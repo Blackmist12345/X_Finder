@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from finder import collect, filters, judge, judge_step, store
+from finder import collect, filters, image_step, judge, judge_step, store
 from finder.config import load_config
 from finder.d1 import D1
 from finder.notion import Notion
@@ -137,6 +137,10 @@ def main():
         lines.append(f"- ⚠️ {w}")
     lines += judge_step.run(d1, config, production, {k: os.environ.get(k) for k in judge.KEY_NAMES.values()},
                             tweets=fresh, decisions=decisions)
+    try:
+        lines += image_step.run(d1, config, production, {k: os.environ.get(k) for k in judge.KEY_NAMES.values()})
+    except Exception as e:  # 画像が読めなくても収集・判定の結果は残す
+        lines += ["", f"- ⚠️ 画像からアカウントを読めませんでした: {e}"]
     lines += month_cost_lines(d1, basic)
     write_summary(lines)
 
