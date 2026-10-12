@@ -158,3 +158,11 @@ def purge_deleted(d1, now=None):
         for table, col in (("post_users", "post_id"), ("judgments", "post_id"), ("reviews", "post_id"), ("posts", "id")):
             d1.query(f"DELETE FROM {table} WHERE {col} IN ({marks})", part)
     return len(ids)
+
+
+BLACKLIST_REASON = "ブラックリスト"
+
+
+def blacklisted_ids(d1):
+    """ブラックリストに載っている人の数字の ID。"""
+    return {r["user_id"] for r in d1.query("SELECT user_id FROM blacklist")}

@@ -141,6 +141,21 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .toast span{min-width:0}
 .toast button{white-space:nowrap;flex:none;border:0;background:transparent;color:var(--accent);font:inherit;font-weight:700;cursor:pointer;padding:4px}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .toast button{color:#2b54d6}}
+/* ブラックリスト */
+.black{margin-top:10px}
+.black .open{border:0;background:none;color:var(--rec);font:inherit;font-size:13px;font-weight:700;padding:6px 0;cursor:pointer}
+.black form{border:1px solid var(--rec);background:var(--rec-soft);border-radius:12px;padding:12px;display:grid;gap:10px}
+.black .why{display:flex;flex-wrap:wrap;gap:6px}
+.black .why label{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer}
+.black .why input{position:absolute;opacity:0;pointer-events:none}
+.black .why label:has(input:checked){background:var(--rec);border-color:var(--rec);color:#fff}
+.black input[type=text]{font:inherit;font-size:16px;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:10px;padding:8px 10px;width:100%;box-sizing:border-box}
+.black .row{display:flex;gap:8px}
+.black .bnote{font-size:13px;color:var(--muted);margin:4px 0 0}
+.btn.danger.fill{background:var(--rec);border-color:var(--rec);color:#fff}
+.blist{display:grid;gap:8px}
+.blist .person .why{font-size:12px;color:var(--rec);font-weight:700}
+.blist .unblock{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
 .setting{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
 .setting select{font-size:16px;padding:8px}
 .empty{text-align:center;color:var(--muted);padding:40px 0}
@@ -336,6 +351,42 @@ function person(p){
   return `<${u?`a class="person link" href="https://x.com/${u}" data-xuser="${u}"`:'div class="person"'}>${ava(p)}<div class="who"><div>${esc(p.name||p.username||"")} <span class="sub">${ROLE[p.role]||""}</span></div>
     <div class="id">@${esc(p.username||"")}${p.followers!=null?` ・ フォロワー <span class="num">${fmt(p.followers)}</span> ・ FF率 <span class="num">${ffText(p)}</span>`:""}</div></div>${u?'<span class="go">X で開く ›</span>':""}</${u?"a":"div"}>`;
 }
+// ---- ブラックリスト ----
+const BLACK_REASON={spam:"スパム",false:"虚偽の申告",other:"その他"};
+function blackOpenButton(){return '<button type="button" class="open" data-black-open="1">🚫 この人をブラックリストに入れる</button>'}
+function blackForm(){
+  return `<form id="blackForm"><div><b>ブラックリストに入れる</b><p class="bnote">この人のポストは、これまでの分もこれからの分も X Finder に出なくなります。AI の判定にもかけません。設定(⚙)からいつでも解除できます。</p></div>
+   <div class="why" role="radiogroup" aria-label="理由">${Object.entries(BLACK_REASON).map(([k,v],i)=>`<label><input type="radio" name="why" value="${k}" ${i?"":"checked"}>${v}</label>`).join("")}</div>
+   <input type="text" name="note" maxlength="200" placeholder="メモ(なくても大丈夫)">
+   <div class="row"><button type="button" class="btn" data-black-cancel="1">やめる</button><button type="submit" class="btn danger fill">登録する</button></div></form>`;
+}
+async function saveBlack(form){
+  const box=$("blackBox");const uid=box.dataset.uid;const name=box.dataset.name;
+  const reason=form.querySelector("input[name=why]:checked")?.value||"other";const note=form.note.value;
+  form.querySelectorAll("button").forEach(b=>b.disabled=true);
+  try{await postJson("/api/blacklist",{user_id:uid,reason,note})}
+  catch(e){form.querySelectorAll("button").forEach(b=>b.disabled=false);alert(`登録できませんでした(${e.message})`);return}
+  const hidden=cases.filter(x=>x.author_id===uid).length;
+  cases=cases.filter(x=>x.author_id!==uid);closeSheet();
+  showToast(`${name}をブラックリストに入れました${hidden>1?`(${hidden}件を非表示)`:""}`,async()=>{
+    try{await postJson("/api/blacklist",{user_id:uid,remove:true})}catch(e){}
+    load()});
+}
+async function loadBlacklist(){
+  const el=$("blist");if(!el)return;
+  let list;try{list=(await api("/api/blacklist")).blacklist}catch(e){el.innerHTML=`<p class="sub">読み込めませんでした(${esc(e.message)})</p>`;return}
+  el.innerHTML=list.length?list.map(b=>`<div class="person">${ava(b)}<div class="who"><div>${esc(b.name||b.username||"")} <span class="why">${esc(BLACK_REASON[b.reason]||b.reason)}</span></div>
+    <div class="id">@${esc(b.username||"")} ・ ${esc((b.added_at||"").slice(0,10))} に登録${b.note?` ・ ${esc(b.note)}`:""}</div></div>
+    <button type="button" class="unblock" data-unblack="${esc(b.user_id)}">解除</button></div>`).join("")
+    :'<p class="sub" style="margin:0">登録している人はいません。案件の詳細の「クライアント」から登録できます。</p>';
+}
+async function unblack(btn){
+  btn.disabled=true;
+  try{await postJson("/api/blacklist",{user_id:btn.dataset.unblack,remove:true});btn.closest(".person").remove();blacklistChanged=true;
+    if(!$("blist").children.length)loadBlacklist()}
+  catch(e){btn.disabled=false;alert(`解除できませんでした(${e.message})`)}
+}
+let blacklistChanged=false;
 async function openSheet(id){
   $("sheetRoot").innerHTML=`<div class="scrim" data-close="1"></div><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div><p class="sub">読み込み中…</p></div>`;
   $("sheetRoot").hidden=false;document.body.style.overflow="hidden";
@@ -355,7 +406,9 @@ async function openSheet(id){
    ${detail.length?`<div class="sec"><h3>点数の内訳</h3><dl class="breakdown">${detail.map(d=>`<dt>${esc(d.label)}</dt><dd>${d.points>0?"+":""}${Math.round(d.points)}</dd>`).join("")}<dt class="total">合計</dt><dd class="total">${Math.round(c.score)}</dd></dl></div>`:""}
    <div class="sec"><h3>クライアント</h3><div class="people"><${cu?`a class="person link" href="https://x.com/${cu}" data-xuser="${cu}"`:'div class="person"'}>${ava(c)}<div class="who"><div>${esc(c.name||"")}</div>
     <div class="id">@${esc(c.username||"")} ・ フォロワー <span class="num">${fmt(c.followers)}</span> ・ フォロー <span class="num">${fmt(c.following)}</span> ・ FF率 <span class="num">${ffText(c)}</span></div>
-    ${c.location?`<div class="id">地域: ${esc(c.location)}</div>`:""}${c.description?`<div class="id">${esc(c.description)}</div>`:""}</div>${cu?'<span class="go">X で開く ›</span>':""}</${cu?"a":"div"}></div></div>
+    ${c.location?`<div class="id">地域: ${esc(c.location)}</div>`:""}${c.description?`<div class="id">${esc(c.description)}</div>`:""}</div>${cu?'<span class="go">X で開く ›</span>':""}</${cu?"a":"div"}></div>
+    ${c.author_id&&!c.blacklist?`<div class="black" id="blackBox" data-uid="${esc(c.author_id)}" data-name="${esc(c.username?"@"+c.username:(c.name||"この人"))}">${blackOpenButton()}</div>`:""}
+    ${c.blacklist?`<p class="sub" style="color:var(--rec)">🚫 ブラックリストに登録済み(${esc(BLACK_REASON[c.blacklist.reason]||"")})</p>`:""}</div>
    ${c.people&&c.people.length?`<div class="sec"><h3>関係するアカウント</h3><div class="people">${c.people.map(person).join("")}</div></div>`:""}
    <div class="review-actions" id="reviewActions" data-id="${esc(c.id)}">${reviewButtons(c.review)}</div>
    <div class="actions">${xurl?`<a class="btn primary" href="${esc(xurl)}" data-xpost="${esc(c.id)}" target="_blank" rel="noopener noreferrer">X で開く</a>`:""}<button class="btn" data-close="1">閉じる</button></div>`;
@@ -455,6 +508,7 @@ function openSettings(){
    <label class="setting"><span>右にスワイプ →</span><select id="swR">${opt(settings.swipe_right)}</select></label>
    <label class="setting"><span>← 左にスワイプ</span><select id="swL">${opt(settings.swipe_left)}</select></label>
    <p class="sub" id="setMsg"></p>
+   <div class="sec"><h3>ブラックリスト</h3><div class="blist" id="blist"><p class="sub" style="margin:0">読み込み中…</p></div></div>
    <div class="sec"><h3>アプリのように使う</h3><p class="sub" style="margin:0">iPhone の Safari でこのページを開き、下の共有ボタン(□↑)→「ホーム画面に追加」を押すと、アイコンから全画面で開けます。最初の 1 回だけ、アプリの中でもう一度ログインが要ります。</p></div>
    <div class="actions"><button class="btn" data-close="1">閉じる</button></div></div>`;
   $("sheetRoot").hidden=false;document.body.style.overflow="hidden";
@@ -465,6 +519,7 @@ function openSettings(){
     catch(e){$("setMsg").textContent=`保存できませんでした(${e.message})`}
   };
   $("swR").onchange=onChange;$("swL").onchange=onChange;
+  blacklistChanged=false;loadBlacklist();
 }
 // ---- サマリー ----
 let statsDays=30;
@@ -532,7 +587,8 @@ async function renderStats(){
    <p class="sub">金額は設定の為替レート(1ドル ${st.rate}円)で円にしています。日付は日本時間です。</p>
    <div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;
 }
-function closeSheet(){if($("sheetRoot").hidden)return;$("sheetRoot").hidden=true;$("sheetRoot").innerHTML="";document.body.style.overflow="";render()}
+function closeSheet(){if($("sheetRoot").hidden)return;$("sheetRoot").hidden=true;$("sheetRoot").innerHTML="";document.body.style.overflow="";
+  if(blacklistChanged){blacklistChanged=false;load()}else render()}
 document.addEventListener("click",ev=>{
   const p=ev.target.closest("[data-p]");if(p){const before=state.preset;state.preset=p.dataset.p;save();
     if((before==="rejected")!==(state.preset==="rejected"))load();else render();return}
@@ -542,6 +598,9 @@ document.addEventListener("click",ev=>{
   const dy=ev.target.closest("[data-days]");if(dy){statsDays=Number(dy.dataset.days);renderStats();return}
   const tb=ev.target.closest("[data-tab]");if(tb){state.tab=tb.dataset.tab;save();render();window.scrollTo({top:0});return}
   const rv=ev.target.closest("[data-review]");if(rv){changeReview(rv);return}
+  if(ev.target.closest("[data-black-open]")){$("blackBox").innerHTML=blackForm();$("blackForm").onsubmit=e=>{e.preventDefault();saveBlack(e.target)};return}
+  if(ev.target.closest("[data-black-cancel]")){$("blackBox").innerHTML=blackOpenButton();return}
+  const ub=ev.target.closest("[data-unblack]");if(ub){unblack(ub);return}
   const t=ev.target.closest("[data-t]");if(t){const v=t.dataset.t;state.types.has(v)?state.types.delete(v):state.types.add(v);save();render();return}
   if(ev.target.closest("[data-close]")){closeSheet();return}
   const c=ev.target.closest(".card");if(c&&!suppressClick)openSheet(c.dataset.id);

@@ -55,6 +55,16 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 CREATE INDEX IF NOT EXISTS reviews_state ON reviews (state);
 
+-- ブラックリスト: X Finderで「スパム」「虚偽の申告」などと判断したアカウント(1 人 = 1 行、数字の ID)。
+-- 載っている人のポストは収集しても AI 判定にかけず(status=skipped)、X Finderにも出さない。解除もできる。
+CREATE TABLE IF NOT EXISTS blacklist (
+  user_id TEXT PRIMARY KEY,
+  username TEXT,
+  reason TEXT NOT NULL,  -- spam(スパム) / false(虚偽の申告) / other(その他)
+  note TEXT,
+  added_at TEXT NOT NULL
+);
+
 -- ユーザー台帳: X のアカウント 1 人 = 1 行。数字の ID で同じ人を見分ける。
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
