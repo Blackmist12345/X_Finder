@@ -139,6 +139,44 @@ export async function getCase(db, id) {
   };
 }
 
+// データベースの中身を見る画面(読むだけ)。見せる表はここに並べたものだけ
+const DB_TABLES = ["posts", "judgments", "reviews", "blacklist", "users", "user_aliases", "post_users", "runs", "costs", "meta"];
+const DB_PAGE = 30;
+const DB_CELL_MAX = 400; // 長い値(AI の返事の JSON など)は先頭だけ返す
+
+export async function listTables(db) {
+  const out = [];
+  for (const name of DB_TABLES) {
+    const row = await db.prepare(`SELECT COUNT(*) AS n FROM ${name}`).first().catch(() => null);
+    if (row) out.push({ name, rows: row.n });
+  }
+  return out;
+}
+
+export async function readTable(db, name, params) {
+  if (!DB_TABLES.includes(name)) return null;
+  const { results: info } = await db.prepare(`PRAGMA table_info(${name})`).all();
+  const columns = info.map((c) => c.name);
+  const offset = Math.max(0, Math.floor(Number(params.get("offset")) || 0));
+  const q = (params.get("q") || "").trim().slice(0, 100);
+  const where = q ? `WHERE ${columns.map((c) => `CAST("${c}" AS TEXT) LIKE ?`).join(" OR ")}` : "";
+  const binds = q ? columns.map(() => `%${q}%`) : [];
+  const total = (await db.prepare(`SELECT COUNT(*) AS n FROM ${name} ${where}`).bind(...binds).first()).n;
+  const { results } = await db
+    .prepare(`SELECT * FROM ${name} ${where} ORDER BY rowid DESC LIMIT ? OFFSET ?`)
+    .bind(...binds, DB_PAGE, offset)
+    .all();
+  const rows = results.map((r) => {
+    const o = {};
+    for (const c of columns) {
+      const v = r[c];
+      o[c] = typeof v === "string" && v.length > DB_CELL_MAX ? `${v.slice(0, DB_CELL_MAX)}…(${v.length}文字)` : v;
+    }
+    return o;
+  });
+  return { name, columns, total, offset, page: DB_PAGE, rows };
+}
+
 // ブラックリスト。載せた人の判定待ちのポストは判定にかけない(AI の費用を使わない)
 export async function listBlacklist(db) {
   const { results } = await db
@@ -408,6 +446,12 @@ export default {
       if (url.pathname === "/api/cases") return json({ cases: await listCases(env.DB, url.searchParams) });
       if (url.pathname === "/api/summary") return json(await getSummary(env.DB));
       if (url.pathname === "/api/settings") return json(await getSettings(env.DB));
+      if (url.pathname === "/api/db") return json({ tables: await listTables(env.DB) });
+      const dbm = url.pathname.match(/^\/api\/db\/([a-z_]{1,30})$/);
+      if (dbm) {
+        const t = await readTable(env.DB, dbm[1], url.searchParams);
+        return t ? json(t) : json({ error: "見つかりません" }, 404);
+      }
       if (url.pathname === "/api/blacklist") return json({ blacklist: await listBlacklist(env.DB) });
       if (url.pathname === "/api/stats") return json(await getStats(env.DB, url.searchParams));
       const m = url.pathname.match(/^\/api\/cases\/(\d{1,25})$/);
