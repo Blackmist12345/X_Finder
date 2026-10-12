@@ -151,6 +151,12 @@ test("スワイプの設定は初期値があり、変えると保存される",
   await assert.rejects(saveSettings(db, { swipe_right: "unread" }), RangeError);
 });
 
+test("一覧にも添付画像の URL が入る(詳細を開いた瞬間から画像の場所を取るため)", async () => {
+  const cases = await listCases(db, new URLSearchParams());
+  assert.deepEqual(cases.find((c) => c.id === "1").media, ["https://pbs.twimg.com/m.jpg"]);
+  assert.equal("media_json" in cases[0], false);
+});
+
 test("対象外の一覧も見られる", async () => {
   const cases = await listCases(db, new URLSearchParams("view=rejected"));
   assert.deepEqual(cases.map((c) => [c.id, c.reject_reason]), [["3", "カメラマン募集ではない"]]);
