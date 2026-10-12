@@ -1,0 +1,142 @@
+"""N12 データ保存 と N15 ユーザー台帳への書き込み。"""
+import json
+from datetime import datetime, timezone
+
+USER_COLUMNS = ["id", "username", "name", "followers", "following", "description", "location", "profile_image",
+                "status", "first_seen_at", "last_seen_at", "profile_updated_at"]
+# プロフィールがそろっている人: 毎回上書きする(初めて登録した日だけは残す)。
+USER_FULL_UPSERT = (
+    "ON CONFLICT(id) DO UPDATE SET username = excluded.username, name = excluded.name, "
+    "followers = excluded.followers, following = excluded.following, description = excluded.description, "
+    "location = excluded.location, profile_image = excluded.profile_image, status = 'confirmed', "
+    "last_seen_at = excluded.last_seen_at, profile_updated_at = excluded.profile_updated_at"
+)
+# ID と名前しか分からない人(メンション先、リプライ先): 分かる項目だけ更新する。
+USER_PARTIAL_UPSERT = (
+    "ON CONFLICT(id) DO UPDATE SET username = COALESCE(excluded.username, users.username), "
+    "name = COALESCE(excluded.name, users.name), last_seen_at = excluded.last_seen_at"
+)
+# 引用元として先に保存されたポストが、あとで検索にかかったときだけ「検索で見つけたポスト」に格上げする。
+POST_UPSERT = (
+    "ON CONFLICT(id) DO UPDATE SET source = 'search', status = excluded.status, "
+    "skip_reason = excluded.skip_reason, penalty_json = excluded.penalty_json "
+    "WHERE posts.source = 'quoted' AND excluded.source = 'search'"
+)
+POST_COLUMNS = ["id", "author_id", "source", "text", "url", "created_at", "quoted_id", "reply_to_id",
+                "conversation_id", "media_json", "penalty_json", "status", "skip_reason", "collected_at"]
+
+
+def now_iso():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def to_iso(created_at):
+    """TwitterAPI.io の createdAt("Sat Oct 12 10:00:00 +0000 2026")を ISO 形式にする。"""
+    if not created_at:
+        return None
+    for fmt in ("%a %b %d %H:%M:%S %z %Y",):
+        try:
+            return datetime.strptime(created_at, fmt).astimezone(timezone.utc).isoformat()
+        except ValueError:
+            pass
+    try:
+        return datetime.fromisoformat(created_at.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+    except ValueError:
+        return created_at
+
+
+def media_urls(tweet):
+    ents = tweet.get("extendedEntities") or tweet.get("entities") or {}
+    out = []
+    for m in ents.get("media", []) or []:
+        url = m.get("media_url_https") or m.get("url")
+        if url and m.get("type", "photo") == "photo":
+            out.append(url)
+    return out
+
+
+def full_user(author, now):
+    return [str(author.get("id")), author.get("userName"), author.get("name"), author.get("followers"),
+            author.get("following"), author.get("description"), author.get("location"),
+            author.get("profilePicture"), "confirmed", now, now, now]
+
+
+def partial_user(uid, username, name, now):
+    return [str(uid), username or None, name or None, None, None, None, None, None, "confirmed", now, now, None]
+
+
+def extract(tweets, decisions, now=None):
+    """検索結果から、保存するポスト・台帳の人・ポストと人の関係を取り出す。
+
+    decisions は {tweet_id: (status, skip_reason, penalty_hits)}。
+    """
+    now = now or now_iso()
+    posts, full, partial, links = {}, {}, {}, set()
+
+    def add_post(tw, source, status, reason, penalties):
+        tid = str(tw.get("id"))
+        author = tw.get("author") or {}
+        quoted = tw.get("quoted_tweet") or None
+        posts.setdefault(tid, [
+            tid, str(author.get("id")), source, tw.get("text"), tw.get("url"), to_iso(tw.get("createdAt")),
+            str(quoted.get("id")) if quoted else None, tw.get("inReplyToId"), tw.get("conversationId"),
+            json.dumps(media_urls(tw)), json.dumps(penalties, ensure_ascii=False) if penalties else None,
+            status, reason, now,
+        ])
+        if author.get("id"):
+            full[str(author["id"])] = full_user(author, now)
+        return tid
+
+    for tw in tweets:  # 検索で見つけたポストを先に登録する
+        tid = str(tw.get("id"))
+        status, reason, penalties = decisions.get(tid, ("new", None, []))
+        add_post(tw, "search", status, reason, penalties)
+        links.add((tid, str((tw.get("author") or {}).get("id")), "client"))
+
+    for tw in tweets:
+        tid = str(tw.get("id"))
+        quoted = tw.get("quoted_tweet")
+        if quoted and quoted.get("id"):
+            qid = add_post(quoted, "quoted", "context", None, [])
+            qa = (quoted.get("author") or {}).get("id")
+            if qa:
+                links.add((tid, str(qa), "quoted"))
+                links.add((qid, str(qa), "client"))
+
+        if tw.get("inReplyToUserId"):
+            uid = str(tw["inReplyToUserId"])
+            partial.setdefault(uid, partial_user(uid, tw.get("inReplyToUsername"), None, now))
+            links.add((tid, uid, "reply_to"))
+
+        for m in ((tw.get("entities") or {}).get("user_mentions") or []):
+            uid = m.get("id_str") or m.get("id")
+            if not uid:
+                continue
+            uid = str(uid)
+            partial.setdefault(uid, partial_user(uid, m.get("screen_name"), m.get("name"), now))
+            links.add((tid, uid, "mention"))
+
+    for uid in full:  # プロフィールがそろっている人は partial から外す
+        partial.pop(uid, None)
+    return list(posts.values()), list(full.values()), list(partial.values()), sorted(links)
+
+
+def existing_post_ids(d1, ids):
+    found = set()
+    ids = list(ids)
+    for i in range(0, len(ids), 90):
+        part = ids[i:i + 90]
+        rows = d1.query(f"SELECT id FROM posts WHERE id IN ({', '.join('?' for _ in part)})", part)
+        found.update(r["id"] for r in rows)
+    return found
+
+
+def save(d1, posts, full_users, partial_users, links):
+    d1.insert_many("users", USER_COLUMNS, full_users, conflict="", upsert=USER_FULL_UPSERT)
+    d1.insert_many("users", USER_COLUMNS, partial_users, conflict="", upsert=USER_PARTIAL_UPSERT)
+    d1.insert_many("posts", POST_COLUMNS, posts, conflict="", upsert=POST_UPSERT)
+    d1.insert_many("post_users", ["post_id", "user_id", "role"], links)
+
+
+def record_cost(d1, service, units, usd, note):
+    d1.query("INSERT INTO costs (at, service, units, usd, note) VALUES (?, ?, ?, ?, ?)", [now_iso(), service, units, usd, note])
