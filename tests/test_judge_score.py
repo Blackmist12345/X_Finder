@@ -5,7 +5,8 @@ import pytest
 
 from finder import collect, judge, judge_step, run_collect
 from finder.score import score
-from tests.test_config import chk, good_tables, num, row, sel, setup, title
+from finder.tables import BASIC
+from tests.test_config import chk, good_tables, kv_rows, num, row, sel, setup, title
 
 
 def ai_result(pid, **over):
@@ -125,6 +126,7 @@ def test_critical_condition_matches_text():
 @pytest.fixture
 def wired(d1, monkeypatch, tmp_path):
     tables = good_tables()
+    tables["basic"] = kv_rows(BASIC, まとめて判定する件数="1")  # 1件でも判定する(待たない)
     tables["scores"] += [row(条件=title("東京都"), 区分=sel("都道府県"), 点数=num(0), 有効=chk()),
                          row(条件=title("その他の道府県"), 区分=sel("都道府県"), 点数=num(-30), 有効=chk())]
     notion = setup(d1, tables)
@@ -210,3 +212,28 @@ def test_out_of_list_prefecture_becomes_unknown():
     r = judge.normalize(ai_result("1", prefecture="関東", case_type="撮影会"))
     assert (r["prefecture"], r["prefecture_source"], r["place"], r["case_type"]) == ("不明", "不明", "関東", "その他")
     assert judge.normalize(ai_result("1", prefecture="千葉県"))["prefecture"] == "千葉県"
+
+
+def test_production_waits_until_batch_is_full(wired, monkeypatch, make_tweet):
+    d1, summary = wired
+    tables = good_tables()  # まとめて判定する件数 = 20
+    monkeypatch.setattr(run_collect, "Notion", lambda key: setup(d1, tables))
+    monkeypatch.setattr(collect, "fetch", lambda *a, **k: ([make_tweet("1")], 1))
+    fake = FakeGemini()
+    real_judge = judge.judge
+    monkeypatch.setattr(judge, "judge", lambda *a, **k: real_judge(*a[:5], session=fake))
+    monkeypatch.setenv("MODE", "production")
+    run_collect.main()
+    assert fake.prompts == []
+    assert d1.query("SELECT status FROM posts")[0]["status"] == "new"
+    assert "20件たまるか" in summary.read_text()
+
+
+def test_should_wait():
+    from datetime import datetime, timezone
+    now = datetime(2026, 10, 12, 12, 0, tzinfo=timezone.utc)
+    fresh = [{"collected_at": "2026-10-12T11:30:00+00:00"}]
+    old = [{"collected_at": "2026-10-12T10:30:00+00:00"}]
+    assert judge_step.should_wait(fresh, 20, 60, now) is True
+    assert judge_step.should_wait(old, 20, 60, now) is False
+    assert judge_step.should_wait(fresh * 20, 20, 60, now) is False

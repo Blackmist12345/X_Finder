@@ -36,6 +36,11 @@ class FakeNotion:
     def __init__(self, tables):
         self.tables = tables
 
+        self.created = []
+
+    def create_page(self, db_id, props):
+        self.created.append((db_id, props))
+
     def query_all(self, db_id):
         value = self.tables[db_id]
         if isinstance(value, Exception):
@@ -105,3 +110,13 @@ def test_seed_rows_match_table_columns():
     for table in TABLES:
         for props in seed_rows(table):
             assert set(props) <= set(table["props"]), table["title"]
+
+
+def test_missing_key_row_is_added_to_notion(d1):
+    tables = good_tables()
+    tables["periods"] = [r for r in tables["periods"] if r["properties"]["項目"]["title"][0]["plain_text"] != "自動削除までの日数"]
+    notion = setup(d1, tables)
+    cfg, warnings = config.load_config(notion, d1)
+    assert cfg["periods"]["自動削除までの日数"] == 14
+    assert notion.created[0][0] == "periods"
+    assert any("行を足しました" in w for w in warnings)

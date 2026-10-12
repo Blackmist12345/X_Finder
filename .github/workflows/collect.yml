@@ -1,10 +1,11 @@
 name: Collect
 
 # N0〜N4・N10・N12・N15: X のポストを集めて D1 とユーザー台帳に保存し、AI で判定して採点する。
-# 定刻起動は GitHub の schedule(30分ごと。混み具合で数分〜十数分遅れることがある)。
+# 定刻起動は GitHub の schedule(10分ごと。混み具合で遅れたり飛ばされたりすることがある)。
+# AI 判定は毎回ではなく、判定待ちが「まとめて判定する件数」たまったときに行う。
 on:
   schedule:
-    - cron: '17,47 * * * *'
+    - cron: '3-59/10 * * * *'
   workflow_dispatch:
     inputs:
       mode:

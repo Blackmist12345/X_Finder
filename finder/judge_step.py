@@ -1,10 +1,12 @@
 """収集のあとに続けて行う N4 AI 判定 と N10 採点。
 
-production: D1 で判定待ち(status=new)のポストを判定し、結果を保存する(前回の残りも含む)。
+production: D1 で判定待ち(status=new)のポストが「まとめて判定する件数」たまったら判定し、結果を保存する。
+  たまらなくても、いちばん古いポストが「判定を待つ最長時間(分)」待ったら判定する。
 dry_run: 今回集めたポストを判定して要約に出すだけで、何も保存しない。
 """
 import json
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 
 from finder import judge, store
 from finder.score import score
@@ -28,7 +30,7 @@ def items_from_tweets(tweets, decisions):
 
 def items_from_db(d1):
     rows = d1.query(
-        "SELECT p.id, p.text, p.url, p.penalty_json, q.text AS quoted_text, "
+        "SELECT p.id, p.text, p.url, p.penalty_json, p.collected_at, q.text AS quoted_text, "
         "u.location AS author_location, u.description AS author_description "
         "FROM posts p LEFT JOIN posts q ON q.id = p.quoted_id LEFT JOIN users u ON u.id = p.author_id "
         "WHERE p.status = 'new' ORDER BY p.collected_at, p.id LIMIT ?", [MAX_PER_RUN])
@@ -79,6 +81,19 @@ def save(d1, evaluated, missing_ids, model):
                      [status, reason] + part)
 
 
+def should_wait(items, batch_size, max_wait_minutes, now=None):
+    """判定を次回に回すなら True。件数がそろうか、いちばん古いポストが待ちすぎたら判定する。"""
+    if len(items) >= batch_size:
+        return False
+    oldest = min((it.get("collected_at") or "") for it in items)
+    now = now or datetime.now(timezone.utc)
+    try:
+        waited = now - datetime.fromisoformat(oldest)
+    except ValueError:
+        return False
+    return waited < timedelta(minutes=max_wait_minutes)
+
+
 def run(d1, config, production, api_keys, tweets=None, decisions=None, session=None):
     """判定と採点を行い、要約の行を返す。失敗しても例外は出さない(ポストは判定待ちのまま残る)。
 
@@ -98,10 +113,13 @@ def run(d1, config, production, api_keys, tweets=None, decisions=None, session=N
     items = items_from_db(d1) if production else items_from_tweets(tweets or [], decisions or {})
     if not items:
         return lines + ["- 判定待ちのポストはありませんでした"]
+    batch_size = max(1, basic["まとめて判定する件数"])
+    max_wait = config["periods"]["判定を待つ最長時間(分)"]
+    if production and should_wait(items, batch_size, max_wait):
+        return lines + [f"- 判定待ち {len(items)}件。{batch_size}件たまるか、いちばん古いポストが{max_wait}分待ったら判定します"]
 
     try:
-        results, t_in, t_out, calls = judge.judge(items, api_key, model, config["excluded_works"],
-                                                  max(1, basic["まとめて判定する件数"]), session)
+        results, t_in, t_out, calls = judge.judge(items, api_key, model, config["excluded_works"], batch_size, session)
     except judge.JudgeError as e:
         return lines + [f"- ⚠️ 判定に失敗しました。ポストは判定待ちのまま、次の実行でもう一度判定します。{e}"]
 

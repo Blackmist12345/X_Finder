@@ -15,7 +15,7 @@ from finder.config import load_config
 from finder.d1 import D1
 from finder.notion import Notion
 
-OVERLAP_SECONDS = 600       # 前回の終わりから 10 分重ねて取る(取りこぼし防止。重複は保存時に除く)
+OVERLAP_SECONDS = 180       # 前回の終わりから 3 分重ねて取る(取りこぼし防止。重なった分も課金されるので短めに)
 MAX_WINDOW_HOURS = 48       # 長く止まっていた場合の上限
 WINDOW_KEY = "last_window_end"
 JST = timezone(timedelta(hours=9))

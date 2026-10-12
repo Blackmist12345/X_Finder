@@ -114,14 +114,18 @@ def _check(value, kind):
     return value
 
 
-def parse_key_values(rows, spec, last_good, warnings, table_title):
-    """1つの値だけの設定。不正な値は前回の値(なければ初期値)を使う。"""
+def parse_key_values(rows, spec, last_good, warnings, table_title, missing=None):
+    """1つの値だけの設定。不正な値は前回の値(なければ初期値)を使う。
+
+    表に行がない項目は missing に入れる(あとで Notion に行を足すため)。
+    """
     found = {nt.text(r["properties"].get("項目")): nt.text(r["properties"].get("値")) for r in rows}
     out = {}
     for key, default, kind, _ in spec:
         fallback = (last_good or {}).get(key, _check(default, kind))
         if key not in found:
-            warnings.append(f"{table_title}に「{key}」の行がないので {fallback} を使いました")
+            if missing is not None:
+                missing.append(key)
             out[key] = fallback
             continue
         try:
@@ -158,8 +162,18 @@ def load_config(notion, d1):
     load("excluded_works", parse_excluded_works)
     load("scores", lambda rows: parse_scores(rows, warnings))
     load("critical", parse_critical)
-    load("basic", lambda rows: parse_key_values(rows, BASIC, last_good.get("basic"), warnings, titles["basic"]))
-    load("periods", lambda rows: parse_key_values(rows, PERIODS, last_good.get("periods"), warnings, titles["periods"]))
+    missing = {"basic": [], "periods": []}
+    load("basic", lambda rows: parse_key_values(rows, BASIC, last_good.get("basic"), warnings, titles["basic"], missing["basic"]))
+    load("periods", lambda rows: parse_key_values(rows, PERIODS, last_good.get("periods"), warnings, titles["periods"], missing["periods"]))
+    for key, spec in (("basic", BASIC), ("periods", PERIODS)):
+        for item, default, _, desc in spec:
+            if item not in missing[key]:
+                continue
+            try:  # あとから増えた項目は、初期値の行を Notion に足す
+                notion.create_page(ids[key], {"項目": nt.p_title(item), "値": nt.p_text(default), "説明": nt.p_text(desc)})
+                warnings.append(f"{titles[key]}に「{item}」の行を足しました(初期値 {default})")
+            except Exception as e:
+                warnings.append(f"{titles[key]}に「{item}」の行がないので {config[key][item]} を使いました(行を足せませんでした: {e})")
 
     d1.set_meta(LAST_GOOD_KEY, config)
     return config, warnings
