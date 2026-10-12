@@ -15,8 +15,8 @@ const SETTINGS_KEY = "finder_settings";
 const SWIPE_CHOICES = ["hold", "delete", "seen", "none"];
 const DEFAULT_SETTINGS = { swipe_right: "hold", swipe_left: "delete" };
 
-// ブラックリストの理由。spam=スパム / false=虚偽の申告 / other=その他
-const BLACKLIST_REASONS = ["spam", "false", "other"];
+// ブラックリストの理由。spam=スパム / false=虚偽の申告 / photographer=被写体ではなくカメラマンだった / other=その他
+const BLACKLIST_REASONS = ["spam", "false", "photographer", "other"];
 const BLACKLIST_SKIP = "ブラックリスト"; // 判定前のポストに付ける除外理由(finder/store.py と同じ)
 const NOT_BLACKLISTED = "NOT EXISTS (SELECT 1 FROM blacklist b WHERE b.user_id = p.author_id)";
 
