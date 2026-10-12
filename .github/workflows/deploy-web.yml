@@ -1,6 +1,6 @@
 name: Deploy Finder
 
-# N13 ファインダー(web/)を Cloudflare Workers に公開する。main の web/ が変わったときと、手動で。
+# N13 X Finder(web/)を Cloudflare Workers に公開する。main の web/ が変わったときと、手動で。
 on:
   push:
     branches: [main]

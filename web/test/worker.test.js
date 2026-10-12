@@ -150,8 +150,14 @@ test("Access を通れば画面と API が返る", async () => {
     const token = await makeToken();
     const page = await worker.fetch(req("/", token), env);
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /ファインダー/);
+    assert.match(await page.text(), /<title>X Finder<\/title>/);
     assert.equal(page.headers.get("cache-control"), "no-store");
+    const manifest = await (await worker.fetch(req("/manifest.webmanifest", token), env)).json();
+    assert.equal(manifest.display, "standalone");
+    const icon = await worker.fetch(req("/apple-touch-icon.png", token), env);
+    assert.equal(icon.headers.get("content-type"), "image/png");
+    assert.deepEqual([...new Uint8Array(await icon.arrayBuffer()).slice(1, 4)], [80, 78, 71]); // "PNG"
+    assert.equal((await worker.fetch(req("/icon-512.png"), env)).status, 403); // アイコンも Access を通った人だけ
     const list = await (await worker.fetch(req("/api/cases", token), env)).json();
     assert.equal(list.cases.length, 2);
     assert.equal((await worker.fetch(req("/api/cases/1", token), env)).status, 200);

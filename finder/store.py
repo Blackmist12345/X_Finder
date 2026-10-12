@@ -142,7 +142,7 @@ def record_cost(d1, service, units, usd, note):
     d1.query("INSERT INTO costs (at, service, units, usd, note) VALUES (?, ?, ?, ?, ?)", [now_iso(), service, units, usd, note])
 
 
-DELETE_AFTER_DAYS = 14  # ファインダーで「削除予定」にした案件は、投稿日からこの日数で消す
+DELETE_AFTER_DAYS = 14  # X Finderで「削除予定」にした案件は、投稿日からこの日数で消す
 
 
 def purge_deleted(d1, now=None):
