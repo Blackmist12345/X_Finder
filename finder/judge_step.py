@@ -47,6 +47,11 @@ JUDGMENT_COLUMNS = ["post_id", "judged_at", "model", "case_type", "is_cosplay", 
 def evaluate(items, results, config):
     """判定結果に対象外の理由と点数を付ける。[(item, result, reject, total, detail, critical, critical_reason)]"""
     cosplay_only = config["basic"]["コスプレに絞る"] == "オン"
+    # 第1段階で保存したポストは減点語のカテゴリを持たないので、今の減点語の表から補う
+    categories = {p["word"]: p.get("category") for p in config.get("penalty_words", [])}
+    for it in items:
+        for p in it["penalties"]:
+            p.setdefault("category", categories.get(p["word"], "その他"))
     out = []
     for it in items:
         r = results.get(it["id"])

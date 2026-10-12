@@ -237,3 +237,11 @@ def test_should_wait():
     assert judge_step.should_wait(fresh, 20, 60, now) is True
     assert judge_step.should_wait(old, 20, 60, now) is False
     assert judge_step.should_wait(fresh * 20, 20, 60, now) is False
+
+
+def test_old_penalties_get_category_from_config():
+    cfg = config()
+    cfg["penalty_words"] = [{"word": "大阪", "category": "地方・都市名", "points": -30}]
+    items = [{"id": "1", "text": "大阪", "penalties": [{"word": "大阪", "points": -30}]}]
+    (_, _, _, total, *_), = judge_step.evaluate(items, {"1": ai_result("1", prefecture="大阪府")}, cfg)
+    assert total == 20  # 地名の減点語は使われず、都道府県の -30 だけ
