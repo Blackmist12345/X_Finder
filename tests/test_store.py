@@ -65,3 +65,24 @@ def test_existing_post_ids_and_many_rows(d1, make_tweet):
 
 def test_to_iso():
     assert store.to_iso("Sat Oct 10 03:00:00 +0000 2026") == "2026-10-10T03:00:00+00:00"
+
+
+def test_purge_deleted_removes_only_old_cases_marked_delete(d1):
+    from datetime import datetime, timezone
+    now = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    for pid, created in (("1", "2026-10-10T00:00:00+00:00"), ("2", "2026-10-20T00:00:00+00:00"),
+                         ("3", "2026-10-01T00:00:00+00:00"), ("4", "2026-10-01T00:00:00+00:00")):
+        d1.query("INSERT INTO posts (id, author_id, created_at, status, collected_at) VALUES (?, '100', ?, 'judged', ?)",
+                 [pid, created, created])
+        d1.query("INSERT INTO judgments (post_id, judged_at) VALUES (?, ?)", [pid, created])
+        d1.query("INSERT INTO post_users (post_id, user_id, role) VALUES (?, '100', 'client')", [pid])
+    d1.query("INSERT INTO users (id, username, status, first_seen_at, last_seen_at) VALUES ('100', 'c', 'confirmed', 'x', 'x')")
+    for pid, state in (("1", "delete"), ("2", "delete"), ("3", "hold")):
+        d1.query("INSERT INTO reviews (post_id, state, updated_at) VALUES (?, ?, 'x')", [pid, state])
+
+    assert store.purge_deleted(d1, now) == 1
+    assert [r["id"] for r in d1.query("SELECT id FROM posts ORDER BY id")] == ["2", "3", "4"]
+    assert [r["post_id"] for r in d1.query("SELECT post_id FROM judgments ORDER BY post_id")] == ["2", "3", "4"]
+    assert [r["post_id"] for r in d1.query("SELECT post_id FROM reviews ORDER BY post_id")] == ["2", "3"]
+    assert len(d1.query("SELECT * FROM post_users")) == 3
+    assert d1.query("SELECT id FROM users") == [{"id": "100"}]  # ユーザー台帳は残す

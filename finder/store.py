@@ -1,6 +1,6 @@
 """N12 データ保存 と N15 ユーザー台帳への書き込み。"""
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 USER_COLUMNS = ["id", "username", "name", "followers", "following", "description", "location", "profile_image",
                 "status", "first_seen_at", "last_seen_at", "profile_updated_at"]
@@ -140,3 +140,21 @@ def save(d1, posts, full_users, partial_users, links):
 
 def record_cost(d1, service, units, usd, note):
     d1.query("INSERT INTO costs (at, service, units, usd, note) VALUES (?, ?, ?, ?, ?)", [now_iso(), service, units, usd, note])
+
+
+DELETE_AFTER_DAYS = 14  # ファインダーで「削除予定」にした案件は、投稿日からこの日数で消す
+
+
+def purge_deleted(d1, now=None):
+    """「削除予定」の案件のうち投稿日から 14 日たったものを消し、消した件数を返す。ユーザー台帳は残す。"""
+    now = now or datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=DELETE_AFTER_DAYS)).replace(microsecond=0).isoformat()
+    rows = d1.query("SELECT p.id FROM reviews r JOIN posts p ON p.id = r.post_id "
+                    "WHERE r.state = 'delete' AND p.created_at < ?", [cutoff])
+    ids = [r["id"] for r in rows]
+    for i in range(0, len(ids), 90):
+        part = ids[i:i + 90]
+        marks = ", ".join("?" for _ in part)
+        for table, col in (("post_users", "post_id"), ("judgments", "post_id"), ("reviews", "post_id"), ("posts", "id")):
+            d1.query(f"DELETE FROM {table} WHERE {col} IN ({marks})", part)
+    return len(ids)

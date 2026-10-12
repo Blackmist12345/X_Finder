@@ -45,6 +45,16 @@ CREATE TABLE IF NOT EXISTS judgments (
 );
 CREATE INDEX IF NOT EXISTS judgments_score ON judgments (score);
 
+-- N13 ファインダーでの確認の状態(案件カード 1 枚 = 1 行)。行がなければ「未確認」(一度も開いていない)。
+-- seen(確認済み) / hold(保留: ピン留め、期間が過ぎても一覧に残す) / delete(削除予定: 投稿日から 14 日で消す)
+CREATE TABLE IF NOT EXISTS reviews (
+  post_id TEXT PRIMARY KEY,
+  state TEXT NOT NULL,
+  opened_at TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reviews_state ON reviews (state);
+
 -- ユーザー台帳: X のアカウント 1 人 = 1 行。数字の ID で同じ人を見分ける。
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,

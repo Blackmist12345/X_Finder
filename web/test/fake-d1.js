@@ -16,6 +16,7 @@ export function fakeD1() {
         bind(...a) { args = a; return api; },
         async all() { return { results: stmt.all(...args).map((r) => ({ ...r })) }; },
         async first() { const r = stmt.get(...args); return r ? { ...r } : null; },
+        async run() { const r = stmt.run(...args); return { meta: { changes: Number(r.changes) } }; },
       };
       return api;
     },

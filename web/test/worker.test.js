@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 
 import { resetCertsCache, verifyAccess } from "../src/auth.js";
-import worker, { getCase, getSummary, listCases } from "../src/index.js";
+import worker, { getCase, getSummary, listCases, setReview } from "../src/index.js";
 import { fakeD1 } from "./fake-d1.js";
 
 const TEAM = "example.cloudflareaccess.com";
@@ -74,6 +74,20 @@ test("一覧は対象の案件を点数順に、直近の分だけ返す", async
   assert.equal(cases[1].username, "client");
 });
 
+test("確認の状態: 開くと確認済み、保留・削除予定に変えられ、保留は古くても一覧に残る", async () => {
+  let cases = await listCases(db, new URLSearchParams());
+  assert.deepEqual(cases.map((c) => c.review), ["unread", "unread"]);
+  assert.equal(await setReview(db, "1", { opened: true }), "seen");
+  assert.equal(await setReview(db, "2", { state: "delete" }), "delete");
+  assert.equal(await setReview(db, "2", { opened: true }), "delete"); // 開いても削除予定のまま
+  assert.equal(await setReview(db, "4", { state: "hold" }), "hold"); // 30 日前の案件
+  cases = await listCases(db, new URLSearchParams());
+  assert.deepEqual(cases.map((c) => [c.id, c.review]), [["4", "hold"], ["2", "delete"], ["1", "seen"]]);
+  assert.equal((await getCase(db, "4")).review, "hold");
+  assert.equal(await setReview(db, "999", { state: "hold" }), null);
+  await assert.rejects(setReview(db, "1", { state: "unread" }), RangeError);
+});
+
 test("対象外の一覧も見られる", async () => {
   const cases = await listCases(db, new URLSearchParams("view=rejected"));
   assert.deepEqual(cases.map((c) => [c.id, c.reject_reason]), [["3", "カメラマン募集ではない"]]);
@@ -133,6 +147,16 @@ test("Access を通れば画面と API が返る", async () => {
     assert.equal(list.cases.length, 2);
     assert.equal((await worker.fetch(req("/api/cases/1", token), env)).status, 200);
     assert.equal((await worker.fetch(req("/api/cases/abc", token), env)).status, 404);
+
+    const post = (body, headers = {}) => worker.fetch(new Request("https://x-finder.example.workers.dev/api/cases/1/review", {
+      method: "POST", body: JSON.stringify(body),
+      headers: { "cf-access-jwt-assertion": token, "content-type": "application/json", "x-finder": "1", ...headers },
+    }), env);
+    assert.deepEqual(await (await post({ state: "hold" })).json(), { review: "hold" });
+    assert.equal((await post({ state: "bad" })).status, 400);
+    assert.equal((await post({ state: "seen" }, { "x-finder": "" })).status, 403);
+    assert.equal((await post({ state: "seen" }, { origin: "https://evil.example" })).status, 403);
+    assert.equal((await worker.fetch(req("/api/cases/1/review", token), env)).status, 405);
   } finally {
     globalThis.fetch = realFetch;
   }
