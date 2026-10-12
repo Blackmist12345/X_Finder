@@ -60,7 +60,7 @@ CREATE INDEX IF NOT EXISTS reviews_state ON reviews (state);
 CREATE TABLE IF NOT EXISTS blacklist (
   user_id TEXT PRIMARY KEY,
   username TEXT,
-  reason TEXT NOT NULL,  -- spam(スパム) / false(虚偽の申告) / other(その他)
+  reason TEXT NOT NULL,  -- spam(スパム) / false(虚偽の申告) / photographer(カメラマンだった) / other(その他)
   note TEXT,
   added_at TEXT NOT NULL
 );

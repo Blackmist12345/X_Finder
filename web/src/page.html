@@ -43,6 +43,11 @@ body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);
 /* スマホで: カードの長押しで文字選択やプレビューが出ない。ボタンの連打で拡大しない */
 .card,.chip,.tab,.btn,.icon-btn{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .wrap{max-width:560px;margin:0 auto;padding-inline:16px;padding-block:0 40px}
+/* 一番上で下に引っぱると再読み込み */
+.ptr{height:0;overflow:hidden;display:grid;place-items:center;color:var(--muted);font-size:13px}
+.ptr.back{transition:height .2s}
+.ptr .spin{display:inline-block;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 header.top{position:sticky;top:0;z-index:5;background:var(--bg);margin-inline:-16px;padding:calc(12px + env(safe-area-inset-top,0px)) 16px 10px;border-bottom:1px solid var(--line)}
 .bar{display:flex;align-items:center;justify-content:space-between;gap:12px}
 h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.02em}
@@ -217,6 +222,7 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
       <button class="icon-btn" id="openSettings" aria-label="設定" title="設定">⚙</button>
     </div>
   </header>
+  <div class="ptr" id="ptr" aria-live="polite"><span id="ptrText"></span></div>
   <p class="note" id="status" hidden></p>
   <div class="list" id="list"></div>
 </div>
@@ -352,7 +358,7 @@ function person(p){
     <div class="id">@${esc(p.username||"")}${p.followers!=null?` ・ フォロワー <span class="num">${fmt(p.followers)}</span> ・ FF率 <span class="num">${ffText(p)}</span>`:""}</div></div>${u?'<span class="go">X で開く ›</span>':""}</${u?"a":"div"}>`;
 }
 // ---- ブラックリスト ----
-const BLACK_REASON={spam:"スパム",false:"虚偽の申告",other:"その他"};
+const BLACK_REASON={spam:"スパム",false:"虚偽の申告",photographer:"カメラマンだった",other:"その他"};
 function blackOpenButton(){return '<button type="button" class="open" data-black-open="1">🚫 この人をブラックリストに入れる</button>'}
 function blackForm(){
   return `<form id="blackForm"><div><b>ブラックリストに入れる</b><p class="bnote">この人のポストは、これまでの分もこれからの分も X Finder に出なくなります。AI の判定にもかけません。設定(⚙)からいつでも解除できます。</p></div>
@@ -649,6 +655,36 @@ $("viewer").addEventListener("touchend",ev=>{
 $("viewer").addEventListener("touchcancel",()=>{vdrag=null;resetViewerDrag()});
 $("sort").addEventListener("change",e=>{state.sort=e.target.value;save();render()});
 $("reload").addEventListener("click",load);
+// ---- 引っぱって再読み込み(一番上にいるときだけ。開いている詳細や画像の上では動かない) ----
+const PTR_GO=64;let ptr=null,ptrBusy=false;
+function ptrShow(h,txt){const el=$("ptr");el.classList.toggle("back",h===0||txt==="busy");el.style.height=`${h}px`;
+  $("ptrText").innerHTML=txt==="busy"?'<span class="spin">↻</span> 読み込み中…':esc(txt||"")}
+document.addEventListener("touchstart",ev=>{
+  ptr=null;
+  if(ptrBusy||ev.touches.length>1||window.scrollY>0||!$("sheetRoot").hidden||!$("viewer").hidden)return;
+  ptr={y:ev.touches[0].clientY,x:ev.touches[0].clientX,h:0,on:false};
+},{passive:true});
+document.addEventListener("touchmove",ev=>{
+  if(!ptr)return;
+  const dy=ev.touches[0].clientY-ptr.y,dx=ev.touches[0].clientX-ptr.x;
+  if(!ptr.on){
+    if(Math.hypot(dx,dy)<LOCK)return;
+    // 下向きで、縦の動きのほうが大きく、カードの横スワイプが始まっていないときだけ
+    if(dy<=0||Math.abs(dx)>=Math.abs(dy)||(drag&&drag.axis)||window.scrollY>0){ptr=null;return}
+    ptr.on=true;ptr.y=ev.touches[0].clientY;
+  }
+  if(ev.cancelable)ev.preventDefault();
+  ptr.h=Math.max(0,Math.min(96,(ev.touches[0].clientY-ptr.y)*.5));
+  ptrShow(ptr.h,ptr.h>=PTR_GO?"↑ 離すと再読み込み":"↓ 引っぱって再読み込み");
+},{passive:false});
+async function ptrEnd(){
+  const p=ptr;ptr=null;if(!p||!p.on)return;
+  if(p.h<PTR_GO){ptrShow(0);return}
+  ptrBusy=true;ptrShow(44,"busy");
+  try{await load()}finally{ptrBusy=false;ptrShow(0)}
+}
+document.addEventListener("touchend",ptrEnd);
+document.addEventListener("touchcancel",()=>{ptr=null;ptrShow(0)});
 $("openSettings").addEventListener("click",openSettings);
 $("cost").addEventListener("click",openStats);
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&$("sheetRoot").hidden)load()});

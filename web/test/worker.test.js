@@ -222,8 +222,8 @@ test("Access を通れば画面と API が返る", async () => {
     assert.equal((await black({ user_id: "100", reason: "spam" }, { origin: "https://evil.example" })).status, 403);
     assert.equal((await black({ user_id: "100", reason: "nope" })).status, 400);
     assert.equal((await black({ user_id: "999", reason: "spam" })).status, 404);
-    assert.equal((await black({ user_id: "100", reason: "false" })).status, 200);
-    assert.equal((await (await worker.fetch(req("/api/blacklist", token), env)).json()).blacklist[0].reason, "false");
+    assert.equal((await black({ user_id: "100", reason: "photographer" })).status, 200);
+    assert.equal((await (await worker.fetch(req("/api/blacklist", token), env)).json()).blacklist[0].reason, "photographer");
     assert.equal((await (await worker.fetch(req("/api/cases", token), env)).json()).cases.length, 0);
   } finally {
     globalThis.fetch = realFetch;
