@@ -1,0 +1,51 @@
+name: Setup
+
+# 初回だけ使う準備用のワークフロー。上から順に 1 回ずつ実行する。
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: '実行する準備'
+        required: true
+        type: choice
+        options:
+          - 'd1_schema'        # 1. D1 にテーブルを作る
+          - 'notion_tables'    # 2. Notion 8表を作る
+          - 'migrate_preview'  # 3. 今の4表からの振り分け案を見る(書き込まない)
+          - 'migrate_apply'    # 4. 振り分け案のとおりに新しい表へ移す
+
+concurrency:
+  group: finder-setup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Run
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
+          NOTION_KEYWORDS_DB_ID: ${{ secrets.NOTION_KEYWORDS_DB_ID }}
+          NOTION_EXCLUDES_DB_ID: ${{ secrets.NOTION_EXCLUDES_DB_ID }}
+          NOTION_GENRES_DB_ID: ${{ secrets.NOTION_GENRES_DB_ID }}
+          NOTION_CONFIG_DB_ID: ${{ secrets.NOTION_CONFIG_DB_ID }}
+          TASK: ${{ github.event.inputs.task }}
+        run: |
+          case "$TASK" in
+            d1_schema)       python -u scripts/setup_d1.py ;;
+            notion_tables)   python -u scripts/setup_notion.py ;;
+            migrate_preview) MODE=preview python -u scripts/migrate_from_old.py ;;
+            migrate_apply)   MODE=apply python -u scripts/migrate_from_old.py ;;
+          esac
