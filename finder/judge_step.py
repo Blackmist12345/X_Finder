@@ -133,7 +133,7 @@ def run(d1, config, production, api_keys, tweets=None, decisions=None, session=N
     missing = [it["id"] for it in items if it["id"] not in results]
     if production:
         save(d1, evaluated, missing, model)
-        store.record_cost(d1, "gemini", t_in + t_out, usd, f"{model} {len(items)}件")
+        store.record_cost(d1, judge.provider(model), t_in + t_out, usd, f"{model} {len(items)}件")
 
     kept = sorted([e for e in evaluated if not e[2]], key=lambda e: -e[3])
     reasons = Counter(e[2].split(":")[0] for e in evaluated if e[2])

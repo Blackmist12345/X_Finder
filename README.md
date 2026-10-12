@@ -15,6 +15,7 @@
 | N12 | データ保存 | `finder/store.py`, `schema.sql`(Cloudflare D1) |
 | N15 | ユーザー台帳 | `finder/store.py`(投稿者・引用元・メンション先・リプライ先を登録) |
 | N4 | AI 判定 | `finder/judge.py`(文字だけを Claude Haiku 5.5 でまとめて判定。Gemini にも切り替え可。対象外にするかはルールで決める) |
+| N13 | ファインダー | `web/`(Cloudflare Workers。D1 を読むだけ。Cloudflare Access を通った人だけ見られる) |
 | N10 | 採点 | `finder/score.py`(【5】点数表と【6】クリティカル条件。都道府県が分かれば地名の減点語は使わない) |
 
 収集は Cloudflare Worker(`trigger/worker.js`)が 10分ごとに Collect ワークフローを起動して動き、判定待ちが「まとめて判定する件数」たまるか、いちばん古いポストが「判定を待つ最長時間(分)」待ったら判定・採点します。通知とファインダーの画面は次の段階で作ります。
@@ -58,9 +59,19 @@ Actions → Collect → Run workflow で、まず `dry_run`(何も保存しな�
 3. その Worker の 設定 → 変数とシークレット に、`GITHUB_TOKEN`(種類はシークレット)として 1 のトークンを入れる
 4. 設定 → トリガー → Cron トリガーに `*/10 * * * *` を追加する
 
+### 5. ファインダー(N13)を公開する
+
+1. Cloudflare の API トークン(`CLOUDFLARE_API_TOKEN`)に、権限「アカウント / Workers スクリプト / 編集」を足す
+2. Actions → Deploy Finder → Run workflow で公開する(以後は main の `web/` が変わるたびに自動で公開される)
+3. Cloudflare → Workers & Pages → `x-finder` → 設定 → ドメインとルート で、workers.dev の「Cloudflare Access」を有効にする(自分のメールアドレスだけ許可)
+4. Zero Trust → Access → アプリケーション → `x-finder` の「アプリケーション対象者 (AUD) タグ」と、Zero Trust の チーム名(`○○.cloudflareaccess.com`)を、`x-finder` の 設定 → 変数とシークレット に `ACCESS_AUD` と `ACCESS_TEAM_DOMAIN` として入れる
+
+Access の確認ができないあいだは、ページは何も表示しません。
+
 ## テスト
 
 ```
 pip install -r requirements.txt pytest
 python -m pytest -q
+cd web && npm test   # ファインダー(Node 22 以上)
 ```
