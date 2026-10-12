@@ -43,12 +43,39 @@ body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);
 /* スマホで: カードの長押しで文字選択やプレビューが出ない。ボタンの連打で拡大しない */
 .card,.chip,.tab,.btn,.icon-btn{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .wrap{max-width:560px;margin:0 auto;padding-inline:16px;padding-block:0 40px}
-header.top{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);margin-inline:-16px;padding:calc(12px + env(safe-area-inset-top,0px)) 16px 10px;border-bottom:1px solid var(--line)}
+header.top{position:sticky;top:0;z-index:5;background:var(--bg);margin-inline:-16px;padding:calc(12px + env(safe-area-inset-top,0px)) 16px 10px;border-bottom:1px solid var(--line)}
 .bar{display:flex;align-items:center;justify-content:space-between;gap:12px}
 h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.02em}
 .sub{color:var(--muted);font-size:12px}
 .cost{font-family:var(--font-num);font-size:15px;font-variant-numeric:tabular-nums;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px 10px;white-space:nowrap}
 .cost b{font-weight:600}
+button.cost{color:var(--fg);cursor:pointer;font-family:var(--font-num)}
+button.cost::after{content:" ›";color:var(--muted)}
+/* サマリー */
+.seg{display:inline-grid;grid-auto-flow:column;gap:2px;background:var(--surface-2);border-radius:10px;padding:3px;margin-top:8px}
+.seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;border-radius:8px;padding:5px 12px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--fg);box-shadow:var(--shadow)}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.kpi{background:var(--surface-2);border-radius:12px;padding:10px 12px;min-width:0}
+.kpi .k{font-size:11.5px;color:var(--muted)}
+.kpi .v{font-family:var(--font-num);font-size:26px;font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums}
+.kpi .v small{font-size:13px;font-weight:500;color:var(--muted);margin-left:2px}
+.kpi .s{font-size:11.5px;color:var(--muted)}
+.chart{width:100%;height:auto;display:block;margin-top:4px}
+.chart text{font-family:var(--font-num);font-size:10px;fill:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;color:var(--muted);margin-top:4px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.cmp{width:100%;border-collapse:collapse;font-size:13px}
+.cmp th{font-weight:500;color:var(--muted);font-size:11.5px;text-align:right;padding:4px 0 4px 8px}
+.cmp th:first-child,.cmp td:first-child{text-align:left;padding-left:0}
+.cmp td{text-align:right;padding:6px 0 6px 8px;border-top:1px solid var(--line);font-family:var(--font-num);font-size:15px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.cmp td:first-child{font-family:var(--font-body);font-size:13px}
+.up{color:var(--ok)} .down{color:var(--rec)}
+.hbars{display:grid;gap:6px;font-size:13px}
+.hbar{display:grid;grid-template-columns:9.5em 1fr 2.5em;gap:8px;align-items:center}
+.hbar .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hbar .b{height:10px;border-radius:5px;background:var(--accent)}
+.hbar .n{text-align:right;font-family:var(--font-num);font-size:15px}
 .scroller{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin-top:10px;padding-bottom:2px}
 .scroller::-webkit-scrollbar{display:none}
 .chip{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
@@ -96,10 +123,13 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .btn.danger.on{background:var(--rec);border-color:var(--rec);color:#fff}
 .btn:disabled{opacity:.6;cursor:default}
 .swipe{position:relative;border-radius:var(--r);overflow:hidden}
-.swipe-bg{position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-weight:700;font-size:14px;color:#fff;background:var(--muted);border-radius:var(--r)}
+/* 裏の色はスワイプしている間だけ出す(スクロール中に裏が透けてチカチカしないように) */
+.swipe-bg{visibility:hidden;position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-weight:700;font-size:14px;color:#fff;background:var(--muted);border-radius:var(--r)}
 .swipe-bg.hold{background:var(--accent)} .swipe-bg.delete{background:var(--rec)} .swipe-bg.seen{background:var(--ok)}
+.swipe-bg.toR,.swipe-bg.toL{visibility:visible}
 .swipe-bg .l,.swipe-bg .r{opacity:0} .swipe-bg.toR .l,.swipe-bg.toL .r{opacity:1}
-.swipe .card{position:relative;touch-action:pan-y;will-change:transform}
+.swipe .card{position:relative;touch-action:pan-y}
+.swipe .card.dragging{will-change:transform}
 .swipe .card.snap{transition:transform .2s ease-out}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:30;background:var(--fg);color:var(--bg);border-radius:12px;padding:10px 12px 10px 14px;display:flex;width:max-content;gap:14px;align-items:center;font-size:14px;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:calc(100% - 32px)}
 .toast[hidden]{display:none}
@@ -120,7 +150,19 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .post + .post{margin-top:8px}
 .post .from{display:block;font-size:11.5px;color:var(--muted);margin-bottom:4px}
 .media{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;margin-top:8px}
+.media button{border:0;padding:0;background:none;cursor:zoom-in;border-radius:10px;display:block}
 .media img{width:100%;border-radius:10px;display:block;aspect-ratio:1;object-fit:cover;background:var(--surface-2)}
+/* 画像を X Finder の中で大きく見る。左右スワイプで次の画像、× か画像の外をタップで閉じる */
+.viewer{position:fixed;inset:0;z-index:40;background:#000;display:flex;flex-direction:column}
+.viewer[hidden]{display:none}
+.viewer .vbar{display:flex;justify-content:space-between;align-items:center;padding:calc(10px + env(safe-area-inset-top,0px)) 12px 10px;color:#fff;font-family:var(--font-num);font-size:16px}
+.viewer .vclose{border:0;background:rgba(255,255,255,.16);color:#fff;width:40px;height:40px;border-radius:50%;font-size:22px;line-height:40px;cursor:pointer}
+.viewer .strip{flex:1;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior:contain}
+.viewer .strip::-webkit-scrollbar{display:none}
+.viewer .slide{flex:0 0 100%;scroll-snap-align:center;display:grid;place-items:center;padding:0 0 calc(24px + env(safe-area-inset-bottom,0px))}
+.viewer .slide img{max-width:100%;max-height:100%;object-fit:contain;-webkit-user-select:none;user-select:none}
+.person.link{width:100%;text-align:left;font:inherit;color:inherit;background:var(--surface);cursor:pointer;text-decoration:none}
+.person .go{flex:none;color:var(--accent);font-size:12.5px;font-weight:700;white-space:nowrap}
 .people{display:grid;gap:8px}
 .person{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px;min-width:0}
 .person .who{min-width:0;flex:1}
@@ -138,7 +180,7 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
   <header class="top">
     <div class="bar">
       <div><h1 style="font-family:var(--font-num);font-size:24px;letter-spacing:.06em;line-height:1.1">X Finder</h1><div class="sub" id="count">読み込み中…</div></div>
-      <div class="cost" id="cost" title="今月の API 費用 / 目標">今月 —</div>
+      <button class="cost" id="cost" title="今月の API 費用 / 目標。タップでサマリー" aria-label="サマリーを見る">今月 —</button>
     </div>
     <div class="tabs" id="tabs" role="group" aria-label="確認の状態"></div>
     <div class="scroller" id="presets" role="group" aria-label="絞り込み"></div>
@@ -159,6 +201,10 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 </div>
 <div id="sheetRoot" hidden></div>
 <div class="toast" id="toast" role="status" hidden></div>
+<div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="画像" hidden>
+  <div class="vbar"><span id="vcount"></span><button class="vclose" id="vclose" aria-label="閉じる">×</button></div>
+  <div class="strip" id="strip"></div>
+</div>
 
 <script>
 const PRESETS=[{k:"all",t:"すべて"},{k:"crit",t:"クリティカル"},{k:"near",t:"首都圏"},{k:"rejected",t:"対象外(確認用)",cls:"warn"}];
@@ -181,6 +227,26 @@ const ffVal=u=>!u.following?Infinity:(u.followers||0)/u.following;
 const ffText=u=>u.followers==null?"—":!u.following?"—":((u.followers||0)/u.following).toFixed(1);
 const safeX=u=>/^https:\/\/(x|twitter)\.com\//.test(u||"")?u:null;
 const safeImg=u=>/^https:\/\/pbs\.twimg\.com\//.test(u||"")?u:null;
+const safeUser=u=>/^[A-Za-z0-9_]{1,15}$/.test(u||"")?u:null;
+// X アプリで開く: アプリの URL(twitter://)を試し、アプリに切り替わらなければ x.com を開く
+function openInX(appUrl,webUrl){
+  let left=false;const away=()=>{left=true};
+  document.addEventListener("visibilitychange",away,{once:true});window.addEventListener("pagehide",away,{once:true});
+  location.href=appUrl;
+  setTimeout(()=>{document.removeEventListener("visibilitychange",away);window.removeEventListener("pagehide",away);
+    if(!left&&document.visibilityState==="visible")window.open(webUrl,"_blank","noopener")},1500);
+}
+let viewerImages=[];
+function openViewer(i){
+  viewerImages=currentMedia;if(!viewerImages.length)return;
+  $("strip").innerHTML=viewerImages.map(u=>`<div class="slide"><img src="${esc(u)}" alt="添付画像" referrerpolicy="no-referrer"></div>`).join("");
+  $("viewer").hidden=false;
+  const strip=$("strip");strip.scrollLeft=strip.clientWidth*i;updateCount();
+}
+function updateCount(){const strip=$("strip");const i=Math.round(strip.scrollLeft/Math.max(1,strip.clientWidth));
+  $("vcount").textContent=viewerImages.length>1?`${i+1} / ${viewerImages.length}`:""}
+function closeViewer(){$("viewer").hidden=true;$("strip").innerHTML=""}
+let currentMedia=[];
 function ago(iso){if(!iso)return"";const m=Math.round((Date.now()-new Date(iso))/6e4);if(m<1)return"たった今";if(m<60)return`${m}分前`;const h=Math.round(m/60);if(h<24)return`${h}時間前`;return`${Math.round(h/24)}日前`}
 function ava(u){const img=safeImg(u.profile_image);const ch=esc((u.name||u.username||"?").trim()[0]||"?");
   return img?`<img class="ava" src="${esc(img)}" alt="" loading="lazy" referrerpolicy="no-referrer">`:`<span class="ava">${ch}</span>`}
@@ -206,7 +272,7 @@ async function load(){
   try{
     const [list,sum,set]=await Promise.all([api(`/api/cases?view=${view}`),api("/api/summary"),api("/api/settings").catch(()=>null)]);
     cases=list.cases;loadedView=view;if(set)settings=set;
-    $("cost").innerHTML=`今月 <b>¥${fmt(sum.month_cost_yen)}</b> / ¥${fmt(sum.goal_yen)}`;
+    $("cost").innerHTML=`今月 <b>¥${fmt(sum.month_cost_yen)}</b> / ¥${fmt(sum.goal_yen)}`;$("cost").dataset.goal=sum.goal_yen||0;
     const st=$("status");
     const parts=[];
     if(sum.last_run_at)parts.push(`最終収集 ${ago(sum.last_run_at)}`);
@@ -260,15 +326,17 @@ function card(c){
   </button></div>`;
 }
 function person(p){
-  return `<div class="person">${ava(p)}<div class="who"><div>${esc(p.name||p.username||"")} <span class="sub">${ROLE[p.role]||""}</span></div>
-    <div class="id">@${esc(p.username||"")}${p.followers!=null?` ・ フォロワー <span class="num">${fmt(p.followers)}</span> ・ FF率 <span class="num">${ffText(p)}</span>`:""}</div></div></div>`;
+  const u=safeUser(p.username);
+  return `<${u?`a class="person link" href="https://x.com/${u}" data-xuser="${u}"`:'div class="person"'}>${ava(p)}<div class="who"><div>${esc(p.name||p.username||"")} <span class="sub">${ROLE[p.role]||""}</span></div>
+    <div class="id">@${esc(p.username||"")}${p.followers!=null?` ・ フォロワー <span class="num">${fmt(p.followers)}</span> ・ FF率 <span class="num">${ffText(p)}</span>`:""}</div></div>${u?'<span class="go">X で開く ›</span>':""}</${u?"a":"div"}>`;
 }
 async function openSheet(id){
   $("sheetRoot").innerHTML=`<div class="scrim" data-close="1"></div><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div><p class="sub">読み込み中…</p></div>`;
   $("sheetRoot").hidden=false;document.body.style.overflow="hidden";
   let c;try{c=await api(`/api/cases/${encodeURIComponent(id)}`)}catch(e){$("sheetRoot").querySelector(".sheet").innerHTML=`<div class="grab"></div><p>読み込めませんでした(${esc(e.message)})。</p><div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;return}
   if(c.review==="unread"){c.review="seen";setLocalReview(id,"seen");postReview(id,{opened:true}).catch(()=>setLocalReview(id,"unread"))}
-  const xurl=safeX(c.url);const media=(c.media||[]).map(safeImg).filter(Boolean);
+  const xurl=safeX(c.url);const media=(c.media||[]).map(safeImg).filter(Boolean);currentMedia=media;
+  const cu=safeUser(c.username);
   const detail=c.score_detail||[];
   $("sheetRoot").querySelector(".sheet").innerHTML=`<div class="grab"></div>
    <div class="meta" id="sheetMeta">${reviewPill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span>${c.score!=null?`<span class="pill">${Math.round(c.score)}点</span>`:""}<span class="pill">${ago(c.created_at)}に投稿</span>${c.reject_reason?`<span class="pill warn">${esc(c.reject_reason)}</span>`:""}</div>
@@ -277,14 +345,14 @@ async function openSheet(id){
     ${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}${c.critical_reason?`<dt>REC</dt><dd>${esc(c.critical_reason)}</dd>`:""}</dl>
    <div class="sec"><h3>募集ポスト</h3><div class="post">${esc(c.text)}</div>
     ${c.quoted_text?`<div class="post"><span class="from">引用元のポスト</span>${esc(c.quoted_text)}</div>`:""}
-    ${media.length?`<div class="media">${media.map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer"><img src="${esc(u)}" alt="添付画像" loading="lazy" referrerpolicy="no-referrer"></a>`).join("")}</div>`:""}</div>
+    ${media.length?`<div class="media">${media.map((u,i)=>`<button type="button" data-img="${i}" aria-label="画像 ${i+1} を大きく見る"><img src="${esc(u)}" alt="添付画像" loading="lazy" referrerpolicy="no-referrer"></button>`).join("")}</div>`:""}</div>
    ${detail.length?`<div class="sec"><h3>点数の内訳</h3><dl class="breakdown">${detail.map(d=>`<dt>${esc(d.label)}</dt><dd>${d.points>0?"+":""}${Math.round(d.points)}</dd>`).join("")}<dt class="total">合計</dt><dd class="total">${Math.round(c.score)}</dd></dl></div>`:""}
-   <div class="sec"><h3>クライアント</h3><div class="people"><div class="person">${ava(c)}<div class="who"><div>${esc(c.name||"")}</div>
+   <div class="sec"><h3>クライアント</h3><div class="people"><${cu?`a class="person link" href="https://x.com/${cu}" data-xuser="${cu}"`:'div class="person"'}>${ava(c)}<div class="who"><div>${esc(c.name||"")}</div>
     <div class="id">@${esc(c.username||"")} ・ フォロワー <span class="num">${fmt(c.followers)}</span> ・ フォロー <span class="num">${fmt(c.following)}</span> ・ FF率 <span class="num">${ffText(c)}</span></div>
-    ${c.location?`<div class="id">地域: ${esc(c.location)}</div>`:""}${c.description?`<div class="id">${esc(c.description)}</div>`:""}</div></div></div></div>
+    ${c.location?`<div class="id">地域: ${esc(c.location)}</div>`:""}${c.description?`<div class="id">${esc(c.description)}</div>`:""}</div>${cu?'<span class="go">X で開く ›</span>':""}</${cu?"a":"div"}></div></div>
    ${c.people&&c.people.length?`<div class="sec"><h3>関係するアカウント</h3><div class="people">${c.people.map(person).join("")}</div></div>`:""}
    <div class="review-actions" id="reviewActions" data-id="${esc(c.id)}">${reviewButtons(c.review)}</div>
-   <div class="actions">${xurl?`<a class="btn primary" href="${esc(xurl)}" target="_blank" rel="noopener noreferrer">X で開く</a>`:""}<button class="btn" data-close="1">閉じる</button></div>`;
+   <div class="actions">${xurl?`<a class="btn primary" href="${esc(xurl)}" data-xpost="${esc(c.id)}" target="_blank" rel="noopener noreferrer">X で開く</a>`:""}<button class="btn" data-close="1">閉じる</button></div>`;
 }
 function reviewButtons(review){
   return `<button class="btn ${review==="hold"?"on":""}" data-review="${review==="hold"?"seen":"hold"}">${review==="hold"?"保留を外す":"📌 保留にする"}</button>
@@ -320,7 +388,7 @@ document.addEventListener("pointermove",ev=>{
   if(!drag.on){
     if(Math.abs(dy)>10&&Math.abs(dy)>Math.abs(dx)){drag=null;return}
     if(Math.abs(dx)<12)return;
-    drag.on=true;try{drag.card.setPointerCapture(ev.pointerId)}catch(e){}
+    drag.on=true;drag.card.classList.add("dragging");try{drag.card.setPointerCapture(ev.pointerId)}catch(e){}
   }
   drag.dx=dx;
   const c=cases.find(x=>x.id===drag.card.dataset.id);const t=c&&swipeTarget(c,dx);
@@ -339,7 +407,7 @@ function endDrag(ev){
   if(t&&far&&ev.type==="pointerup"){
     d.card.style.transform=`translateX(${d.dx>0?"":"-"}110%)`;
     setTimeout(()=>applySwipe(c,t),180);
-  }else{d.card.style.transform="";setTimeout(()=>d.card.classList.remove("snap"),220)}
+  }else{d.card.style.transform="";setTimeout(()=>{d.card.classList.remove("snap","dragging");d.card.previousElementSibling.className="swipe-bg"},220)}
 }
 document.addEventListener("pointerup",endDrag);
 document.addEventListener("pointercancel",endDrag);
@@ -373,20 +441,100 @@ function openSettings(){
   };
   $("swR").onchange=onChange;$("swL").onchange=onChange;
 }
+// ---- サマリー ----
+let statsDays=30;
+const yen=n=>`¥${Math.round(n||0).toLocaleString("ja-JP")}`;
+const yen2=n=>n<10?`¥${(n||0).toFixed(2)}`:yen(n);
+function barChart(daily,series,{fmt=v=>Math.round(v),goal=null}={}){
+  const W=340,H=140,L=30,B=18,T=8,w=W-L-4,h=H-B-T,n=daily.length;
+  const tot=d=>series.reduce((a,s)=>a+(d[s.key]||0),0);
+  const top=Math.max(...daily.map(tot),0);
+  // 目標の線が棒よりずっと上にあると棒がつぶれるので、そのときは線を描かず凡例に書く
+  const showGoal=goal&&goal<=top*1.6;
+  const max=Math.max(showGoal?goal:0,top,1e-9)*1.05;
+  const bw=w/n,gap=Math.min(2,bw*.25);
+  let bars="";
+  daily.forEach((d,i)=>{let y=T+h;for(const s of series){const v=d[s.key]||0;if(!v)continue;const bh=v/max*h;y-=bh;
+    bars+=`<rect x="${(L+i*bw+gap/2).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(.5,bw-gap).toFixed(1)}" height="${bh.toFixed(1)}" fill="${s.color}" rx="1"><title>${d.date} ${s.label} ${fmt(v)}</title></rect>`}});
+  const gy=showGoal?T+h-goal/max*h:null;
+  const md=s=>s.slice(5).replace("-","/");
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img">
+    <line x1="${L}" x2="${W-4}" y1="${T+h}" y2="${T+h}" stroke="var(--line)"/>
+    <text x="${L-4}" y="${T+8}" text-anchor="end">${esc(fmt(top))}</text><text x="${L-4}" y="${T+h}" text-anchor="end">0</text>
+    ${bars}
+    ${gy!=null?`<line x1="${L}" x2="${W-4}" y1="${gy.toFixed(1)}" y2="${gy.toFixed(1)}" stroke="var(--warn)" stroke-dasharray="4 3"/><text x="${W-4}" y="${(gy-3).toFixed(1)}" text-anchor="end" style="fill:var(--warn)">目標/日</text>`:""}
+    <text x="${L}" y="${H-4}">${md(daily[0].date)}</text><text x="${W-4}" y="${H-4}" text-anchor="end">${md(daily[n-1].date)}</text></svg>
+    <div class="legend">${series.map(s=>`<span><i style="background:${s.color}"></i>${s.label}</span>`).join("")}${goal?`<span style="color:var(--warn)">目標 ${esc(fmt(goal))}/日${showGoal?"":"(グラフより上)"}</span>`:""}</div>`;
+}
+function hbars(rows){
+  if(!rows.length)return '<p class="sub" style="margin:0">まだありません</p>';
+  const max=Math.max(...rows.map(r=>r.n));
+  return `<div class="hbars">${rows.map(r=>`<div class="hbar"><span class="t">${esc(r.k)}</span><span><span class="b" style="display:block;width:${Math.max(2,r.n/max*100)}%"></span></span><span class="n">${r.n}</span></div>`).join("")}</div>`;
+}
+// 増えたら緑・減ったら赤。費用は逆(増えたら赤)
+function diff(a,b,lowerBetter=false){if(!b)return a?"新規":"—";const p=Math.round((a-b)/b*100);const good=lowerBetter?p<=0:p>=0;return `<span class="${good?"up":"down"}">${p>=0?"+":""}${p}%</span>`}
+async function openStats(){
+  $("sheetRoot").innerHTML=`<div class="scrim" data-close="1"></div><div class="sheet" role="dialog" aria-modal="true" aria-label="サマリー"><div class="grab"></div><p class="sub">読み込み中…</p></div>`;
+  $("sheetRoot").hidden=false;document.body.style.overflow="hidden";
+  await renderStats();
+}
+async function renderStats(){
+  const sheet=$("sheetRoot").querySelector(".sheet");if(!sheet)return;
+  let st;try{st=await api(`/api/stats?days=${statsDays}`)}catch(e){sheet.innerHTML=`<div class="grab"></div><p>読み込めませんでした(${esc(e.message)})。</p><div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;return}
+  const d=st.daily.map(x=>({...x,rest:Math.max(0,(x.fetched||0)-(x.target||0))})),n=d.length||1,sum=k=>d.reduce((a,x)=>a+(x[k]||0),0);
+  const cost=sum("collect_yen")+sum("ai_yen"),target=sum("target");
+  const goal=Number(String($("cost").dataset.goal||0));
+  const tm=st.this_month,lm=st.last_month_same_point,lt=st.last_month_total;
+  const row=(label,k,f=v=>Number(v||0).toLocaleString("ja-JP"),lowerBetter=false)=>`<tr><td>${label}</td><td>${f(tm[k])}</td><td>${f(lm[k])}</td><td>${diff(tm[k]||0,lm[k]||0,lowerBetter)}</td><td>${f(lt[k])}</td></tr>`;
+  const rv=st.reviews||{};
+  sheet.innerHTML=`<div class="grab"></div><h2>サマリー</h2>
+   <div class="seg" role="group" aria-label="期間">${[7,30,90].map(k=>`<button data-days="${k}" aria-pressed="${statsDays===k}">${k}日</button>`).join("")}</div>
+   <div class="kpis">
+    <div class="kpi"><div class="k">これまでに判定した案件</div><div class="v">${fmt(st.totals.judged)}<small>件</small></div><div class="s">対象 ${fmt(st.totals.target)} ・ REC ${fmt(st.totals.critical)}</div></div>
+    <div class="kpi"><div class="k">1日平均の取得ポスト(${statsDays}日)</div><div class="v">${fmt(Math.round(sum("fetched")/n))}<small>件</small></div><div class="s">判定 ${fmt(Math.round(sum("judged")/n))}件/日</div></div>
+    <div class="kpi"><div class="k">1日平均の費用(${statsDays}日)</div><div class="v">${yen2(cost/n)}</div><div class="s">月にすると約 ${yen(cost/n*30)}</div></div>
+    <div class="kpi"><div class="k">対象 1件あたりの費用</div><div class="v">${target?yen2(cost/target):"—"}</div><div class="s">${statsDays}日で対象 ${fmt(target)}件</div></div>
+   </div>
+   <div class="sec"><h3>日ごとの取得ポストと判定</h3>${barChart(d,[{key:"target",label:"対象",color:"var(--accent)"},{key:"rest",label:"そのほか取得",color:"var(--line)"}])}</div>
+   <div class="sec"><h3>日ごとの費用</h3>${barChart(d,[{key:"collect_yen",label:"収集(TwitterAPI.io)",color:"var(--muted)"},{key:"ai_yen",label:"AI 判定",color:"var(--accent)"}],{fmt:v=>yen2(v),goal:goal?goal/30:null})}</div>
+   <div class="sec"><h3>今月と先月</h3><table class="cmp"><tr><th></th><th>今月</th><th>先月の同じ時点</th><th>増減</th><th>先月全体</th></tr>
+    ${row("取得ポスト","fetched")}${row("判定","judged")}${row("対象","target")}${row("REC","critical")}${row("費用","yen",v=>yen(v),true)}</table></div>
+   <div class="sec"><h3>対象の案件の種類(${statsDays}日)</h3>${hbars(st.types)}</div>
+   <div class="sec"><h3>対象の案件の都道府県(${statsDays}日)</h3>${hbars(st.prefectures)}</div>
+   <div class="sec"><h3>対象外の理由(${statsDays}日)</h3>${hbars(st.reject_reasons)}</div>
+   <div class="sec"><h3>確認の状態</h3><div class="kpis" style="grid-template-columns:repeat(3,1fr);margin-top:0">
+    <div class="kpi"><div class="k">確認済み</div><div class="v">${fmt(rv.seen||0)}</div></div><div class="kpi"><div class="k">保留</div><div class="v">${fmt(rv.hold||0)}</div></div><div class="kpi"><div class="k">削除予定</div><div class="v">${fmt(rv.delete||0)}</div></div></div></div>
+   <p class="sub">金額は設定の為替レート(1ドル ${st.rate}円)で円にしています。日付は日本時間です。</p>
+   <div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;
+}
 function closeSheet(){if($("sheetRoot").hidden)return;$("sheetRoot").hidden=true;$("sheetRoot").innerHTML="";document.body.style.overflow="";render()}
 document.addEventListener("click",ev=>{
   const p=ev.target.closest("[data-p]");if(p){const before=state.preset;state.preset=p.dataset.p;save();
     if((before==="rejected")!==(state.preset==="rejected"))load();else render();return}
+  const xu=ev.target.closest("[data-xuser]");if(xu){ev.preventDefault();openInX(`twitter://user?screen_name=${xu.dataset.xuser}`,xu.href);return}
+  const xp=ev.target.closest("[data-xpost]");if(xp&&/^\d+$/.test(xp.dataset.xpost)){ev.preventDefault();openInX(`twitter://status?id=${xp.dataset.xpost}`,xp.href);return}
+  const im=ev.target.closest("[data-img]");if(im){openViewer(Number(im.dataset.img));return}
+  const dy=ev.target.closest("[data-days]");if(dy){statsDays=Number(dy.dataset.days);renderStats();return}
   const tb=ev.target.closest("[data-tab]");if(tb){state.tab=tb.dataset.tab;save();render();window.scrollTo({top:0});return}
   const rv=ev.target.closest("[data-review]");if(rv){changeReview(rv);return}
   const t=ev.target.closest("[data-t]");if(t){const v=t.dataset.t;state.types.has(v)?state.types.delete(v):state.types.add(v);save();render();return}
   if(ev.target.closest("[data-close]")){closeSheet();return}
   const c=ev.target.closest(".card");if(c&&!suppressClick)openSheet(c.dataset.id);
 });
-document.addEventListener("keydown",e=>{if(e.key==="Escape")closeSheet()});
+document.addEventListener("keydown",e=>{
+  if(!$("viewer").hidden){const s=$("strip");
+    if(e.key==="Escape")closeViewer();
+    else if(e.key==="ArrowRight")s.scrollBy({left:s.clientWidth,behavior:"smooth"});
+    else if(e.key==="ArrowLeft")s.scrollBy({left:-s.clientWidth,behavior:"smooth"});
+    return}
+  if(e.key==="Escape")closeSheet()});
+$("strip").addEventListener("scroll",updateCount,{passive:true});
+// 画像でも外でも、タップで元の画面(詳細)に戻る。下の詳細にタップが届かないよう、閉じるのは少し後
+$("viewer").addEventListener("click",e=>{e.stopPropagation();e.preventDefault();setTimeout(closeViewer,60)});
 $("sort").addEventListener("change",e=>{state.sort=e.target.value;save();render()});
 $("reload").addEventListener("click",load);
 $("openSettings").addEventListener("click",openSettings);
+$("cost").addEventListener("click",openStats);
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&$("sheetRoot").hidden)load()});
 renderControls();load();
 </script>
