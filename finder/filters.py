@@ -21,7 +21,8 @@ def find_words(text, words):
 
 def penalty_hits(text, penalty_words):
     masked = _mask(text or "")
-    return [{"word": p["word"], "points": p["points"]} for p in penalty_words if p["word"] and p["word"] in masked]
+    return [{"word": p["word"], "category": p.get("category", "その他"), "points": p["points"]}
+            for p in penalty_words if p["word"] and p["word"] in masked]
 
 
 def skip_reason(tweet, overflow_excludes, min_followers):

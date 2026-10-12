@@ -7,8 +7,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from finder.d1 import D1  # noqa: E402
-from scripts.setup_d1 import statements  # noqa: E402
+from finder.d1 import D1, schema_statements  # noqa: E402
 
 
 class SqliteD1(D1):
@@ -17,12 +16,13 @@ class SqliteD1(D1):
     def __init__(self):
         self.db = sqlite3.connect(":memory:")
         self.db.row_factory = sqlite3.Row
-        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(root, "schema.sql"), encoding="utf-8") as f:
-            for s in statements(f.read()):
-                self.db.execute(s)
+        for s in schema_statements():
+            self.db.execute(s)
 
     def query(self, sql, params=None):
+        if not params and sql.count(";") > 0:  # D1 と同じく、複数の文をまとめて流せるようにする
+            self.db.executescript(sql)
+            return []
         cur = self.db.execute(sql, list(params or []))
         rows = [dict(r) for r in cur.fetchall()]
         self.db.commit()

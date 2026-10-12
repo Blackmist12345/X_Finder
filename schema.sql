@@ -14,13 +14,36 @@ CREATE TABLE IF NOT EXISTS posts (
   conversation_id TEXT,
   media_json TEXT,
   penalty_json TEXT,
-  status TEXT NOT NULL DEFAULT 'new',
+  status TEXT NOT NULL DEFAULT 'new',  -- new(判定待ち) / skipped(一次フィルタで除外) / context(引用元) / judged(対象) / rejected(AI 判定で対象外) / judge_error
   skip_reason TEXT,
   collected_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS posts_status ON posts (status);
 CREATE INDEX IF NOT EXISTS posts_author ON posts (author_id);
 CREATE INDEX IF NOT EXISTS posts_collected ON posts (collected_at);
+
+-- N4 AI 判定と N10 採点の結果(判定したポスト 1 件 = 1 行)。
+CREATE TABLE IF NOT EXISTS judgments (
+  post_id TEXT PRIMARY KEY,
+  judged_at TEXT NOT NULL,
+  model TEXT,
+  case_type TEXT,
+  is_cosplay INTEGER,
+  works TEXT,
+  excluded_work TEXT,
+  prefecture TEXT,
+  prefecture_source TEXT,
+  place TEXT,
+  dates TEXT,
+  summary TEXT,
+  reject_reason TEXT,
+  score REAL,
+  score_json TEXT,
+  critical INTEGER NOT NULL DEFAULT 0,
+  critical_reason TEXT,
+  raw_json TEXT
+);
+CREATE INDEX IF NOT EXISTS judgments_score ON judgments (score);
 
 -- ユーザー台帳: X のアカウント 1 人 = 1 行。数字の ID で同じ人を見分ける。
 CREATE TABLE IF NOT EXISTS users (
