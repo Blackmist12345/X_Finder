@@ -120,7 +120,19 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .post + .post{margin-top:8px}
 .post .from{display:block;font-size:11.5px;color:var(--muted);margin-bottom:4px}
 .media{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;margin-top:8px}
+.media button{border:0;padding:0;background:none;cursor:zoom-in;border-radius:10px;display:block}
 .media img{width:100%;border-radius:10px;display:block;aspect-ratio:1;object-fit:cover;background:var(--surface-2)}
+/* 画像を X Finder の中で大きく見る。左右スワイプで次の画像、× か画像の外をタップで閉じる */
+.viewer{position:fixed;inset:0;z-index:40;background:#000;display:flex;flex-direction:column}
+.viewer[hidden]{display:none}
+.viewer .vbar{display:flex;justify-content:space-between;align-items:center;padding:calc(10px + env(safe-area-inset-top,0px)) 12px 10px;color:#fff;font-family:var(--font-num);font-size:16px}
+.viewer .vclose{border:0;background:rgba(255,255,255,.16);color:#fff;width:40px;height:40px;border-radius:50%;font-size:22px;line-height:40px;cursor:pointer}
+.viewer .strip{flex:1;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior:contain}
+.viewer .strip::-webkit-scrollbar{display:none}
+.viewer .slide{flex:0 0 100%;scroll-snap-align:center;display:grid;place-items:center;padding:0 0 calc(24px + env(safe-area-inset-bottom,0px))}
+.viewer .slide img{max-width:100%;max-height:100%;object-fit:contain;-webkit-user-select:none;user-select:none}
+.person.link{width:100%;text-align:left;font:inherit;color:inherit;background:var(--surface);cursor:pointer;text-decoration:none}
+.person .go{flex:none;color:var(--accent);font-size:12.5px;font-weight:700;white-space:nowrap}
 .people{display:grid;gap:8px}
 .person{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px;min-width:0}
 .person .who{min-width:0;flex:1}
@@ -159,6 +171,10 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 </div>
 <div id="sheetRoot" hidden></div>
 <div class="toast" id="toast" role="status" hidden></div>
+<div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="画像" hidden>
+  <div class="vbar"><span id="vcount"></span><button class="vclose" id="vclose" aria-label="閉じる">×</button></div>
+  <div class="strip" id="strip"></div>
+</div>
 
 <script>
 const PRESETS=[{k:"all",t:"すべて"},{k:"crit",t:"クリティカル"},{k:"near",t:"首都圏"},{k:"rejected",t:"対象外(確認用)",cls:"warn"}];
@@ -181,6 +197,26 @@ const ffVal=u=>!u.following?Infinity:(u.followers||0)/u.following;
 const ffText=u=>u.followers==null?"—":!u.following?"—":((u.followers||0)/u.following).toFixed(1);
 const safeX=u=>/^https:\/\/(x|twitter)\.com\//.test(u||"")?u:null;
 const safeImg=u=>/^https:\/\/pbs\.twimg\.com\//.test(u||"")?u:null;
+const safeUser=u=>/^[A-Za-z0-9_]{1,15}$/.test(u||"")?u:null;
+// X アプリで開く: アプリの URL(twitter://)を試し、アプリに切り替わらなければ x.com を開く
+function openInX(appUrl,webUrl){
+  let left=false;const away=()=>{left=true};
+  document.addEventListener("visibilitychange",away,{once:true});window.addEventListener("pagehide",away,{once:true});
+  location.href=appUrl;
+  setTimeout(()=>{document.removeEventListener("visibilitychange",away);window.removeEventListener("pagehide",away);
+    if(!left&&document.visibilityState==="visible")window.open(webUrl,"_blank","noopener")},1500);
+}
+let viewerImages=[];
+function openViewer(i){
+  viewerImages=currentMedia;if(!viewerImages.length)return;
+  $("strip").innerHTML=viewerImages.map(u=>`<div class="slide"><img src="${esc(u)}" alt="添付画像" referrerpolicy="no-referrer"></div>`).join("");
+  $("viewer").hidden=false;
+  const strip=$("strip");strip.scrollLeft=strip.clientWidth*i;updateCount();
+}
+function updateCount(){const strip=$("strip");const i=Math.round(strip.scrollLeft/Math.max(1,strip.clientWidth));
+  $("vcount").textContent=viewerImages.length>1?`${i+1} / ${viewerImages.length}`:""}
+function closeViewer(){$("viewer").hidden=true;$("strip").innerHTML=""}
+let currentMedia=[];
 function ago(iso){if(!iso)return"";const m=Math.round((Date.now()-new Date(iso))/6e4);if(m<1)return"たった今";if(m<60)return`${m}分前`;const h=Math.round(m/60);if(h<24)return`${h}時間前`;return`${Math.round(h/24)}日前`}
 function ava(u){const img=safeImg(u.profile_image);const ch=esc((u.name||u.username||"?").trim()[0]||"?");
   return img?`<img class="ava" src="${esc(img)}" alt="" loading="lazy" referrerpolicy="no-referrer">`:`<span class="ava">${ch}</span>`}
@@ -260,15 +296,17 @@ function card(c){
   </button></div>`;
 }
 function person(p){
-  return `<div class="person">${ava(p)}<div class="who"><div>${esc(p.name||p.username||"")} <span class="sub">${ROLE[p.role]||""}</span></div>
-    <div class="id">@${esc(p.username||"")}${p.followers!=null?` ・ フォロワー <span class="num">${fmt(p.followers)}</span> ・ FF率 <span class="num">${ffText(p)}</span>`:""}</div></div></div>`;
+  const u=safeUser(p.username);
+  return `<${u?`a class="person link" href="https://x.com/${u}" data-xuser="${u}"`:'div class="person"'}>${ava(p)}<div class="who"><div>${esc(p.name||p.username||"")} <span class="sub">${ROLE[p.role]||""}</span></div>
+    <div class="id">@${esc(p.username||"")}${p.followers!=null?` ・ フォロワー <span class="num">${fmt(p.followers)}</span> ・ FF率 <span class="num">${ffText(p)}</span>`:""}</div></div>${u?'<span class="go">X で開く ›</span>':""}</${u?"a":"div"}>`;
 }
 async function openSheet(id){
   $("sheetRoot").innerHTML=`<div class="scrim" data-close="1"></div><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div><p class="sub">読み込み中…</p></div>`;
   $("sheetRoot").hidden=false;document.body.style.overflow="hidden";
   let c;try{c=await api(`/api/cases/${encodeURIComponent(id)}`)}catch(e){$("sheetRoot").querySelector(".sheet").innerHTML=`<div class="grab"></div><p>読み込めませんでした(${esc(e.message)})。</p><div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;return}
   if(c.review==="unread"){c.review="seen";setLocalReview(id,"seen");postReview(id,{opened:true}).catch(()=>setLocalReview(id,"unread"))}
-  const xurl=safeX(c.url);const media=(c.media||[]).map(safeImg).filter(Boolean);
+  const xurl=safeX(c.url);const media=(c.media||[]).map(safeImg).filter(Boolean);currentMedia=media;
+  const cu=safeUser(c.username);
   const detail=c.score_detail||[];
   $("sheetRoot").querySelector(".sheet").innerHTML=`<div class="grab"></div>
    <div class="meta" id="sheetMeta">${reviewPill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span>${c.score!=null?`<span class="pill">${Math.round(c.score)}点</span>`:""}<span class="pill">${ago(c.created_at)}に投稿</span>${c.reject_reason?`<span class="pill warn">${esc(c.reject_reason)}</span>`:""}</div>
@@ -277,14 +315,14 @@ async function openSheet(id){
     ${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}${c.critical_reason?`<dt>REC</dt><dd>${esc(c.critical_reason)}</dd>`:""}</dl>
    <div class="sec"><h3>募集ポスト</h3><div class="post">${esc(c.text)}</div>
     ${c.quoted_text?`<div class="post"><span class="from">引用元のポスト</span>${esc(c.quoted_text)}</div>`:""}
-    ${media.length?`<div class="media">${media.map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer"><img src="${esc(u)}" alt="添付画像" loading="lazy" referrerpolicy="no-referrer"></a>`).join("")}</div>`:""}</div>
+    ${media.length?`<div class="media">${media.map((u,i)=>`<button type="button" data-img="${i}" aria-label="画像 ${i+1} を大きく見る"><img src="${esc(u)}" alt="添付画像" loading="lazy" referrerpolicy="no-referrer"></button>`).join("")}</div>`:""}</div>
    ${detail.length?`<div class="sec"><h3>点数の内訳</h3><dl class="breakdown">${detail.map(d=>`<dt>${esc(d.label)}</dt><dd>${d.points>0?"+":""}${Math.round(d.points)}</dd>`).join("")}<dt class="total">合計</dt><dd class="total">${Math.round(c.score)}</dd></dl></div>`:""}
-   <div class="sec"><h3>クライアント</h3><div class="people"><div class="person">${ava(c)}<div class="who"><div>${esc(c.name||"")}</div>
+   <div class="sec"><h3>クライアント</h3><div class="people"><${cu?`a class="person link" href="https://x.com/${cu}" data-xuser="${cu}"`:'div class="person"'}>${ava(c)}<div class="who"><div>${esc(c.name||"")}</div>
     <div class="id">@${esc(c.username||"")} ・ フォロワー <span class="num">${fmt(c.followers)}</span> ・ フォロー <span class="num">${fmt(c.following)}</span> ・ FF率 <span class="num">${ffText(c)}</span></div>
-    ${c.location?`<div class="id">地域: ${esc(c.location)}</div>`:""}${c.description?`<div class="id">${esc(c.description)}</div>`:""}</div></div></div></div>
+    ${c.location?`<div class="id">地域: ${esc(c.location)}</div>`:""}${c.description?`<div class="id">${esc(c.description)}</div>`:""}</div>${cu?'<span class="go">X で開く ›</span>':""}</${cu?"a":"div"}></div></div>
    ${c.people&&c.people.length?`<div class="sec"><h3>関係するアカウント</h3><div class="people">${c.people.map(person).join("")}</div></div>`:""}
    <div class="review-actions" id="reviewActions" data-id="${esc(c.id)}">${reviewButtons(c.review)}</div>
-   <div class="actions">${xurl?`<a class="btn primary" href="${esc(xurl)}" target="_blank" rel="noopener noreferrer">X で開く</a>`:""}<button class="btn" data-close="1">閉じる</button></div>`;
+   <div class="actions">${xurl?`<a class="btn primary" href="${esc(xurl)}" data-xpost="${esc(c.id)}" target="_blank" rel="noopener noreferrer">X で開く</a>`:""}<button class="btn" data-close="1">閉じる</button></div>`;
 }
 function reviewButtons(review){
   return `<button class="btn ${review==="hold"?"on":""}" data-review="${review==="hold"?"seen":"hold"}">${review==="hold"?"保留を外す":"📌 保留にする"}</button>
@@ -377,13 +415,25 @@ function closeSheet(){if($("sheetRoot").hidden)return;$("sheetRoot").hidden=true
 document.addEventListener("click",ev=>{
   const p=ev.target.closest("[data-p]");if(p){const before=state.preset;state.preset=p.dataset.p;save();
     if((before==="rejected")!==(state.preset==="rejected"))load();else render();return}
+  const xu=ev.target.closest("[data-xuser]");if(xu){ev.preventDefault();openInX(`twitter://user?screen_name=${xu.dataset.xuser}`,xu.href);return}
+  const xp=ev.target.closest("[data-xpost]");if(xp&&/^\d+$/.test(xp.dataset.xpost)){ev.preventDefault();openInX(`twitter://status?id=${xp.dataset.xpost}`,xp.href);return}
+  const im=ev.target.closest("[data-img]");if(im){openViewer(Number(im.dataset.img));return}
   const tb=ev.target.closest("[data-tab]");if(tb){state.tab=tb.dataset.tab;save();render();window.scrollTo({top:0});return}
   const rv=ev.target.closest("[data-review]");if(rv){changeReview(rv);return}
   const t=ev.target.closest("[data-t]");if(t){const v=t.dataset.t;state.types.has(v)?state.types.delete(v):state.types.add(v);save();render();return}
   if(ev.target.closest("[data-close]")){closeSheet();return}
   const c=ev.target.closest(".card");if(c&&!suppressClick)openSheet(c.dataset.id);
 });
-document.addEventListener("keydown",e=>{if(e.key==="Escape")closeSheet()});
+document.addEventListener("keydown",e=>{
+  if(!$("viewer").hidden){const s=$("strip");
+    if(e.key==="Escape")closeViewer();
+    else if(e.key==="ArrowRight")s.scrollBy({left:s.clientWidth,behavior:"smooth"});
+    else if(e.key==="ArrowLeft")s.scrollBy({left:-s.clientWidth,behavior:"smooth"});
+    return}
+  if(e.key==="Escape")closeSheet()});
+$("strip").addEventListener("scroll",updateCount,{passive:true});
+// 画像でも外でも、タップで元の画面(詳細)に戻る。下の詳細にタップが届かないよう、閉じるのは少し後
+$("viewer").addEventListener("click",e=>{e.stopPropagation();e.preventDefault();setTimeout(closeViewer,60)});
 $("sort").addEventListener("change",e=>{state.sort=e.target.value;save();render()});
 $("reload").addEventListener("click",load);
 $("openSettings").addEventListener("click",openSettings);
