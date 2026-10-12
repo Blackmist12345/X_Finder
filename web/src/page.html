@@ -113,9 +113,13 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:10px;background:var(--surface-2);border-radius:12px;padding:3px}
 .tab{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12.5px;border-radius:9px;padding:6px 2px;cursor:pointer;white-space:nowrap}
 .tab .c{display:block;font-family:var(--font-num);font-size:16px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
-.tab[aria-pressed="true"]{background:var(--surface);color:var(--fg);box-shadow:var(--shadow)}
+/* 状態ごとの色: 未確認=青 確認済み=緑 保留=オレンジ 削除予定=赤 */
+.tab[data-tab="unread"]{--tc:var(--accent);--tc-soft:var(--accent-soft)} .tab[data-tab="seen"]{--tc:var(--ok);--tc-soft:var(--ok-soft)}
+.tab[data-tab="hold"]{--tc:var(--warn);--tc-soft:var(--warn-soft)} .tab[data-tab="delete"]{--tc:var(--rec);--tc-soft:var(--rec-soft)}
+.tab .c{color:var(--tc)}
+.tab[aria-pressed="true"]{background:var(--tc-soft);color:var(--tc);box-shadow:inset 0 0 0 1.5px var(--tc)}
 .tab:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.pill.hold{background:var(--accent-soft);color:var(--accent);font-weight:500}
+.pill.hold{background:var(--warn-soft);color:var(--warn);font-weight:500}
 .pill.del{background:var(--rec-soft);color:var(--rec)}
 .card.unread .title::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:2px}
 .review-actions{display:flex;gap:8px;margin-top:20px}
@@ -125,7 +129,7 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .swipe{position:relative;border-radius:var(--r);overflow:hidden}
 /* 裏の色はスワイプしている間だけ出す(スクロール中に裏が透けてチカチカしないように) */
 .swipe-bg{visibility:hidden;position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-weight:700;font-size:14px;color:#fff;background:var(--muted);border-radius:var(--r)}
-.swipe-bg.hold{background:var(--accent)} .swipe-bg.delete{background:var(--rec)} .swipe-bg.seen{background:var(--ok)}
+.swipe-bg.hold{background:var(--warn)} .swipe-bg.delete{background:var(--rec)} .swipe-bg.seen{background:var(--ok)}
 .swipe-bg.toR,.swipe-bg.toL{visibility:visible}
 .swipe-bg .l,.swipe-bg .r{opacity:0} .swipe-bg.toR .l,.swipe-bg.toL .r{opacity:1}
 .swipe .card{position:relative;touch-action:pan-y}
