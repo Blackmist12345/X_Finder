@@ -174,6 +174,10 @@ header.top.slim .tab .c{font-size:17px}
 .scrim{position:fixed;inset:0;background:rgba(10,14,20,.45);z-index:20;touch-action:none}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:21;background:var(--surface);border-radius:20px 20px 0 0;max-height:88%;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:8px 16px calc(24px + env(safe-area-inset-bottom,0px));max-width:560px;margin:0 auto;box-shadow:0 -8px 30px rgba(0,0,0,.18)}
 @media (prefers-reduced-motion:no-preference){.sheet{animation:up .22s ease-out}@keyframes up{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}}}
+.sheet.drag{animation:none}
+.sheet.back{transition:transform .22s ease}
+.sheet.out{transition:transform .22s ease-in;transform:translateY(100%)!important}
+.scrim.fade{transition:opacity .22s ease}
 .grab{width:40px;height:4px;border-radius:2px;background:var(--line);margin:4px auto 10px}
 .sheet h2{font-size:18px;margin:6px 0 2px;text-wrap:balance;overflow-wrap:anywhere}
 .sec{margin-top:18px}
@@ -676,6 +680,42 @@ window.addEventListener("scroll",()=>{
   moved=(Math.sign(dy)===Math.sign(moved))?moved+dy:dy;
   if(moved>24)setSlim(true);else if(moved<-24)setSlim(false);
 },{passive:true});
+// ---- 詳細などのシートを、一番上までスクロールしたあとさらに下へ引っぱると閉じる ----
+let sd=null;
+$("sheetRoot").addEventListener("touchstart",ev=>{
+  const sheet=ev.target.closest(".sheet");sd=null;
+  // 一番上にいる状態で始めた指の動きだけ(スクロールの勢いのまま閉じてしまわないように)
+  if(!sheet||ev.touches.length>1||sheet.scrollTop>0)return;
+  sd={sheet,x:ev.touches[0].clientX,y:ev.touches[0].clientY,base:null,dy:0,t:0,on:false,axis:null};
+},{passive:true});
+$("sheetRoot").addEventListener("touchmove",ev=>{
+  if(!sd)return;
+  const x=ev.touches[0].clientX,y=ev.touches[0].clientY;
+  if(!sd.axis){if(Math.hypot(x-sd.x,y-sd.y)<LOCK)return;sd.axis=Math.abs(y-sd.y)>Math.abs(x-sd.x)?"y":"x"}
+  if(sd.axis!=="y"){sd=null;return}
+  if(!sd.on){
+    if(sd.sheet.scrollTop>0||y<=sd.y){sd=null;return}  // 上向き(中身のスクロール)はふつうに任せる
+    sd.base=y;
+    sd.on=true;sd.sheet.classList.add("drag");sd.sheet.classList.remove("back");
+  }
+  if(ev.cancelable)ev.preventDefault();
+  const prev=sd.dy;sd.dy=Math.max(0,y-sd.base);sd.v=(sd.dy-prev);sd.t=Date.now();
+  sd.sheet.style.transform=`translateY(${sd.dy}px)`;
+  const scrim=$("sheetRoot").querySelector(".scrim");if(scrim)scrim.style.opacity=String(Math.max(0,1-sd.dy/sd.sheet.offsetHeight));
+},{passive:false});
+function sheetDragEnd(cancel){
+  const d=sd;sd=null;if(!d||!d.on)return;
+  const scrim=$("sheetRoot").querySelector(".scrim");
+  if(!cancel&&(d.dy>Math.min(140,d.sheet.offsetHeight*.25)||(d.v>6&&d.dy>40))){
+    d.sheet.classList.add("out");if(scrim){scrim.classList.add("fade");scrim.style.opacity="0"}
+    setTimeout(closeSheet,220);
+  }else{
+    d.sheet.classList.add("back");d.sheet.style.transform="";if(scrim){scrim.classList.add("fade");scrim.style.opacity=""}
+    setTimeout(()=>{d.sheet.classList.remove("back","drag");scrim&&scrim.classList.remove("fade")},230);
+  }
+}
+$("sheetRoot").addEventListener("touchend",()=>sheetDragEnd(false));
+$("sheetRoot").addEventListener("touchcancel",()=>sheetDragEnd(true));
 // ---- 引っぱって再読み込み(一番上にいるときだけ。開いている詳細や画像の上では動かない) ----
 const PTR_GO=64;let ptr=null,ptrBusy=false;
 function ptrShow(h,txt){const el=$("ptr");el.classList.toggle("back",h===0||txt==="busy");el.style.height=`${h}px`;
