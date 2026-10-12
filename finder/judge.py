@@ -163,7 +163,7 @@ def _call_claude(s, api_key, model, prompt):
     # 決まった形で返させるため、結果を「道具」の引数として出させる。
     tool = {"name": "submit_results", "description": "読み取った結果を提出する",
             "input_schema": {"type": "object", "properties": {"results": json_schema(SCHEMA)}, "required": ["results"]}}
-    body = {"model": model, "max_tokens": 16000, "temperature": 0, "tools": [tool],
+    body = {"model": model, "max_tokens": 16000, "tools": [tool],  # temperature はこの機種では使えない
             "tool_choice": {"type": "tool", "name": "submit_results"},
             "messages": [{"role": "user", "content": prompt}]}
     headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
