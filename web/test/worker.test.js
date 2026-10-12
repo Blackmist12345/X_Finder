@@ -164,6 +164,17 @@ test("詳細は画像・点数の内訳・関係するアカウントを含む",
   assert.equal(await getCase(db, "999"), null);
 });
 
+test("関係するアカウントは同じ人を 1 回だけ出し、投稿者本人は出さない", async () => {
+  const sql = (q) => db.raw.prepare(q).run();
+  sql(`INSERT INTO post_users (post_id, user_id, role) VALUES ('1', '300', 'reply_to'), ('1', '100', 'reply_to'), ('1', '100', 'mention')`);
+  try {
+    const c = await getCase(db, "1");
+    assert.deepEqual(c.people.map((p) => [p.username, p.role, p.roles]), [["friend", "reply_to", ["reply_to", "mention"]]]);
+  } finally {
+    sql(`DELETE FROM post_users WHERE post_id = '1' AND (role = 'reply_to' OR (user_id = '100' AND role = 'mention'))`);
+  }
+});
+
 test("今月の費用は今月分だけを設定の為替レートで円にする", async () => {
   const s = await getSummary(db);
   assert.equal(s.month_cost_yen, 150);

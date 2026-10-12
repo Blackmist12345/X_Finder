@@ -16,6 +16,7 @@ const SWIPE_CHOICES = ["hold", "delete", "seen", "none"];
 const DEFAULT_SETTINGS = { swipe_right: "hold", swipe_left: "delete" };
 
 // ブラックリストの理由。spam=スパム / false=虚偽の申告 / photographer=被写体ではなくカメラマンだった / other=その他
+const ROLE_ORDER = ["reply_to", "quoted", "mention"];
 const BLACKLIST_REASONS = ["spam", "false", "photographer", "other"];
 const BLACKLIST_SKIP = "ブラックリスト"; // 判定前のポストに付ける除外理由(finder/store.py と同じ)
 const NOT_BLACKLISTED = "NOT EXISTS (SELECT 1 FROM blacklist b WHERE b.user_id = p.author_id)";
@@ -126,6 +127,19 @@ export async function getCase(db, id) {
     )
     .bind(id)
     .all();
+  // 同じ人が「リプライ先」と「メンション」の両方で入っていることがある(リプライには相手の @ が自動で付く)ので 1 人にまとめる。
+  // 投稿者本人(自分のポストへのリプライなど)は「クライアント」に出ているので外す。
+  const merged = new Map();
+  for (const p of people) {
+    if (p.id === row.author_id) continue;
+    const m = merged.get(p.id);
+    if (m) m.roles.push(p.role);
+    else merged.set(p.id, { ...p, roles: [p.role] });
+  }
+  for (const m of merged.values()) {
+    m.roles.sort((a, b) => ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b));
+    m.role = m.roles[0];
+  }
   const black = await db.prepare("SELECT reason, note, added_at FROM blacklist WHERE user_id = ?").bind(row.author_id).first();
   const { media_json, score_json, ...rest } = row;
   return {
@@ -134,7 +148,7 @@ export async function getCase(db, id) {
     near: NEAR.includes(row.prefecture),
     media: parseJson(media_json, []),
     score_detail: parseJson(score_json, []),
-    people,
+    people: [...merged.values()],
     blacklist: black || null,
   };
 }
