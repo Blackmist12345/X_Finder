@@ -131,6 +131,7 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .swipe-bg{visibility:hidden;position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-weight:700;font-size:14px;color:#fff;background:var(--muted);border-radius:var(--r)}
 .swipe-bg.hold{background:var(--warn)} .swipe-bg.delete{background:var(--rec)} .swipe-bg.seen{background:var(--ok)}
 .swipe-bg.toR,.swipe-bg.toL{visibility:visible}
+.swipe-bg{opacity:.55;transition:opacity .12s} .swipe-bg.ready{opacity:1}
 .swipe-bg .l,.swipe-bg .r{opacity:0} .swipe-bg.toR .l,.swipe-bg.toL .r{opacity:1}
 .swipe .card{position:relative;touch-action:pan-y}
 .swipe .card.dragging{will-change:transform}
@@ -159,6 +160,7 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 /* 画像を X Finder の中で大きく見る。左右スワイプで次の画像、× か画像の外をタップで閉じる */
 .viewer{position:fixed;inset:0;z-index:40;background:#000;display:flex;flex-direction:column}
 .viewer[hidden]{display:none}
+.viewer .vhint{font-family:var(--font-body);font-size:12px;color:rgba(255,255,255,.6)}
 .viewer .vbar{display:flex;justify-content:space-between;align-items:center;padding:calc(10px + env(safe-area-inset-top,0px)) 12px 10px;color:#fff;font-family:var(--font-num);font-size:16px}
 .viewer .vclose{border:0;background:rgba(255,255,255,.16);color:#fff;width:40px;height:40px;border-radius:50%;font-size:22px;line-height:40px;cursor:pointer}
 .viewer .strip{flex:1;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior:contain}
@@ -206,7 +208,7 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 <div id="sheetRoot" hidden></div>
 <div class="toast" id="toast" role="status" hidden></div>
 <div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="画像" hidden>
-  <div class="vbar"><span id="vcount"></span><button class="vclose" id="vclose" aria-label="閉じる">×</button></div>
+  <div class="vbar"><span id="vcount"></span><span class="vhint">上下にスワイプで閉じる</span><button class="vclose" id="vclose" aria-label="閉じる">×</button></div>
   <div class="strip" id="strip"></div>
 </div>
 
@@ -381,40 +383,59 @@ function swipeTarget(c,dir){
   if(c.review===want)return want==="seen"?null:{state:"seen",label:`${SWIPE_LABEL[want]}を外す`,cls:"seen"};
   return {state:want,label:SWIPE_LABEL[want],cls:want};
 }
+// カードの横スワイプ。指の動き始めで縦か横かを1回だけ決め、そのジェスチャーの間は変えない。
+// 横に決まったら画面のスクロールを止め、縦に決まったらスワイプはしない(斜めの動きで両方が動かないように)
 let drag=null,suppressClick=false;
-document.addEventListener("pointerdown",ev=>{
-  const card=ev.target.closest(".swipe .card");if(!card||ev.button>0)return;
-  drag={card,x:ev.clientX,y:ev.clientY,dx:0,on:false,id:ev.pointerId};
-});
-document.addEventListener("pointermove",ev=>{
-  if(!drag||ev.pointerId!==drag.id)return;
-  const dx=ev.clientX-drag.x,dy=ev.clientY-drag.y;
-  if(!drag.on){
-    if(Math.abs(dy)>10&&Math.abs(dy)>Math.abs(dx)){drag=null;return}
-    if(Math.abs(dx)<12)return;
-    drag.on=true;drag.card.classList.add("dragging");try{drag.card.setPointerCapture(ev.pointerId)}catch(e){}
+const LOCK=10;  // この距離(px)動いたら向きを決める
+function startDrag(card,x,y){drag={card,x,y,dx:0,axis:null}}
+function moveDrag(x,y){
+  if(!drag)return false;
+  const dx=x-drag.x,dy=y-drag.y;
+  if(!drag.axis){
+    if(Math.hypot(dx,dy)<LOCK)return false;
+    // 横は、横の動きが縦の1.5倍を超えたときだけ。迷う角度はスクロールを優先
+    if(Math.abs(dx)>Math.abs(dy)*1.5){drag.axis="x";drag.x=x;drag.card.classList.add("dragging")}
+    else{drag=null;return false}
   }
-  drag.dx=dx;
-  const c=cases.find(x=>x.id===drag.card.dataset.id);const t=c&&swipeTarget(c,dx);
-  const bg=drag.card.previousElementSibling;
-  bg.className=`swipe-bg ${t?t.cls:""} ${dx>0?"toR":"toL"}`;
-  bg.querySelector(dx>0?".l":".r").textContent=t?t.label:"設定なし";
-  drag.card.style.transform=`translateX(${t?dx:dx/4}px)`;
-});
-function endDrag(ev){
-  if(!drag||ev.pointerId!==drag.id)return;
-  const d=drag;drag=null;if(!d.on)return;
-  suppressClick=true;setTimeout(()=>suppressClick=false,50);
+  drag.dx=x-drag.x;
+  const c=cases.find(v=>v.id===drag.card.dataset.id);const t=c&&swipeTarget(c,drag.dx);
+  const bg=drag.card.previousElementSibling;const far=Math.abs(drag.dx)>swipeFar(drag.card);
+  bg.className=`swipe-bg ${t?t.cls:""} ${drag.dx>0?"toR":"toL"} ${t&&far?"ready":""}`;
+  bg.querySelector(drag.dx>0?".l":".r").textContent=t?(far?`離すと${t.label}`:t.label):"設定なし";
+  drag.card.style.transform=`translateX(${t?drag.dx:drag.dx/4}px)`;
+  return true;
+}
+const swipeFar=card=>Math.min(110,card.offsetWidth*.3);
+function endDrag(commit){
+  const d=drag;drag=null;if(!d||!d.axis)return;
+  suppressClick=true;setTimeout(()=>suppressClick=false,80);
   const c=cases.find(x=>x.id===d.card.dataset.id);const t=c&&swipeTarget(c,d.dx);
-  const far=Math.abs(d.dx)>Math.min(110,d.card.offsetWidth*.3);
   d.card.classList.add("snap");
-  if(t&&far&&ev.type==="pointerup"){
+  if(t&&commit&&Math.abs(d.dx)>swipeFar(d.card)){
     d.card.style.transform=`translateX(${d.dx>0?"":"-"}110%)`;
     setTimeout(()=>applySwipe(c,t),180);
   }else{d.card.style.transform="";setTimeout(()=>{d.card.classList.remove("snap","dragging");d.card.previousElementSibling.className="swipe-bg"},220)}
 }
-document.addEventListener("pointerup",endDrag);
-document.addEventListener("pointercancel",endDrag);
+// スマホ(タッチ)
+document.addEventListener("touchstart",ev=>{
+  const card=ev.target.closest(".swipe .card");
+  if(!card||ev.touches.length>1){drag=null;return}
+  startDrag(card,ev.touches[0].clientX,ev.touches[0].clientY);
+},{passive:true});
+document.addEventListener("touchmove",ev=>{
+  if(!drag)return;
+  if(ev.touches.length>1){endDrag(false);return}
+  if(moveDrag(ev.touches[0].clientX,ev.touches[0].clientY)&&ev.cancelable)ev.preventDefault();
+},{passive:false});
+document.addEventListener("touchend",()=>endDrag(true));
+document.addEventListener("touchcancel",()=>endDrag(false));
+// パソコン(マウス)
+document.addEventListener("pointerdown",ev=>{
+  if(ev.pointerType!=="mouse"||ev.button>0)return;
+  const card=ev.target.closest(".swipe .card");if(card)startDrag(card,ev.clientX,ev.clientY);
+});
+document.addEventListener("pointermove",ev=>{if(ev.pointerType==="mouse")moveDrag(ev.clientX,ev.clientY)});
+document.addEventListener("pointerup",ev=>{if(ev.pointerType==="mouse")endDrag(true)});
 async function applySwipe(c,t){
   const prev=c.review;setLocalReview(c.id,t.state);render();
   try{await postReview(c.id,{state:t.state});showToast(`${t.label}にしました`,async()=>{setLocalReview(c.id,prev);render();try{await postReview(c.id,{state:prev})}catch(e){load()}})}
@@ -535,6 +556,38 @@ document.addEventListener("keydown",e=>{
 $("strip").addEventListener("scroll",updateCount,{passive:true});
 // 画像でも外でも、タップで元の画面(詳細)に戻る。下の詳細にタップが届かないよう、閉じるのは少し後
 $("viewer").addEventListener("click",e=>{e.stopPropagation();e.preventDefault();setTimeout(closeViewer,60)});
+// 画像を上か下にスワイプしても閉じる。横の動きは画像送りに任せる
+let vdrag=null;
+$("viewer").addEventListener("touchstart",ev=>{
+  if(ev.touches.length>1){vdrag=null;return}
+  vdrag={x:ev.touches[0].clientX,y:ev.touches[0].clientY,dy:0,axis:null,t:Date.now()};
+},{passive:true});
+$("viewer").addEventListener("touchmove",ev=>{
+  if(!vdrag)return;
+  if(ev.touches.length>1){vdrag=null;resetViewerDrag();return}
+  const dx=ev.touches[0].clientX-vdrag.x,dy=ev.touches[0].clientY-vdrag.y;
+  if(!vdrag.axis){
+    if(Math.hypot(dx,dy)<LOCK)return;
+    vdrag.axis=Math.abs(dy)>Math.abs(dx)?"y":"x";
+    if(vdrag.axis==="x"){vdrag=null;return}
+    vdrag.y=ev.touches[0].clientY;
+  }
+  if(ev.cancelable)ev.preventDefault();
+  vdrag.dy=ev.touches[0].clientY-vdrag.y;
+  const strip=$("strip");strip.style.transition="none";strip.style.transform=`translateY(${vdrag.dy}px)`;
+  $("viewer").style.background=`rgba(0,0,0,${Math.max(.25,1-Math.abs(vdrag.dy)/400)})`;
+},{passive:false});
+function resetViewerDrag(){const strip=$("strip");strip.style.transition="transform .2s";strip.style.transform="";$("viewer").style.background=""}
+$("viewer").addEventListener("touchend",ev=>{
+  const d=vdrag;vdrag=null;if(!d||d.axis!=="y")return;
+  ev.preventDefault();  // このあとのタップ扱い(click)を出さない
+  const fast=Math.abs(d.dy)/Math.max(1,Date.now()-d.t)>.5;
+  if(Math.abs(d.dy)>90||(fast&&Math.abs(d.dy)>30)){
+    const strip=$("strip");strip.style.transition="transform .18s";strip.style.transform=`translateY(${d.dy>0?"":"-"}100%)`;
+    setTimeout(()=>{closeViewer();strip.style.transition="";strip.style.transform="";$("viewer").style.background=""},180);
+  }else resetViewerDrag();
+});
+$("viewer").addEventListener("touchcancel",()=>{vdrag=null;resetViewerDrag()});
 $("sort").addEventListener("change",e=>{state.sort=e.target.value;save();render()});
 $("reload").addEventListener("click",load);
 $("openSettings").addEventListener("click",openSettings);
