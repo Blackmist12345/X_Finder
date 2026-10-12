@@ -195,7 +195,8 @@ header.top.slim .tab .c{font-size:17px}
 .scrim{position:fixed;inset:0;background:rgba(10,14,20,.45);z-index:20;touch-action:none}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:21;background:var(--surface);border-radius:20px 20px 0 0;max-height:88%;overflow-y:auto;overscroll-behavior:none;-webkit-overflow-scrolling:touch;padding:8px 16px calc(24px + env(safe-area-inset-bottom,0px));max-width:560px;margin:0 auto;box-shadow:0 -8px 30px rgba(0,0,0,.18)}
 @media (prefers-reduced-motion:no-preference){.sheet{animation:up .22s ease-out}@keyframes up{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}}}
-.sheet.drag{animation:none}
+/* 一度でも引っぱったシートは、開くときのアニメーションをもう出さない(戻したときに一瞬薄くなるのを防ぐ) */
+.sheet.drag,.sheet.settled{animation:none}
 .sheet.drag{will-change:transform}
 .grab{width:40px;height:4px;border-radius:2px;background:var(--line);margin:4px auto 10px}
 .sheet h2{font-size:18px;margin:6px 0 2px;text-wrap:balance;overflow-wrap:anywhere}
@@ -742,6 +743,9 @@ function setSlim(on){const h=document.querySelector("header.top");if(h.classList
 window.addEventListener("scroll",()=>{
   const y=window.scrollY,dy=y-lastY;lastY=y;
   if(y<=40){setSlim(false);return}
+  // 一番下で勢い余ってはね返る動き(行き過ぎて少し戻る)は、上へのスクロールとして数えない
+  const maxY=document.documentElement.scrollHeight-window.innerHeight;
+  if(y>=maxY-60){moved=0;return}
   if(Date.now()<slimHold)return;
   moved=(Math.sign(dy)===Math.sign(moved))?moved+dy:dy;
   if(moved>24)setSlim(true);else if(moved<-24)setSlim(false);
@@ -791,7 +795,7 @@ function sheetDragEnd(cancel){
   if(d.scrim){d.scrim.style.transition=`opacity ${ms}ms linear`;d.scrim.style.opacity=close?"0":""}
   setTimeout(()=>{
     if(close){closeSheet();return}
-    d.sheet.style.transition="";d.sheet.style.transform="";d.sheet.classList.remove("drag");
+    d.sheet.style.transition="";d.sheet.style.transform="";d.sheet.classList.add("settled");d.sheet.classList.remove("drag");
     if(d.scrim)d.scrim.style.transition="";
   },ms+20);
 }
