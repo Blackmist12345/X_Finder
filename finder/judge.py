@@ -75,6 +75,8 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
 - wants_photographer: 投稿者(引用ポストなら引用元の募集者を含む)が、撮影してくれるカメラマン・撮影者を探していれば true。
   被写体やモデルだけを募集している、カメラマン自身が被写体を探している、募集の締め切り報告・お礼・雑談なら false。
   他人の募集への返信や質問(「まだ募集していますか」「立候補します」など)も false。
+  「撮ってくれる方いませんか」「一緒に撮影に行ってくれる方」「推しカメ募集」のように、言い方が違っても
+  自分を撮影してくれる人を探していれば true。迷う場合は true(見落としの方が困るため)。
 - official_or_job: 企業や公式イベントの撮影スタッフ募集、仕事としての求人なら true。個人どうしの撮影なら false。
 - case_type: 次のどれか1つ。
   コスプレ撮影 = コスプレの写真撮影(併せ・ロケ・スタジオ・イベント会場での個撮を含む)
@@ -161,7 +163,7 @@ def _call_claude(s, api_key, model, prompt):
     # 決まった形で返させるため、結果を「道具」の引数として出させる。
     tool = {"name": "submit_results", "description": "読み取った結果を提出する",
             "input_schema": {"type": "object", "properties": {"results": json_schema(SCHEMA)}, "required": ["results"]}}
-    body = {"model": model, "max_tokens": 16000, "tools": [tool],
+    body = {"model": model, "max_tokens": 16000, "temperature": 0, "tools": [tool],
             "tool_choice": {"type": "tool", "name": "submit_results"},
             "messages": [{"role": "user", "content": prompt}]}
     headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
