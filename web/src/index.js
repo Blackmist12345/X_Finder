@@ -189,6 +189,92 @@ function sameOriginWrite(request, url) {
   return request.headers.get("x-finder") === "1" && (request.headers.get("content-type") || "").startsWith("application/json");
 }
 
+// サマリー画面の数字。日付は日本時間で区切る。
+const JST_DAY = (col) => `date(datetime(substr(${col}, 1, 19), '+9 hours'))`;
+const STATS_DAYS = [7, 30, 90];
+
+function jstDay(offsetDays = 0) {
+  return new Date(Date.now() + 9 * 3600e3 - offsetDays * 864e5).toISOString().slice(0, 10);
+}
+
+function jstMonthStartIso(monthsAgo) {
+  const jst = new Date(Date.now() + 9 * 3600e3);
+  return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth() - monthsAgo, 1) - 9 * 3600e3).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
+export async function getStats(db, params) {
+  const days = STATS_DAYS.includes(Number(params.get("days"))) ? Number(params.get("days")) : 30;
+  const config = parseJson((await db.prepare("SELECT value FROM meta WHERE key = 'config_last_good'").first())?.value, {});
+  const rate = Number((config.basic || {})["為替レート(円/ドル)"]) || 155;
+  const since = new Date(Date.now() - days * 864e5).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+  const all = async (sql, ...binds) => (await db.prepare(sql).bind(...binds).all()).results;
+
+  // 日ごと: 取得ポスト数(runs)、判定数・対象・クリティカル(judgments)、費用(costs)
+  const fetched = await all(`SELECT ${JST_DAY("started_at")} AS d, SUM(fetched) AS fetched, SUM(new_posts) AS new_posts, COUNT(*) AS runs
+    FROM runs WHERE started_at >= ? AND status = 'ok' GROUP BY d`, since);
+  const judged = await all(`SELECT ${JST_DAY("j.judged_at")} AS d, COUNT(*) AS judged,
+      SUM(CASE WHEN j.reject_reason IS NULL THEN 1 ELSE 0 END) AS target, SUM(j.critical) AS critical
+    FROM judgments j WHERE j.judged_at >= ? GROUP BY d`, since);
+  const costs = await all(`SELECT ${JST_DAY("at")} AS d,
+      SUM(CASE WHEN service = 'twitterapi.io' THEN usd ELSE 0 END) AS collect_usd,
+      SUM(CASE WHEN service = 'twitterapi.io' THEN 0 ELSE usd END) AS ai_usd
+    FROM costs WHERE at >= ? GROUP BY d`, since);
+  const byDay = new Map();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = jstDay(i);
+    byDay.set(d, { date: d, fetched: 0, new_posts: 0, judged: 0, target: 0, critical: 0, collect_yen: 0, ai_yen: 0 });
+  }
+  for (const r of fetched) if (byDay.has(r.d)) Object.assign(byDay.get(r.d), { fetched: r.fetched || 0, new_posts: r.new_posts || 0 });
+  for (const r of judged) if (byDay.has(r.d)) Object.assign(byDay.get(r.d), { judged: r.judged || 0, target: r.target || 0, critical: r.critical || 0 });
+  for (const r of costs) if (byDay.has(r.d)) Object.assign(byDay.get(r.d), { collect_yen: (r.collect_usd || 0) * rate, ai_yen: (r.ai_usd || 0) * rate });
+  const daily = [...byDay.values()].map((d) => ({ ...d, collect_yen: Math.round(d.collect_yen * 100) / 100, ai_yen: Math.round(d.ai_yen * 100) / 100 }));
+
+  // 累計(期間に関係なく、これまでの全部)
+  const totals = await db.prepare(`SELECT
+      (SELECT COUNT(*) FROM posts WHERE source = 'search') AS collected,
+      (SELECT COUNT(*) FROM posts WHERE status = 'skipped') AS skipped,
+      (SELECT COUNT(*) FROM judgments) AS judged,
+      (SELECT COUNT(*) FROM judgments WHERE reject_reason IS NULL) AS target,
+      (SELECT COUNT(*) FROM judgments WHERE critical = 1) AS critical,
+      (SELECT COALESCE(SUM(usd), 0) FROM costs) AS usd,
+      (SELECT MIN(started_at) FROM runs) AS first_run`).first();
+  const reviews = await all("SELECT state, COUNT(*) AS n FROM reviews GROUP BY state");
+
+  // 今月と先月の比べ(先月は同じ日付まで)
+  const month = async (from, to) => db.prepare(`SELECT
+      (SELECT COALESCE(SUM(fetched), 0) FROM runs WHERE started_at >= ?1 AND started_at < ?2) AS fetched,
+      (SELECT COUNT(*) FROM judgments WHERE judged_at >= ?1 AND judged_at < ?2) AS judged,
+      (SELECT COUNT(*) FROM judgments WHERE judged_at >= ?1 AND judged_at < ?2 AND reject_reason IS NULL) AS target,
+      (SELECT COUNT(*) FROM judgments WHERE judged_at >= ?1 AND judged_at < ?2 AND critical = 1) AS critical,
+      (SELECT COALESCE(SUM(usd), 0) FROM costs WHERE at >= ?1 AND at < ?2) AS usd`).bind(from, to).first();
+  const now = new Date();
+  const thisStart = jstMonthStartIso(0);
+  const lastStart = jstMonthStartIso(1);
+  const sameDayLast = new Date(Math.min(Date.parse(thisStart), Date.parse(lastStart) + (now - Date.parse(thisStart)))).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+  const toYen = (m) => ({ ...m, yen: Math.round((m.usd || 0) * rate) });
+
+  const types = await all(`SELECT COALESCE(case_type, 'その他') AS k, COUNT(*) AS n FROM judgments
+    WHERE judged_at >= ? AND reject_reason IS NULL GROUP BY k ORDER BY n DESC`, since);
+  const prefs = await all(`SELECT COALESCE(prefecture, '不明') AS k, COUNT(*) AS n FROM judgments
+    WHERE judged_at >= ? AND reject_reason IS NULL GROUP BY k ORDER BY n DESC LIMIT 8`, since);
+  const rejects = await all(`SELECT reject_reason AS k, COUNT(*) AS n FROM judgments
+    WHERE judged_at >= ? AND reject_reason IS NOT NULL GROUP BY k ORDER BY n DESC LIMIT 6`, since);
+
+  return {
+    days,
+    rate,
+    daily,
+    totals: { ...totals, yen: Math.round((totals?.usd || 0) * rate) },
+    reviews: Object.fromEntries(reviews.map((r) => [r.state, r.n])),
+    this_month: toYen(await month(thisStart, "9999")),
+    last_month_same_point: toYen(await month(lastStart, sameDayLast)),
+    last_month_total: toYen(await month(lastStart, thisStart)),
+    types,
+    prefectures: prefs,
+    reject_reasons: rejects,
+  };
+}
+
 export async function getSummary(db) {
   const config = parseJson((await db.prepare("SELECT value FROM meta WHERE key = 'config_last_good'").first())?.value, {});
   const basic = config.basic || {};
@@ -260,6 +346,7 @@ export default {
       if (url.pathname === "/api/cases") return json({ cases: await listCases(env.DB, url.searchParams) });
       if (url.pathname === "/api/summary") return json(await getSummary(env.DB));
       if (url.pathname === "/api/settings") return json(await getSettings(env.DB));
+      if (url.pathname === "/api/stats") return json(await getStats(env.DB, url.searchParams));
       const m = url.pathname.match(/^\/api\/cases\/(\d{1,25})$/);
       if (m) {
         const c = await getCase(env.DB, m[1]);

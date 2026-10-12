@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 
 import { resetCertsCache, verifyAccess } from "../src/auth.js";
-import worker, { getCase, getSettings, getSummary, listCases, saveSettings, setReview } from "../src/index.js";
+import worker, { getCase, getSettings, getStats, getSummary, listCases, saveSettings, setReview } from "../src/index.js";
 import { fakeD1 } from "./fake-d1.js";
 
 const TEAM = "example.cloudflareaccess.com";
@@ -88,6 +88,22 @@ test("確認の状態: 開くと確認済み、保留・削除予定に変えら
   assert.equal(await setReview(db, "1", { state: "unread" }), "unread"); // 元に戻す
   assert.equal((await getCase(db, "1")).review, "unread");
   await assert.rejects(setReview(db, "1", { state: "bad" }), RangeError);
+});
+
+test("サマリー: 日ごとの数・累計・今月と先月の比べ・種類の内訳", async () => {
+  const s = await getStats(db, new URLSearchParams("days=7"));
+  assert.equal(s.days, 7);
+  assert.equal(s.daily.length, 7);
+  const today = s.daily.at(-1);
+  assert.equal(today.judged, 4); // seed の judged_at はすべて今
+  assert.equal(today.target, 3);
+  assert.equal(today.critical, 2);
+  assert.equal(today.ai_yen, 150); // claude $1 × 150円
+  assert.equal(s.totals.collected, 5);
+  assert.equal(s.totals.critical, 2);
+  assert.equal(s.this_month.target, 3);
+  assert.deepEqual(s.types, [{ k: "コスプレ撮影", n: 3 }]);
+  assert.equal((await getStats(db, new URLSearchParams("days=5"))).days, 30); // 決まった期間以外は 30 日
 });
 
 test("スワイプの設定は初期値があり、変えると保存される", async () => {
