@@ -1,12 +1,16 @@
 // N13 ファインダー: D1 にたまった判定・採点の結果を、スマホで見るための Web ページ。
-// D1 は読むだけ。ただし案件カードの確認の状態(未確認 / 確認済み / 保留 / 削除予定)だけは書く。
+// D1 は読むだけ。ただし案件カードの確認の状態(未確認 / 確認済み / 保留 / 削除予定)と、画面の設定だけは書く。
 // Cloudflare Access を通った人だけが見られる(auth.js)。
 import { verifyAccess } from "./auth.js";
 import page from "./page.html";
 
 const NEAR = ["東京都", "神奈川県", "埼玉県", "千葉県"];
 const MAX_LIST = 300;
-const REVIEW_STATES = ["seen", "hold", "delete"]; // 行がなければ未確認(unread)
+const REVIEW_STATES = ["seen", "hold", "delete", "unread"]; // 行がなければ未確認(unread)。unread は「元に戻す」用
+// 画面の設定(D1 の meta に保存するので、スマホでも PC でも同じになる)。スワイプで付ける状態。none は何もしない
+const SETTINGS_KEY = "finder_settings";
+const SWIPE_CHOICES = ["hold", "delete", "seen", "none"];
+const DEFAULT_SETTINGS = { swipe_right: "hold", swipe_left: "delete" };
 
 // 収集の実行(schema.sql)より先に画面が使われても困らないよう、確認の状態の表はここでも作る
 const REVIEWS_DDL = `CREATE TABLE IF NOT EXISTS reviews (
@@ -121,6 +125,10 @@ export async function setReview(db, id, { state, opened }) {
       .run();
   } else {
     if (!REVIEW_STATES.includes(state)) throw new RangeError("state");
+    if (state === "unread") {
+      await db.prepare("DELETE FROM reviews WHERE post_id = ?").bind(id).run();
+      return "unread";
+    }
     await db
       .prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES (?, ?, ?, ?)
                 ON CONFLICT(post_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`)
@@ -129,6 +137,29 @@ export async function setReview(db, id, { state, opened }) {
   }
   const row = await db.prepare("SELECT state FROM reviews WHERE post_id = ?").bind(id).first();
   return row?.state || "unread";
+}
+
+export async function getSettings(db) {
+  const row = await db.prepare("SELECT value FROM meta WHERE key = ?").bind(SETTINGS_KEY).first();
+  const saved = parseJson(row?.value, {});
+  const out = { ...DEFAULT_SETTINGS };
+  for (const k of Object.keys(DEFAULT_SETTINGS)) if (SWIPE_CHOICES.includes(saved[k])) out[k] = saved[k];
+  return out;
+}
+
+export async function saveSettings(db, body) {
+  const next = await getSettings(db);
+  for (const k of Object.keys(DEFAULT_SETTINGS)) {
+    if (body[k] === undefined) continue;
+    if (!SWIPE_CHOICES.includes(body[k])) throw new RangeError(k);
+    next[k] = body[k];
+  }
+  await db
+    .prepare(`INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?)
+              ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
+    .bind(SETTINGS_KEY, JSON.stringify(next), nowIso())
+    .run();
+  return next;
 }
 
 // 画面の fetch からだけ書けるようにする(よそのサイトからのフォーム送信を受け付けない)
@@ -169,6 +200,16 @@ export default {
     }
 
     const url = new URL(request.url);
+    if (url.pathname === "/api/settings" && request.method === "POST") {
+      if (!sameOriginWrite(request, url)) return text("このページからだけ変更できます。", 403);
+      try {
+        return json(await saveSettings(env.DB, await request.json().catch(() => ({}))));
+      } catch (e) {
+        if (e instanceof RangeError) return json({ error: "設定の値が正しくありません" }, 400);
+        console.error(e);
+        return json({ error: "保存できませんでした" }, 500);
+      }
+    }
     const write = url.pathname.match(/^\/api\/cases\/(\d{1,25})\/review$/);
     if (write) {
       if (request.method !== "POST") return text("POST だけ使えます。", 405);
@@ -192,6 +233,7 @@ export default {
       }
       if (url.pathname === "/api/cases") return json({ cases: await listCases(env.DB, url.searchParams) });
       if (url.pathname === "/api/summary") return json(await getSummary(env.DB));
+      if (url.pathname === "/api/settings") return json(await getSettings(env.DB));
       const m = url.pathname.match(/^\/api\/cases\/(\d{1,25})$/);
       if (m) {
         const c = await getCase(env.DB, m[1]);

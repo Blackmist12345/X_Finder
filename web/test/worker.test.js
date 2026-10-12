@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 
 import { resetCertsCache, verifyAccess } from "../src/auth.js";
-import worker, { getCase, getSummary, listCases, setReview } from "../src/index.js";
+import worker, { getCase, getSettings, getSummary, listCases, saveSettings, setReview } from "../src/index.js";
 import { fakeD1 } from "./fake-d1.js";
 
 const TEAM = "example.cloudflareaccess.com";
@@ -85,7 +85,16 @@ test("確認の状態: 開くと確認済み、保留・削除予定に変えら
   assert.deepEqual(cases.map((c) => [c.id, c.review]), [["4", "hold"], ["2", "delete"], ["1", "seen"]]);
   assert.equal((await getCase(db, "4")).review, "hold");
   assert.equal(await setReview(db, "999", { state: "hold" }), null);
-  await assert.rejects(setReview(db, "1", { state: "unread" }), RangeError);
+  assert.equal(await setReview(db, "1", { state: "unread" }), "unread"); // 元に戻す
+  assert.equal((await getCase(db, "1")).review, "unread");
+  await assert.rejects(setReview(db, "1", { state: "bad" }), RangeError);
+});
+
+test("スワイプの設定は初期値があり、変えると保存される", async () => {
+  assert.deepEqual(await getSettings(db), { swipe_right: "hold", swipe_left: "delete" });
+  assert.deepEqual(await saveSettings(db, { swipe_left: "seen" }), { swipe_right: "hold", swipe_left: "seen" });
+  assert.deepEqual(await getSettings(db), { swipe_right: "hold", swipe_left: "seen" });
+  await assert.rejects(saveSettings(db, { swipe_right: "unread" }), RangeError);
 });
 
 test("対象外の一覧も見られる", async () => {
@@ -157,6 +166,12 @@ test("Access を通れば画面と API が返る", async () => {
     assert.equal((await post({ state: "seen" }, { "x-finder": "" })).status, 403);
     assert.equal((await post({ state: "seen" }, { origin: "https://evil.example" })).status, 403);
     assert.equal((await worker.fetch(req("/api/cases/1/review", token), env)).status, 405);
+    const setting = await worker.fetch(new Request("https://x-finder.example.workers.dev/api/settings", {
+      method: "POST", body: JSON.stringify({ swipe_right: "none" }),
+      headers: { "cf-access-jwt-assertion": token, "content-type": "application/json", "x-finder": "1" },
+    }), env);
+    assert.equal((await setting.json()).swipe_right, "none");
+    assert.equal((await (await worker.fetch(req("/api/settings", token), env)).json()).swipe_right, "none");
   } finally {
     globalThis.fetch = realFetch;
   }

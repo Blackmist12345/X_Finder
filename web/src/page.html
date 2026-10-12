@@ -82,6 +82,19 @@ select{font:inherit;font-size:13px;border:1px solid var(--line);background:var(-
 .btn.on{background:var(--fg);border-color:var(--fg);color:var(--bg)}
 .btn.danger.on{background:var(--rec);border-color:var(--rec);color:#fff}
 .btn:disabled{opacity:.6;cursor:default}
+.swipe{position:relative;border-radius:var(--r);overflow:hidden}
+.swipe-bg{position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-weight:700;font-size:14px;color:#fff;background:var(--muted);border-radius:var(--r)}
+.swipe-bg.hold{background:var(--accent)} .swipe-bg.delete{background:var(--rec)} .swipe-bg.seen{background:var(--ok)}
+.swipe-bg .l,.swipe-bg .r{opacity:0} .swipe-bg.toR .l,.swipe-bg.toL .r{opacity:1}
+.swipe .card{position:relative;touch-action:pan-y;will-change:transform}
+.swipe .card.snap{transition:transform .2s ease-out}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:30;background:var(--fg);color:var(--bg);border-radius:12px;padding:10px 12px 10px 14px;display:flex;width:max-content;gap:14px;align-items:center;font-size:14px;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:calc(100% - 32px)}
+.toast[hidden]{display:none}
+.toast span{min-width:0}
+.toast button{white-space:nowrap;flex:none;border:0;background:transparent;color:var(--accent);font:inherit;font-weight:700;cursor:pointer;padding:4px}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .toast button{color:#2b54d6}}
+.setting{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.setting select{font-size:15px;padding:8px}
 .empty{text-align:center;color:var(--muted);padding:40px 0}
 .scrim{position:fixed;inset:0;background:rgba(10,14,20,.45);z-index:20}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:21;background:var(--surface);border-radius:20px 20px 0 0;max-height:88%;overflow-y:auto;padding:8px 16px calc(24px + env(safe-area-inset-bottom,0px));max-width:560px;margin:0 auto;box-shadow:0 -8px 30px rgba(0,0,0,.18)}
@@ -125,12 +138,14 @@ select{font:inherit;font-size:13px;border:1px solid var(--line);background:var(-
         <option value="followers">フォロワー数順</option>
       </select>
       <button class="icon-btn" id="reload" aria-label="最新にする" title="最新にする">↻</button>
+      <button class="icon-btn" id="openSettings" aria-label="設定" title="設定">⚙</button>
     </div>
   </header>
   <p class="note" id="status" hidden></p>
   <div class="list" id="list"></div>
 </div>
 <div id="sheetRoot" hidden></div>
+<div class="toast" id="toast" role="status" hidden></div>
 
 <script>
 const PRESETS=[{k:"all",t:"すべて"},{k:"crit",t:"クリティカル"},{k:"near",t:"首都圏"},{k:"rejected",t:"対象外(確認用)",cls:"warn"}];
@@ -139,6 +154,9 @@ const ROLE={mention:"メンション",quoted:"引用元の投稿者",reply_to:"�
 // 確認の状態。未確認=一度も開いていない / 確認済み=開いた / 保留=ピン留め / 削除予定=投稿日から14日で消える
 const TABS=[{k:"unread",t:"未確認"},{k:"seen",t:"確認済み"},{k:"hold",t:"保留"},{k:"delete",t:"削除予定"}];
 const DELETE_DAYS=14;
+// 左右のスワイプで付ける状態(⚙ の設定で変えられる。保存先は D1 なので、どの端末でも同じ)
+const SWIPE_LABEL={hold:"📌 保留",delete:"削除予定",seen:"確認済み",none:"何もしない"};
+let settings={swipe_right:"hold",swipe_left:"delete"};
 let state={preset:"all",types:new Set(),sort:"score",tab:"unread"};
 let cases=[],loadedView=null;
 try{const s=JSON.parse(localStorage.getItem("finder-ui")||"null");if(s){state.preset=s.preset||"all";state.sort=s.sort||"score";state.types=new Set(s.types||[]);state.tab=TABS.some(t=>t.k===s.tab)?s.tab:"unread"}}catch(e){}
@@ -155,6 +173,9 @@ function ava(u){const img=safeImg(u.profile_image);const ch=esc((u.name||u.usern
   return img?`<img class="ava" src="${esc(img)}" alt="" loading="lazy" referrerpolicy="no-referrer">`:`<span class="ava">${ch}</span>`}
 
 async function api(path){const r=await fetch(path,{credentials:"same-origin"});if(!r.ok)throw new Error(`${r.status}`);return r.json()}
+async function postJson(path,body){
+  const r=await fetch(path,{method:"POST",credentials:"same-origin",headers:{"content-type":"application/json","x-finder":"1"},body:JSON.stringify(body)});
+  if(!r.ok)throw new Error(`${r.status}`);return r.json()}
 async function postReview(id,body){
   const r=await fetch(`/api/cases/${encodeURIComponent(id)}/review`,{method:"POST",credentials:"same-origin",
     headers:{"content-type":"application/json","x-finder":"1"},body:JSON.stringify(body)});
@@ -170,8 +191,8 @@ async function load(){
   const view=state.preset==="rejected"?"rejected":"judged";
   $("count").textContent="読み込み中…";
   try{
-    const [list,sum]=await Promise.all([api(`/api/cases?view=${view}`),api("/api/summary")]);
-    cases=list.cases;loadedView=view;
+    const [list,sum,set]=await Promise.all([api(`/api/cases?view=${view}`),api("/api/summary"),api("/api/settings").catch(()=>null)]);
+    cases=list.cases;loadedView=view;if(set)settings=set;
     $("cost").innerHTML=`今月 <b>¥${fmt(sum.month_cost_yen)}</b> / ¥${fmt(sum.goal_yen)}`;
     const st=$("status");
     const parts=[];
@@ -214,7 +235,7 @@ function render(){
 function place(c){return c.prefecture&&c.prefecture!=="不明"?c.prefecture:"場所不明"}
 function card(c){
   const rejected=state.preset==="rejected";
-  return `<button class="card ${c.critical?"crit":""} ${c.review==="unread"?"unread":""}" data-id="${esc(c.id)}">
+  return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card ${c.critical?"crit":""} ${c.review==="unread"?"unread":""}" data-id="${esc(c.id)}">
    <div class="meta">${reviewPill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(place(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
    <div class="score">${rejected?"":`<span class="n">${c.score==null?"—":Math.round(c.score)}</span><span class="l">点</span>`}</div>
    <div class="title">${esc(c.summary||"(要約なし)")}</div>
@@ -223,7 +244,7 @@ function card(c){
    <div class="client">${ava(c)}
     <span class="who">${esc(c.name||"")} <span class="sub">@${esc(c.username||"")}</span>${c.others?` <span class="sub">ほか${c.others}人</span>`:""}</span>
     <span class="ff"><span class="num">${ffText(c)}</span><small>FF率</small></span></div>
-  </button>`;
+  </button></div>`;
 }
 function person(p){
   return `<div class="person">${ava(p)}<div class="who"><div>${esc(p.name||p.username||"")} <span class="sub">${ROLE[p.role]||""}</span></div>
@@ -267,6 +288,77 @@ async function changeReview(btn){
     if(meta){meta.querySelectorAll(".pill.hold,.pill.del").forEach(e=>e.remove());if(c)meta.insertAdjacentHTML("afterbegin",reviewPill(c))}
   }catch(e){box.querySelectorAll("button").forEach(b=>b.disabled=false);alert(`保存できませんでした(${e.message})`)}
 }
+// ---- スワイプ ----
+// 設定の状態をすでに付けているカードをスワイプしたら、その状態を外して確認済みに戻す
+function swipeTarget(c,dir){
+  const want=settings[dir>0?"swipe_right":"swipe_left"];
+  if(!want||want==="none")return null;
+  if(c.review===want)return want==="seen"?null:{state:"seen",label:`${SWIPE_LABEL[want]}を外す`,cls:"seen"};
+  return {state:want,label:SWIPE_LABEL[want],cls:want};
+}
+let drag=null,suppressClick=false;
+document.addEventListener("pointerdown",ev=>{
+  const card=ev.target.closest(".swipe .card");if(!card||ev.button>0)return;
+  drag={card,x:ev.clientX,y:ev.clientY,dx:0,on:false,id:ev.pointerId};
+});
+document.addEventListener("pointermove",ev=>{
+  if(!drag||ev.pointerId!==drag.id)return;
+  const dx=ev.clientX-drag.x,dy=ev.clientY-drag.y;
+  if(!drag.on){
+    if(Math.abs(dy)>10&&Math.abs(dy)>Math.abs(dx)){drag=null;return}
+    if(Math.abs(dx)<12)return;
+    drag.on=true;try{drag.card.setPointerCapture(ev.pointerId)}catch(e){}
+  }
+  drag.dx=dx;
+  const c=cases.find(x=>x.id===drag.card.dataset.id);const t=c&&swipeTarget(c,dx);
+  const bg=drag.card.previousElementSibling;
+  bg.className=`swipe-bg ${t?t.cls:""} ${dx>0?"toR":"toL"}`;
+  bg.querySelector(dx>0?".l":".r").textContent=t?t.label:"設定なし";
+  drag.card.style.transform=`translateX(${t?dx:dx/4}px)`;
+});
+function endDrag(ev){
+  if(!drag||ev.pointerId!==drag.id)return;
+  const d=drag;drag=null;if(!d.on)return;
+  suppressClick=true;setTimeout(()=>suppressClick=false,50);
+  const c=cases.find(x=>x.id===d.card.dataset.id);const t=c&&swipeTarget(c,d.dx);
+  const far=Math.abs(d.dx)>Math.min(110,d.card.offsetWidth*.3);
+  d.card.classList.add("snap");
+  if(t&&far&&ev.type==="pointerup"){
+    d.card.style.transform=`translateX(${d.dx>0?"":"-"}110%)`;
+    setTimeout(()=>applySwipe(c,t),180);
+  }else{d.card.style.transform="";setTimeout(()=>d.card.classList.remove("snap"),220)}
+}
+document.addEventListener("pointerup",endDrag);
+document.addEventListener("pointercancel",endDrag);
+async function applySwipe(c,t){
+  const prev=c.review;setLocalReview(c.id,t.state);render();
+  try{await postReview(c.id,{state:t.state});showToast(`${t.label}にしました`,async()=>{setLocalReview(c.id,prev);render();try{await postReview(c.id,{state:prev})}catch(e){load()}})}
+  catch(e){setLocalReview(c.id,prev);render();showToast(`保存できませんでした(${e.message})`)}
+}
+let toastTimer=null;
+function showToast(msg,undo){
+  const el=$("toast");el.innerHTML=`<span>${esc(msg)}</span>${undo?'<button type="button" id="undo">元に戻す</button>':""}`;el.hidden=false;
+  if(undo)$("undo").onclick=()=>{el.hidden=true;undo()};
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.hidden=true,5000);
+}
+// ---- 設定 ----
+function openSettings(){
+  const opt=v=>["hold","delete","seen","none"].map(k=>`<option value="${k}" ${v===k?"selected":""}>${SWIPE_LABEL[k]}</option>`).join("");
+  $("sheetRoot").innerHTML=`<div class="scrim" data-close="1"></div><div class="sheet" role="dialog" aria-modal="true" aria-label="設定"><div class="grab"></div>
+   <h2>設定</h2><p class="sub">カードを左右にスワイプしたときに付ける状態です。その状態のカードをもう一度同じ向きにスワイプすると外れて、確認済みに戻ります。</p>
+   <label class="setting"><span>右にスワイプ →</span><select id="swR">${opt(settings.swipe_right)}</select></label>
+   <label class="setting"><span>← 左にスワイプ</span><select id="swL">${opt(settings.swipe_left)}</select></label>
+   <p class="sub" id="setMsg"></p>
+   <div class="actions"><button class="btn" data-close="1">閉じる</button></div></div>`;
+  $("sheetRoot").hidden=false;document.body.style.overflow="hidden";
+  const onChange=async()=>{
+    const body={swipe_right:$("swR").value,swipe_left:$("swL").value};
+    $("setMsg").textContent="保存中…";
+    try{settings=await postJson("/api/settings",body);$("setMsg").textContent="保存しました"}
+    catch(e){$("setMsg").textContent=`保存できませんでした(${e.message})`}
+  };
+  $("swR").onchange=onChange;$("swL").onchange=onChange;
+}
 function closeSheet(){if($("sheetRoot").hidden)return;$("sheetRoot").hidden=true;$("sheetRoot").innerHTML="";document.body.style.overflow="";render()}
 document.addEventListener("click",ev=>{
   const p=ev.target.closest("[data-p]");if(p){const before=state.preset;state.preset=p.dataset.p;save();
@@ -275,11 +367,12 @@ document.addEventListener("click",ev=>{
   const rv=ev.target.closest("[data-review]");if(rv){changeReview(rv);return}
   const t=ev.target.closest("[data-t]");if(t){const v=t.dataset.t;state.types.has(v)?state.types.delete(v):state.types.add(v);save();render();return}
   if(ev.target.closest("[data-close]")){closeSheet();return}
-  const c=ev.target.closest(".card");if(c)openSheet(c.dataset.id);
+  const c=ev.target.closest(".card");if(c&&!suppressClick)openSheet(c.dataset.id);
 });
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeSheet()});
 $("sort").addEventListener("change",e=>{state.sort=e.target.value;save();render()});
 $("reload").addEventListener("click",load);
+$("openSettings").addEventListener("click",openSettings);
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&$("sheetRoot").hidden)load()});
 renderControls();load();
 </script>
