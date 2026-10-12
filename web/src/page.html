@@ -14,6 +14,19 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#f3f5f8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0e1118" media="(prefers-color-scheme: dark)">
+<script>
+// 画面の色(白/黒/システムに合わせる)はこの端末に保存。描く前に決めて、一瞬ちがう色が出ないようにする
+function applyTheme(t){
+  const r=document.documentElement;
+  if(t==="light"||t==="dark")r.dataset.theme=t;else delete r.dataset.theme;
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m=>{
+    if(t==="light"||t==="dark"){m.content=t==="dark"?"#0e1118":"#f3f5f8";m.removeAttribute("media")}
+    else{const d=m.dataset.dark==="1";m.content=d?"#0e1118":"#f3f5f8";m.media=`(prefers-color-scheme: ${d?"dark":"light"})`}
+  });
+}
+document.querySelectorAll('meta[name="theme-color"]').forEach((m,i)=>{m.dataset.dark=i?"1":"0"});
+try{applyTheme(localStorage.getItem("finder-theme")||"system")}catch(e){}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Barlow+Condensed:wght@500;600;700&display=swap">
@@ -163,6 +176,14 @@ header.top.slim .tab .c{font-size:17px}
 .toast span{min-width:0}
 .toast button{white-space:nowrap;flex:none;border:0;background:transparent;color:var(--accent);font:inherit;font-weight:700;cursor:pointer;padding:4px}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .toast button{color:#2b54d6}}
+:root[data-theme="dark"] .toast button{color:#2b54d6}
+/* 左上の「X Finder」= 設定を開くボタン */
+.brand{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:4px;font-family:var(--font-num);font-size:24px;font-weight:700;letter-spacing:.06em;line-height:1.1;color:var(--fg);-webkit-tap-highlight-color:transparent}
+.brand .chev{font-size:15px;color:var(--muted);transform:translateY(1px)}
+.brand:active{opacity:.6}
+.theme-seg{display:grid;grid-template-columns:1fr 1fr 2fr;gap:4px;background:var(--surface-2);border-radius:12px;padding:4px}
+.theme-seg button{white-space:nowrap;border:0;background:transparent;color:var(--muted);font:inherit;font-size:14px;padding:9px 4px;border-radius:9px;cursor:pointer}
+.theme-seg button.on{background:var(--surface);color:var(--fg);font-weight:700;box-shadow:var(--shadow)}
 /* ブラックリスト */
 .black{margin-top:16px}
 .black:empty{display:none}
@@ -236,7 +257,7 @@ header.top.slim .tab .c{font-size:17px}
 <div class="wrap">
   <header class="top">
     <div class="bar">
-      <div><h1 style="font-family:var(--font-num);font-size:24px;letter-spacing:.06em;line-height:1.1">X Finder</h1><div class="sub" id="count">読み込み中…</div></div>
+      <div><h1 style="margin:0;font-size:inherit"><button type="button" class="brand" id="openSettings" aria-label="設定を開く">X Finder<span class="chev" aria-hidden="true">▾</span></button></h1><div class="sub" id="count">読み込み中…</div></div>
       <button class="cost" id="cost" title="今月の API 費用 / 目標。タップでサマリー" aria-label="サマリーを見る">今月 —</button>
     </div>
     <div class="tabs" id="tabs" role="group" aria-label="確認の状態"></div>
@@ -250,7 +271,6 @@ header.top.slim .tab .c{font-size:17px}
         <option value="ff">FF率順</option>
         <option value="followers">フォロワー数順</option>
       </select>
-      <button class="icon-btn" id="openSettings" aria-label="設定" title="設定">⚙</button>
     </div>
     </div></div>
   </header>
@@ -272,7 +292,7 @@ const ROLE={mention:"メンション",quoted:"引用元の投稿者",reply_to:"�
 // 確認の状態。未確認=一度も開いていない / 確認済み=開いた / 保留=ピン留め / 削除予定=投稿日から14日で消える
 const TABS=[{k:"unread",t:"未確認"},{k:"seen",t:"確認済み"},{k:"hold",t:"保留"},{k:"delete",t:"削除予定"}];
 const DELETE_DAYS=14;
-// 左右のスワイプで付ける状態(⚙ の設定で変えられる。保存先は D1 なので、どの端末でも同じ)
+// 左右のスワイプで付ける状態(左上の「X Finder」から開く設定で変えられる。保存先は D1 なので、どの端末でも同じ)
 const SWIPE_LABEL={hold:"📌 保留",delete:"削除予定",seen:"確認済み",none:"何もしない"};
 let settings={swipe_right:"hold",swipe_left:"delete"};
 let state={preset:"all",types:new Set(),sort:"score",tab:"unread"};
@@ -549,13 +569,22 @@ function showToast(msg,undo){
   clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.hidden=true,5000);
 }
 // ---- 設定 ----
+const THEMES=[["light","白"],["dark","黒"],["system","システムに合わせる"]];
+const curTheme=()=>{try{return localStorage.getItem("finder-theme")||"system"}catch(e){return "system"}};
+function pickTheme(t){
+  try{localStorage.setItem("finder-theme",t)}catch(e){}
+  applyTheme(t);
+  document.querySelectorAll("[data-theme-pick]").forEach(b=>{const on=b.dataset.themePick===t;b.classList.toggle("on",on);b.setAttribute("aria-pressed",on)});
+}
 function openSettings(){
   const opt=v=>["hold","delete","seen","none"].map(k=>`<option value="${k}" ${v===k?"selected":""}>${SWIPE_LABEL[k]}</option>`).join("");
   $("sheetRoot").innerHTML=`<div class="scrim" data-close="1"></div><div class="sheet" role="dialog" aria-modal="true" aria-label="設定"><div class="grab"></div>
-   <h2>設定</h2><p class="sub">カードを左右にスワイプしたときに付ける状態です。その状態のカードをもう一度同じ向きにスワイプすると外れて、確認済みに戻ります。</p>
+   <h2>設定</h2>
+   <div class="sec" style="margin-top:8px"><h3>画面の色</h3><div class="theme-seg" id="themeSeg" role="group" aria-label="画面の色">${THEMES.map(([k,l])=>`<button type="button" data-theme-pick="${k}" class="${curTheme()===k?"on":""}" aria-pressed="${curTheme()===k}">${l}</button>`).join("")}</div></div>
+   <div class="sec"><h3>スワイプ</h3><p class="sub" style="margin-top:0">カードを左右にスワイプしたときに付ける状態です。その状態のカードをもう一度同じ向きにスワイプすると外れて、確認済みに戻ります。</p>
    <label class="setting"><span>右にスワイプ →</span><select id="swR">${opt(settings.swipe_right)}</select></label>
    <label class="setting"><span>← 左にスワイプ</span><select id="swL">${opt(settings.swipe_left)}</select></label>
-   <p class="sub" id="setMsg"></p>
+   <p class="sub" id="setMsg"></p></div>
    <div class="sec"><h3>ブラックリスト</h3><div class="blist" id="blist"><p class="sub" style="margin:0">読み込み中…</p></div></div>
    <div class="sec"><h3>データベース</h3><p class="sub" style="margin:0 0 8px">集めたポスト、AI の判定、ユーザー台帳、費用などの中身を見られます(見るだけで、変更はしません)。</p>
     <button type="button" class="btn" data-db="1" style="width:100%">中身を見る ›</button></div>
@@ -683,6 +712,7 @@ document.addEventListener("click",ev=>{
     $("blackBox").scrollIntoView({behavior:"smooth",block:"nearest"});return}
   if(ev.target.closest("[data-black-cancel]")){$("blackBox").innerHTML="";return}
   const ub=ev.target.closest("[data-unblack]");if(ub){unblack(ub);return}
+  const tp=ev.target.closest("[data-theme-pick]");if(tp){pickTheme(tp.dataset.themePick);return}
   if(ev.target.closest("[data-db]")||ev.target.closest("[data-dbback]")){openDb();return}
   const dbt=ev.target.closest("[data-dbt]");if(dbt){openTable(dbt.dataset.dbt);return}
   const dbm=ev.target.closest("[data-dbmore]");if(dbm){dbm.disabled=true;openTable(dbState.name,dbState.q,Number(dbm.dataset.dbmore));return}
