@@ -92,6 +92,17 @@ CREATE TABLE IF NOT EXISTS user_aliases (
   PRIMARY KEY (alias, user_id)
 );
 
+-- N7 添付画像(メンバー表など)から AI が読み取った X のアカウント。1 ポスト = 1 行。読んだら(0 人でも)行を作り、二度は読まない。
+-- accounts_json = [{"handle": "abc", "name": "表示名"}]。数字の ID は分からないので、画面で users の username と突き合わせる。
+CREATE TABLE IF NOT EXISTS image_reads (
+  post_id TEXT PRIMARY KEY,
+  read_at TEXT NOT NULL,
+  model TEXT,
+  images INTEGER NOT NULL DEFAULT 0,
+  accounts_json TEXT,
+  error TEXT
+);
+
 -- どのポストに、誰が、どの立場で出てきたか(client / quoted / reply_to / mention)。
 CREATE TABLE IF NOT EXISTS post_users (
   post_id TEXT NOT NULL,

@@ -16,7 +16,7 @@ const SWIPE_CHOICES = ["hold", "delete", "seen", "none"];
 const DEFAULT_SETTINGS = { swipe_right: "hold", swipe_left: "delete" };
 
 // ブラックリストの理由。spam=スパム / false=虚偽の申告 / photographer=被写体ではなくカメラマンだった / other=その他
-const ROLE_ORDER = ["reply_to", "quoted", "mention"];
+const ROLE_ORDER = ["reply_to", "quoted", "mention", "image"];
 const BLACKLIST_REASONS = ["spam", "false", "photographer", "other"];
 const BLACKLIST_SKIP = "ブラックリスト"; // 判定前のポストに付ける除外理由(finder/store.py と同じ)
 const NOT_BLACKLISTED = "NOT EXISTS (SELECT 1 FROM blacklist b WHERE b.user_id = p.author_id)";
@@ -27,6 +27,9 @@ const TABLES_DDL = [
     post_id TEXT PRIMARY KEY, state TEXT NOT NULL, opened_at TEXT, updated_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS blacklist (
     user_id TEXT PRIMARY KEY, username TEXT, reason TEXT NOT NULL, note TEXT, added_at TEXT NOT NULL)`,
+  // 画像から読んだアカウント(書くのは収集の方。表がまだなくても詳細が開けるように作っておく)
+  `CREATE TABLE IF NOT EXISTS image_reads (
+    post_id TEXT PRIMARY KEY, read_at TEXT NOT NULL, model TEXT, images INTEGER NOT NULL DEFAULT 0, accounts_json TEXT, error TEXT)`,
 ];
 let tablesReady = false;
 async function ensureTables(db) {
@@ -136,6 +139,34 @@ export async function getCase(db, id) {
     if (m) m.roles.push(p.role);
     else merged.set(p.id, { ...p, roles: [p.role] });
   }
+  // 添付画像(メンバー表など)から AI が読んだアカウント。台帳に同じ ID(username)の人がいればその人として出す
+  const read = await db.prepare("SELECT accounts_json FROM image_reads WHERE post_id = ?").bind(id).first();
+  const fromImage = parseJson(read && read.accounts_json, []).filter((a) => a && /^[A-Za-z0-9_]{1,15}$/.test(a.handle || ""));
+  if (fromImage.length) {
+    const handles = fromImage.map((a) => a.handle.toLowerCase());
+    const { results: known } = await db
+      .prepare(
+        `SELECT id, username, name, followers, following, profile_image FROM users
+         WHERE lower(username) IN (${handles.map(() => "?").join(", ")})`,
+      )
+      .bind(...handles)
+      .all();
+    const byName = new Map(known.map((u) => [u.username.toLowerCase(), u]));
+    const author = (row.username || "").toLowerCase();
+    for (const a of fromImage) {
+      const key = a.handle.toLowerCase();
+      if (key === author) continue;
+      const u = byName.get(key);
+      const same = u ? merged.get(u.id) : [...merged.values()].find((m) => (m.username || "").toLowerCase() === key);
+      if (same) {
+        if (!same.roles.includes("image")) same.roles.push("image");
+        continue;
+      }
+      if (u && u.id === row.author_id) continue;
+      const entry = u ? { ...u, roles: ["image"] } : { id: null, username: a.handle, name: a.name || null, roles: ["image"] };
+      merged.set(u ? u.id : `image:${key}`, entry);
+    }
+  }
   for (const m of merged.values()) {
     m.roles.sort((a, b) => ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b));
     m.role = m.roles[0];
@@ -154,7 +185,7 @@ export async function getCase(db, id) {
 }
 
 // データベースの中身を見る画面(読むだけ)。見せる表はここに並べたものだけ
-const DB_TABLES = ["posts", "judgments", "reviews", "blacklist", "users", "user_aliases", "post_users", "runs", "costs", "meta"];
+const DB_TABLES = ["posts", "judgments", "reviews", "blacklist", "users", "user_aliases", "post_users", "image_reads", "runs", "costs", "meta"];
 const DB_PAGE = 30;
 const DB_CELL_MAX = 400; // 長い値(AI の返事の JSON など)は先頭だけ返す
 

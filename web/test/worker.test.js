@@ -164,6 +164,16 @@ test("詳細は画像・点数の内訳・関係するアカウントを含む",
   assert.equal(await getCase(db, "999"), null);
 });
 
+test("画像から読んだアカウントも関係するアカウントに並べる", async () => {
+  db.raw.prepare(`INSERT INTO image_reads (post_id, read_at, images, accounts_json) VALUES ('1', 'x', 1, ?)`).run(
+    JSON.stringify([{ handle: "Friend", name: "" }, { handle: "cos_new", name: "新しい人" }, { handle: "client", name: "" }, { handle: "bad id", name: "" }]));
+  const c = await getCase(db, "1");
+  assert.deepEqual(c.people.map((p) => [p.username, p.name, p.roles]), [["friend", "友達", ["mention", "image"]], ["cos_new", "新しい人", ["image"]]]);
+  assert.equal(c.people[1].id, null);
+  // 画像を読んでいない案件は今まで通り
+  assert.deepEqual((await getCase(db, "2")).people, []);
+});
+
 test("関係するアカウントは同じ人を 1 回だけ出し、投稿者本人は出さない", async () => {
   const sql = (q) => db.raw.prepare(q).run();
   sql(`INSERT INTO post_users (post_id, user_id, role) VALUES ('1', '300', 'reply_to'), ('1', '100', 'reply_to'), ('1', '100', 'mention')`);

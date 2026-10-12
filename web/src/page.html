@@ -288,7 +288,7 @@ header.top.slim .tab .c{font-size:17px}
 <script>
 const PRESETS=[{k:"all",t:"すべて"},{k:"crit",t:"クリティカル"},{k:"near",t:"首都圏"},{k:"rejected",t:"対象外(確認用)",cls:"warn"}];
 const TYPES=["コスプレ撮影","コスパフォ","踊ってみた","ポートレート","イベント","その他"];
-const ROLE={mention:"メンション",quoted:"引用元の投稿者",reply_to:"リプライ先"};
+const ROLE={mention:"メンション",quoted:"引用元の投稿者",reply_to:"リプライ先",image:"画像から"};
 // 確認の状態。未確認=一度も開いていない / 確認済み=開いた / 保留=ピン留め / 削除予定=投稿日から14日で消える
 const TABS=[{k:"unread",t:"未確認"},{k:"seen",t:"確認済み"},{k:"hold",t:"保留"},{k:"delete",t:"削除予定"}];
 const DELETE_DAYS=14;
@@ -634,7 +634,7 @@ function openSettings(){
 }
 // ---- データベースの中身(見るだけ) ----
 const DB_LABEL={posts:"ポスト",judgments:"AI の判定と点数",reviews:"確認の状態",blacklist:"ブラックリスト",users:"ユーザー台帳",user_aliases:"読み間違いの別名",
-  post_users:"ポストと人のつながり",runs:"収集の実行",costs:"費用",meta:"内部の記録"};
+  post_users:"ポストと人のつながり",image_reads:"画像から読んだアカウント",runs:"収集の実行",costs:"費用",meta:"内部の記録"};
 function dbSheet(inner){
   if($("sheetRoot").hidden){$("sheetRoot").hidden=false;document.body.style.overflow="hidden"}
   $("sheetRoot").innerHTML=`<div class="scrim" data-close="1"></div><div class="sheet" role="dialog" aria-modal="true" aria-label="データベース"><div class="grab"></div>${inner}</div>`;

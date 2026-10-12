@@ -155,7 +155,7 @@ def purge_deleted(d1, now=None):
     for i in range(0, len(ids), 90):
         part = ids[i:i + 90]
         marks = ", ".join("?" for _ in part)
-        for table, col in (("post_users", "post_id"), ("judgments", "post_id"), ("reviews", "post_id"), ("posts", "id")):
+        for table, col in (("post_users", "post_id"), ("image_reads", "post_id"), ("judgments", "post_id"), ("reviews", "post_id"), ("posts", "id")):
             d1.query(f"DELETE FROM {table} WHERE {col} IN ({marks})", part)
     return len(ids)
 
