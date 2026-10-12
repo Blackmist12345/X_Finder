@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 
 import { resetCertsCache, verifyAccess } from "../src/auth.js";
-import worker, { changeBlacklist, getCase, getSettings, getStats, getSummary, listBlacklist, listCases, saveSettings, setReview } from "../src/index.js";
+import worker, { changeBlacklist, listTables, readTable, getCase, getSettings, getStats, getSummary, listBlacklist, listCases, saveSettings, setReview } from "../src/index.js";
 import { fakeD1 } from "./fake-d1.js";
 
 const TEAM = "example.cloudflareaccess.com";
@@ -127,6 +127,23 @@ test("ブラックリスト: 載せた人の案件は一覧に出ず、判定待
   assert.equal(db.raw.prepare("SELECT status FROM posts WHERE id = '5'").get().status, "new"); // 判定待ちに戻る
 });
 
+test("データベースの中身: 表ごとの件数と、新しい順の行・検索・ページ送り。決めた表だけ読める", async () => {
+  const tables = await listTables(db);
+  assert.equal(tables.find((t) => t.name === "posts").rows, 5);
+  assert.ok(tables.some((t) => t.name === "meta"));
+  const posts = await readTable(db, "posts", new URLSearchParams());
+  assert.equal(posts.total, 5);
+  assert.equal(posts.rows[0].id, "5"); // 新しく入れた順
+  assert.ok(posts.columns.includes("author_id"));
+  const found = await readTable(db, "users", new URLSearchParams("q=友達"));
+  assert.deepEqual(found.rows.map((r) => r.id), ["300"]);
+  db.raw.prepare("UPDATE judgments SET summary = ? WHERE post_id = '1'").run("あ".repeat(500));
+  const long = await readTable(db, "judgments", new URLSearchParams("q=ああ"));
+  assert.match(long.rows[0].summary, /…\(500文字\)$/);
+  assert.equal((await readTable(db, "posts", new URLSearchParams("offset=4"))).rows.length, 1);
+  assert.equal(await readTable(db, "sqlite_master", new URLSearchParams()), null);
+});
+
 test("スワイプの設定は初期値があり、変えると保存される", async () => {
   assert.deepEqual(await getSettings(db), { swipe_right: "hold", swipe_left: "delete" });
   assert.deepEqual(await saveSettings(db, { swipe_left: "seen" }), { swipe_right: "hold", swipe_left: "seen" });
@@ -225,6 +242,10 @@ test("Access を通れば画面と API が返る", async () => {
     assert.equal((await black({ user_id: "100", reason: "photographer" })).status, 200);
     assert.equal((await (await worker.fetch(req("/api/blacklist", token), env)).json()).blacklist[0].reason, "photographer");
     assert.equal((await (await worker.fetch(req("/api/cases", token), env)).json()).cases.length, 0);
+    assert.ok((await (await worker.fetch(req("/api/db", token), env)).json()).tables.length > 5);
+    assert.equal((await worker.fetch(req("/api/db/runs", token), env)).status, 200);
+    assert.equal((await worker.fetch(req("/api/db/nope", token), env)).status, 404);
+    assert.equal((await worker.fetch(req("/api/db/posts"), env)).status, 403); // Access を通っていなければ見られない
   } finally {
     globalThis.fetch = realFetch;
   }
