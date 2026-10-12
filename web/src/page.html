@@ -224,6 +224,8 @@ header.top.slim .tab .c{font-size:17px}
 .sheet.now,.scrim.now{transition:none}
 @media (prefers-reduced-motion:reduce){.sheet,.scrim{transition:none}}
 .card.opening{opacity:.7;transition:opacity .1s}
+.card.wait{position:relative}
+.card.wait::after{content:"";position:absolute;right:14px;bottom:14px;width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
 /* 一度でも引っぱったシートは、開くときのアニメーションをもう出さない(戻したときに一瞬薄くなるのを防ぐ) */
 
 .sheet.drag{will-change:transform}
@@ -235,8 +237,12 @@ header.top.slim .tab .c{font-size:17px}
 .post + .post{margin-top:8px}
 .post .from{display:block;font-size:11.5px;color:var(--muted);margin-bottom:4px}
 .media{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;margin-top:8px}
-.media button{border:0;padding:0;background:none;cursor:zoom-in;border-radius:10px;display:block}
-.media img{width:100%;border-radius:10px;display:block;aspect-ratio:1;object-fit:cover;background:var(--surface-2)}
+.media button{border:0;padding:0;background:var(--surface-2);cursor:zoom-in;border-radius:10px;display:block;aspect-ratio:1;overflow:hidden;position:relative}
+/* 画像の場所は枠(button)で先に取る。画像は届いたら枠いっぱいに出す(高さが変わらない) */
+.media img{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;opacity:0;transition:opacity .2s}
+.media img.ok{opacity:1}
+/* 案件の詳細は高さを決めておく(あとから中身が足されても、上の端が動かない) */
+.sheet.case{height:88%}
 /* 画像を X Finder の中で大きく見る。左右スワイプで次の画像、× か画像の外をタップで閉じる */
 .viewer{position:fixed;inset:0;z-index:40;background:#000;display:flex;flex-direction:column}
 .viewer[hidden]{display:none}
@@ -398,6 +404,7 @@ function render(){
   const emptyMsg={unread:"未確認の案件はありません。",seen:"確認済みの案件はありません。",hold:"保留の案件はありません。<br>あとで見直したい案件は、詳細の「保留にする」でここに残せます。",
     delete:`削除予定の案件はありません。<br>削除予定にした案件は、投稿日から${DELETE_DAYS}日で消えます。`}[state.tab];
   $("list").innerHTML=a.length?a.map(card).join(""):`<div class="empty">${emptyMsg}</div>`;
+  prefetchTop(a);
 }
 function place(c){return c.prefecture&&c.prefecture!=="不明"?c.prefecture:"場所不明"}
 function card(c){
@@ -465,9 +472,9 @@ document.addEventListener("touchmove",ev=>{
   if(!sheet||sheet.scrollHeight<=sheet.clientHeight+1)ev.preventDefault();
 },{passive:false});
 // html = シートの中身。すでに開いていれば動かさずに中身だけ入れ替える。開ききったら resolve する
-function presentSheet(html,label){
+function presentSheet(html,label,cls=""){
   const root=$("sheetRoot");const already=!root.hidden&&root.querySelector(".sheet.in");
-  root.innerHTML=`<div class="scrim${already?" in now":""}" data-close="1"></div><div class="sheet${already?" in now":""}" role="dialog" aria-modal="true"${label?` aria-label="${esc(label)}"`:""}>${html}</div>`;
+  root.innerHTML=`<div class="scrim${already?" in now":""}" data-close="1"></div><div class="sheet${cls?" "+cls:""}${already?" in now":""}" role="dialog" aria-modal="true"${label?` aria-label="${esc(label)}"`:""}>${html}</div>`;
   root.hidden=false;lockScroll();
   const sheet=root.querySelector(".sheet"),scrim=root.querySelector(".scrim");
   if(already)return Promise.resolve(sheet);
@@ -478,7 +485,7 @@ function presentSheet(html,label){
     sheet.addEventListener("transitionend",done);setTimeout(done,500)});
 }
 // 添付画像は開ききってから読み込む(せり上がりの途中で画像の処理が重なってカクつかないように)
-function loadSheetImages(sheet){sheet.querySelectorAll("img[data-src]").forEach(img=>{img.src=img.dataset.src;img.removeAttribute("data-src")})}
+function loadSheetImages(sheet){sheet.querySelectorAll("img[data-src]").forEach(img=>{img.onload=()=>img.classList.add("ok");img.src=img.dataset.src;img.removeAttribute("data-src")})}
 let blacklistChanged=false;
 // 詳細はタップした瞬間に一覧のデータで開き、画像・点数の内訳・関係するアカウントなどは届いたら足す。
 // 指が触れた時点で読み込みを始め、一度読んだ詳細は覚えておく。
@@ -511,8 +518,6 @@ function sheetHtml(c,full){
    ${full?"":'<p class="sub" id="sheetLoading" style="text-align:center">くわしい情報を読み込み中…</p>'}
    <div class="detail-actions" id="reviewActions" data-id="${esc(c.id)}">${reviewButtons(c.review,full?c:{...c,blacklist:null})}</div>`;
 }
-const WAIT_DETAIL=280; // 詳細がこの時間内に届けば、はじめから全部そろった形で開く(途中で描き直さない)
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let opening=false;
 async function openSheet(id,cardEl){
   if(opening)return; // 開くのを待っている間の二度押し
@@ -526,32 +531,31 @@ async function openSheetNow(id,cardEl){
     if(now)c.review=now.review; // 確認の状態は一覧の最新を使う(開いたら確認済みになる・ボタンで変えた分)
     else if(c.review==="unread"&&!base){c.review="seen";postReview(id,{opened:true}).catch(()=>{})}
     return c};
-  // 少しだけ待って、届いていれば全部そろった形で開く。押したカードは薄くして、押せたことが分かるようにする
-  let c=null;
+  // 中身が全部そろってから開く(開いたあとに引用元・画像・点数の内訳などが足されて表示がずれないように)。
+  // 待っている間は押したカードを薄くし、少しかかるときはカードに読み込み中の印を出す
   if(cardEl)cardEl.classList.add("opening");
-  c=await Promise.race([p.then(fresh,()=>null),sleep(WAIT_DETAIL).then(()=>null)]);
-  if(cardEl)cardEl.classList.remove("opening");
-  if(!c&&!base){try{c=fresh(await p)}catch(e){c=null}}
-  const opened=presentSheet(c?sheetHtml(c,true):base?sheetHtml(base,false):'<div class="grab"></div><p>読み込めませんでした。</p><div class="actions"><button class="btn" data-close="1">閉じる</button></div>');
-  opening=false; // ここから先(あとから差し替え)の間も、閉じて別のカードを開ける
+  const waitMark=setTimeout(()=>cardEl&&cardEl.classList.add("wait"),200);
+  let c=null,err=null;
+  try{c=fresh(await p)}catch(e){err=e}
+  clearTimeout(waitMark);if(cardEl)cardEl.classList.remove("opening","wait");
+  const html=c?sheetHtml(c,true)
+    :base?sheetHtml(base,true).replace('<div class="detail-actions"',`<p class="sub" style="color:var(--rec)">くわしい情報を読み込めませんでした(${esc(err&&err.message||"")})。</p><div class="detail-actions"`)
+    :`<div class="grab"></div><p>読み込めませんでした(${esc(err&&err.message||"")})。</p><div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;
+  const opened=presentSheet(html,"","case");
+  opening=false;
   const sheet=$("sheetRoot").querySelector(".sheet");
   currentCase=c||base||null;
   await opened;
-  if(!sheet.isConnected)return;
-  if(c||!base){loadSheetImages(sheet);return}
-  // 間に合わなかったときは、開ききってから中身を足す
-  let full;try{full=await p}catch(e){
-    if(!sheet.isConnected)return;
-    const l=$("sheetLoading");if(l)l.textContent=`くわしい情報を読み込めませんでした(${esc(e.message)})`;return}
-  if(!sheet.isConnected||$("sheetRoot").hidden)return; // 読み込みの間に閉じた・別の案件を開いた
-  c=fresh(full);currentCase=c;
-  // 開いたあとにブラックリストの入力欄を出していたら、そのまま残す
-  const box=$("blackBox");const keep=box&&box.innerHTML?box.innerHTML:"";
-  const top=sheet.scrollTop;
-  sheet.innerHTML=sheetHtml(c,true);
-  sheet.scrollTop=top;
-  loadSheetImages(sheet);
-  if(keep){$("blackBox").innerHTML=keep;const f=$("blackForm");if(f)f.onsubmit=e=>{e.preventDefault();saveBlack(e.target)}}
+  // 添付画像は開ききってから読み込む(場所は先に取ってあるので、表示はずれない)
+  if(sheet.isConnected)loadSheetImages(sheet);
+}
+// 一覧を出したら、上のほうのカードの詳細を先に読んでおく(押した瞬間に開けるように)
+let prefetchTimer=0;
+function prefetchTop(list){
+  clearTimeout(prefetchTimer);
+  const ids=list.slice(0,6).map(c=>c.id).filter(id=>!detailCache.has(id));
+  let i=0;const next=()=>{if(i>=ids.length)return;fetchDetail(ids[i++]).catch(()=>{}).finally(()=>{prefetchTimer=setTimeout(next,80)})};
+  prefetchTimer=setTimeout(next,400);
 }
 // 本文はタップで X アプリのそのポストを開く
 function postBox(text,url,id,from){

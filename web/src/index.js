@@ -96,7 +96,7 @@ export async function listCases(db, params) {
   const days = Math.min(Math.max(Number(params.get("days")) || 14, 1), 60);
   const { results } = await db
     .prepare(
-      `SELECT ${CASE_COLUMNS},
+      `SELECT ${CASE_COLUMNS}, p.media_json,
         (SELECT COUNT(*) FROM post_users pu WHERE pu.post_id = p.id AND pu.role IN ('mention', 'quoted')) AS others
        FROM posts p JOIN judgments j ON j.post_id = p.id LEFT JOIN users u ON u.id = p.author_id
        LEFT JOIN reviews r ON r.post_id = p.id
@@ -105,7 +105,13 @@ export async function listCases(db, params) {
     )
     .bind(view, daysAgoIso(days), MAX_LIST)
     .all();
-  return results.map((r) => ({ ...r, critical: !!r.critical, near: NEAR.includes(r.prefecture) }));
+  // 添付画像の URL も返す(詳細を開いた瞬間から画像の場所を取っておき、あとから表示がずれないように)
+  return results.map(({ media_json, ...r }) => ({
+    ...r,
+    critical: !!r.critical,
+    near: NEAR.includes(r.prefecture),
+    media: parseJson(media_json, []),
+  }));
 }
 
 export async function getCase(db, id) {
