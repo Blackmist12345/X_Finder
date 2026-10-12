@@ -17,7 +17,7 @@
 | N4 | AI 判定 | `finder/judge.py`(文字だけを Claude Haiku 5.5 でまとめて判定。Gemini にも切り替え可。対象外にするかはルールで決める) |
 | N10 | 採点 | `finder/score.py`(【5】点数表と【6】クリティカル条件。都道府県が分かれば地名の減点語は使わない) |
 
-収集は Collect ワークフローで 10分ごとに自動で動き、判定待ちが「まとめて判定する件数」たまるか、いちばん古いポストが「判定を待つ最長時間(分)」待ったら判定・採点します。通知とファインダーの画面は次の段階で作ります。
+収集は Cloudflare Worker(`trigger/worker.js`)が 10分ごとに Collect ワークフローを起動して動き、判定待ちが「まとめて判定する件数」たまるか、いちばん古いポストが「判定を待つ最長時間(分)」待ったら判定・採点します。通知とファインダーの画面は次の段階で作ります。
 
 ## 準備(初回だけ)
 
@@ -50,6 +50,13 @@ Actions → Setup → Run workflow で、task を選んで 1 回ずつ実行し�
 
 Actions → Collect → Run workflow で、まず `dry_run`(何も保存しない)を実行し、結果の要約を確認します。
 問題なければ `production` で実行します。定刻での自動起動は、手動で数回試したあとに追加します。
+
+### 4. 10分ごとの自動起動(N0)を Cloudflare に置く
+
+1. GitHub → Settings → Developer settings → Fine-grained tokens で、Repository access を X_Finder だけ、Permissions の Actions を Read and write にしたトークンを作る
+2. Cloudflare → Workers & Pages → 作成 → Worker を作り(名前は `x-finder-trigger`)、コードの編集で `trigger/worker.js` の中身を貼り付けてデプロイする
+3. その Worker の 設定 → 変数とシークレット に、`GITHUB_TOKEN`(種類はシークレット)として 1 のトークンを入れる
+4. 設定 → トリガー → Cron トリガーに `*/10 * * * *` を追加する
 
 ## テスト
 

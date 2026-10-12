@@ -1,11 +1,10 @@
 name: Collect
 
 # N0〜N4・N10・N12・N15: X のポストを集めて D1 とユーザー台帳に保存し、AI で判定して採点する。
-# 定刻起動は GitHub の schedule(10分ごと。混み具合で遅れたり飛ばされたりすることがある)。
+# 定刻起動は Cloudflare Worker(trigger/worker.js)が10分ごとに workflow_dispatch で行う。
+# GitHub の schedule は遅れたり飛ばされたりするので使わない。
 # AI 判定は毎回ではなく、判定待ちが「まとめて判定する件数」たまったときに行う。
 on:
-  schedule:
-    - cron: '3-59/10 * * * *'
   workflow_dispatch:
     inputs:
       mode:
