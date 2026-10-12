@@ -1,8 +1,10 @@
 name: Collect
 
-# N0〜N3・N12・N15: X のポストを集めて D1 とユーザー台帳に保存する。
-# 定刻起動(Cloudflare のトリガー)は、手動で数回試したあとに追加する。
+# N0〜N4・N10・N12・N15: X のポストを集めて D1 とユーザー台帳に保存し、AI で判定して採点する。
+# 定刻起動は GitHub の schedule(30分ごと。混み具合で数分〜十数分遅れることがある)。
 on:
+  schedule:
+    - cron: '17,47 * * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -49,6 +51,7 @@ jobs:
           D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
           TWITTERAPI_KEY: ${{ secrets.TWITTERAPI_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           MODE: ${{ github.event.inputs.mode || 'production' }}
           HOURS: ${{ github.event.inputs.hours || '1' }}
         run: python -u -m finder.run_collect

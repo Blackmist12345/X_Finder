@@ -6,6 +6,18 @@ import time
 import requests
 
 MAX_PARAMS = 100  # D1 の 1 文あたりのバインド変数の上限
+SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "schema.sql")
+
+
+def statements(sql):
+    """SQL ファイルを 1 文ずつに分ける(-- で始まる行は飛ばす)。"""
+    lines = [line for line in sql.splitlines() if not line.strip().startswith("--")]
+    return [s.strip() for s in "\n".join(lines).split(";") if s.strip()]
+
+
+def schema_statements():
+    with open(SCHEMA_PATH, encoding="utf-8") as f:
+        return statements(f.read())
 
 
 class D1Error(Exception):
@@ -45,6 +57,10 @@ class D1:
             results = data.get("result") or [{}]
             return results[-1].get("results", [])
         raise D1Error("D1 のクエリが再試行後も失敗しました")
+
+    def ensure_schema(self):
+        """schema.sql をまとめて 1 回で流す(IF NOT EXISTS なので、足りない表だけができる)。"""
+        self.query(";\n".join(schema_statements()))
 
     def insert_many(self, table, columns, rows, conflict="OR IGNORE", upsert=""):
         """複数行をまとめて INSERT する。バインド変数の上限に合わせて分割する。"""

@@ -5,7 +5,7 @@
 
 モジュールの番号(N0〜N15)と用語は、定義書に合わせています。
 
-## いまできること(第1段階: 収集と保存)
+## いまできること(第1段階: 収集と保存 / 第2段階: AI 判定と採点)
 
 | 番号 | 名前 | 場所 |
 | --- | --- | --- |
@@ -14,8 +14,10 @@
 | N3 | 一次フィルタ(一部) | `finder/filters.py`(リポスト・フォロワー数・入りきらなかった除外語。減点語は記録だけ) |
 | N12 | データ保存 | `finder/store.py`, `schema.sql`(Cloudflare D1) |
 | N15 | ユーザー台帳 | `finder/store.py`(投稿者・引用元・メンション先・リプライ先を登録) |
+| N4 | AI 判定 | `finder/judge.py`(文字だけを Gemini でまとめて判定。対象外にするかはルールで決める) |
+| N10 | 採点 | `finder/score.py`(【5】点数表と【6】クリティカル条件。都道府県が分かれば地名の減点語は使わない) |
 
-AI 判定、採点、通知、ファインダーの画面は次の段階で作ります。
+収集・判定・採点は Collect ワークフローで 30分ごとに自動で動きます。通知とファインダーの画面は次の段階で作ります。
 
 ## 準備(初回だけ)
 
@@ -26,6 +28,7 @@ GitHub の X_Finder → Settings → Secrets and variables → Actions → New r
 | 名前 | 中身 |
 | --- | --- |
 | `TWITTERAPI_KEY` | TwitterAPI.io の API キー(今の仕組みと同じもの) |
+| `GEMINI_API_KEY` | Gemini の API キー(今の仕組みと同じもの。ないと判定だけ飛ばす) |
 | `NOTION_API_KEY` | Notion のインテグレーションのキー(今の仕組みと同じもの) |
 | `NOTION_PARENT_PAGE_ID` | 新しい 8表を置く Notion ページの URL |
 | `NOTION_KEYWORDS_DB_ID` ほか3つ | 今の 4表の ID(今の仕組みと同じ名前・同じ値。移行にだけ使う) |

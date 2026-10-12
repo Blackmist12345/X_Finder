@@ -1,4 +1,4 @@
-"""収集の 1 回分: N1 設定読込 → N2 収集 → N3 一次フィルタ → N12/N15 保存。
+"""収集の 1 回分: N1 設定読込 → N2 収集 → N3 一次フィルタ → N12/N15 保存 → N4 AI 判定 → N10 採点。
 
 環境変数:
   MODE   production(保存して検索時間枠を進める)/ dry_run(何も保存しない試し)
@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from finder import collect, filters, store
+from finder import collect, filters, judge_step, store
 from finder.config import load_config
 from finder.d1 import D1
 from finder.notion import Notion
@@ -32,6 +32,15 @@ def write_summary(lines):
     if path:
         with open(path, "a", encoding="utf-8") as f:
             f.write(text)
+
+
+def month_cost_lines(d1, basic):
+    start = datetime.now(JST).replace(day=1, hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).isoformat()
+    rows = d1.query("SELECT service, SUM(usd) AS usd FROM costs WHERE at >= ? GROUP BY service ORDER BY service", [start])
+    rate, goal = basic["為替レート(円/ドル)"], basic["月の費用の目標(円)"]
+    total = sum(r["usd"] or 0 for r in rows) * rate
+    parts = "、".join(f"{r['service']} 約{(r['usd'] or 0) * rate:.0f}円" for r in rows)
+    return ["", f"今月の費用(保存した分): 約{total:.0f}円 / 目標 {goal}円" + (f"({parts})" if parts else "")]
 
 
 def main():
@@ -57,6 +66,10 @@ def main():
     started = store.now_iso()
     run_id = None
     if production:
+        try:
+            d1.ensure_schema()
+        except Exception as e:  # 表がそろっていれば収集は続けられる
+            warnings.append(f"D1 の表の確認に失敗しました: {e}")
         run_id = d1.query(
             "INSERT INTO runs (started_at, window_start, window_end, status) VALUES (?, ?, ?, 'running') RETURNING id",
             [started, datetime.fromtimestamp(since_ts, timezone.utc).isoformat(), datetime.fromtimestamp(until_ts, timezone.utc).isoformat()],
@@ -109,11 +122,8 @@ def main():
         lines.append("- 減点語に当たった数: " + "、".join(f"{k} {v}件" for k, v in penalty_count.most_common(10)))
     for w in warnings:
         lines.append(f"- ⚠️ {w}")
-    if kept:
-        lines += ["", "### AI 判定待ちのポスト(先頭5件)", ""]
-        for t in kept[:5]:
-            body = (t.get("text") or "").replace("\n", " ")[:60]
-            lines.append(f"- {body}… {t.get('url', '')}")
+    lines += judge_step.run(d1, config, production, os.environ.get("GEMINI_API_KEY"), tweets=fresh, decisions=decisions)
+    lines += month_cost_lines(d1, basic)
     write_summary(lines)
 
 
