@@ -134,7 +134,17 @@ header.top.slim .tab .c{font-size:17px}
 .pill.hold{background:var(--warn-soft);color:var(--warn);font-weight:500}
 .pill.del{background:var(--rec-soft);color:var(--rec)}
 .card.unread .title::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:2px}
-.review-actions{display:flex;gap:8px;margin-top:20px}
+.detail-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:20px}
+.detail-actions .btn{padding:13px 4px;font-size:14px;white-space:nowrap}
+/* 保留・削除予定はタブと同じ色、ブラックリストは黒と赤 */
+.btn.hold{border-color:var(--warn);color:var(--warn);background:var(--warn-soft)}
+.btn.hold.on{background:var(--warn);color:#fff}
+.btn.del{border-color:var(--rec);color:var(--rec);background:var(--rec-soft)}
+.btn.del.on{background:var(--rec);color:#fff}
+.btn.blk{background:#0b0d12;border-color:#e2372b;color:#ff5a4d}
+.btn.blk:disabled{opacity:.6}
+.post.link{display:block;color:inherit;text-decoration:none;cursor:pointer;position:relative}
+.post .open-x{display:block;text-align:right;color:var(--accent);font-size:12.5px;font-weight:700;margin-top:6px;white-space:normal}
 .btn.on{background:var(--fg);border-color:var(--fg);color:var(--bg)}
 .btn.danger.on{background:var(--rec);border-color:var(--rec);color:#fff}
 .btn:disabled{opacity:.6;cursor:default}
@@ -154,8 +164,8 @@ header.top.slim .tab .c{font-size:17px}
 .toast button{white-space:nowrap;flex:none;border:0;background:transparent;color:var(--accent);font:inherit;font-weight:700;cursor:pointer;padding:4px}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .toast button{color:#2b54d6}}
 /* ブラックリスト */
-.black{margin-top:10px}
-.black .open{border:0;background:none;color:var(--rec);font:inherit;font-size:13px;font-weight:700;padding:6px 0;cursor:pointer}
+.black{margin-top:16px}
+.black:empty{display:none}
 .black form{border:1px solid var(--rec);background:var(--rec-soft);border-radius:12px;padding:12px;display:grid;gap:10px}
 .black .why{display:flex;flex-wrap:wrap;gap:6px}
 .black .why label{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer}
@@ -381,7 +391,6 @@ function person(p){
 }
 // ---- ブラックリスト ----
 const BLACK_REASON={spam:"スパム",false:"虚偽の申告",photographer:"カメラマンだった",other:"その他"};
-function blackOpenButton(){return '<button type="button" class="open" data-black-open="1">🚫 この人をブラックリストに入れる</button>'}
 function blackForm(){
   return `<form id="blackForm"><div><b>ブラックリストに入れる</b><p class="bnote">この人のポストは、これまでの分もこれからの分も X Finder に出なくなります。AI の判定にもかけません。設定(⚙)からいつでも解除できます。</p></div>
    <div class="why" role="radiogroup" aria-label="理由">${Object.entries(BLACK_REASON).map(([k,v],i)=>`<label><input type="radio" name="why" value="${k}" ${i?"":"checked"}>${v}</label>`).join("")}</div>
@@ -419,6 +428,7 @@ async function openSheet(id){
   $("sheetRoot").innerHTML=`<div class="scrim" data-close="1"></div><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div><p class="sub">読み込み中…</p></div>`;
   $("sheetRoot").hidden=false;document.body.style.overflow="hidden";
   let c;try{c=await api(`/api/cases/${encodeURIComponent(id)}`)}catch(e){$("sheetRoot").querySelector(".sheet").innerHTML=`<div class="grab"></div><p>読み込めませんでした(${esc(e.message)})。</p><div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;return}
+  currentCase=c;
   if(c.review==="unread"){c.review="seen";setLocalReview(id,"seen");postReview(id,{opened:true}).catch(()=>setLocalReview(id,"unread"))}
   const xurl=safeX(c.url);const media=(c.media||[]).map(safeImg).filter(Boolean);currentMedia=media;
   const cu=safeUser(c.username);
@@ -428,30 +438,40 @@ async function openSheet(id){
    <h2>${esc(c.summary||"(要約なし)")}</h2>
    <dl class="facts"><dt>日程</dt><dd>${esc(c.dates||"不明")}</dd><dt>場所</dt><dd>${esc(c.place||"")}${c.place?" ・ ":""}${esc(place(c))}${c.prefecture_source==="プロフィール"?"(プロフィールから推定)":""}</dd>
     ${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}${c.critical_reason?`<dt>REC</dt><dd>${esc(c.critical_reason)}</dd>`:""}</dl>
-   <div class="sec"><h3>募集ポスト</h3><div class="post">${esc(c.text)}</div>
-    ${c.quoted_text?`<div class="post"><span class="from">引用元のポスト</span>${esc(c.quoted_text)}</div>`:""}
+   <div class="sec"><h3>募集ポスト</h3>${postBox(c.text,xurl,c.id)}
+    ${c.quoted_text?postBox(c.quoted_text,safeX(c.quoted_url),c.quoted_id,"引用元のポスト"):""}
     ${media.length?`<div class="media">${media.map((u,i)=>`<button type="button" data-img="${i}" aria-label="画像 ${i+1} を大きく見る"><img src="${esc(u)}" alt="添付画像" loading="lazy" referrerpolicy="no-referrer"></button>`).join("")}</div>`:""}</div>
    ${detail.length?`<div class="sec"><h3>点数の内訳</h3><dl class="breakdown">${detail.map(d=>`<dt>${esc(d.label)}</dt><dd>${d.points>0?"+":""}${Math.round(d.points)}</dd>`).join("")}<dt class="total">合計</dt><dd class="total">${Math.round(c.score)}</dd></dl></div>`:""}
    <div class="sec"><h3>クライアント</h3><div class="people"><${cu?`a class="person link" href="https://x.com/${cu}" data-xuser="${cu}"`:'div class="person"'}>${ava(c)}<div class="who"><div>${esc(c.name||"")}</div>
     <div class="id">@${esc(c.username||"")} ・ フォロワー <span class="num">${fmt(c.followers)}</span> ・ フォロー <span class="num">${fmt(c.following)}</span> ・ FF率 <span class="num">${ffText(c)}</span></div>
     ${c.location?`<div class="id">地域: ${esc(c.location)}</div>`:""}${c.description?`<div class="id">${esc(c.description)}</div>`:""}</div>${cu?'<span class="go">X で開く ›</span>':""}</${cu?"a":"div"}></div>
-    ${c.author_id&&!c.blacklist?`<div class="black" id="blackBox" data-uid="${esc(c.author_id)}" data-name="${esc(c.username?"@"+c.username:(c.name||"この人"))}">${blackOpenButton()}</div>`:""}
     ${c.blacklist?`<p class="sub" style="color:var(--rec)">🚫 ブラックリストに登録済み(${esc(BLACK_REASON[c.blacklist.reason]||"")})</p>`:""}</div>
    ${c.people&&c.people.length?`<div class="sec"><h3>関係するアカウント</h3><div class="people">${c.people.map(person).join("")}</div></div>`:""}
-   <div class="review-actions" id="reviewActions" data-id="${esc(c.id)}">${reviewButtons(c.review)}</div>
-   <div class="actions">${xurl?`<a class="btn primary" href="${esc(xurl)}" data-xpost="${esc(c.id)}" target="_blank" rel="noopener noreferrer">X で開く</a>`:""}<button class="btn" data-close="1">閉じる</button></div>`;
+   <div class="black" id="blackBox" data-uid="${esc(c.author_id||"")}" data-name="${esc(c.username?"@"+c.username:(c.name||"この人"))}"></div>
+   <div class="detail-actions" id="reviewActions" data-id="${esc(c.id)}">${reviewButtons(c.review,c)}</div>`;
 }
-function reviewButtons(review){
-  return `<button class="btn ${review==="hold"?"on":""}" data-review="${review==="hold"?"seen":"hold"}">${review==="hold"?"保留を外す":"📌 保留にする"}</button>
-   <button class="btn danger ${review==="delete"?"on":""}" data-review="${review==="delete"?"seen":"delete"}">${review==="delete"?"削除予定を外す":"削除予定にする"}</button>`;
+// 本文はタップで X アプリのそのポストを開く
+function postBox(text,url,id,from){
+  const body=`${from?`<span class="from">${esc(from)}</span>`:""}${esc(text)}`;
+  return url&&/^\d+$/.test(String(id||""))?`<a class="post link" href="${esc(url)}" data-xpost="${esc(id)}" target="_blank" rel="noopener noreferrer">${body}<span class="open-x">X で開く ›</span></a>`:`<div class="post">${body}</div>`;
 }
+// 詳細のいちばん下のボタンは「とじる」「保留にする」「削除予定にする」「ブラックリストにいれる」の4つ
+function reviewButtons(review,c){
+  const black=c&&c.blacklist?'<button type="button" class="btn blk" disabled>ブラックリスト登録済み</button>'
+    :`<button type="button" class="btn blk" data-black-open="1" ${c&&c.author_id?"":"disabled"}>ブラックリストにいれる</button>`;
+  return `<button type="button" class="btn" data-close="1">とじる</button>
+   <button type="button" class="btn hold ${review==="hold"?"on":""}" data-review="${review==="hold"?"seen":"hold"}">${review==="hold"?"保留を外す":"保留にする"}</button>
+   <button type="button" class="btn del ${review==="delete"?"on":""}" data-review="${review==="delete"?"seen":"delete"}">${review==="delete"?"削除予定を外す":"削除予定にする"}</button>
+   ${black}`;
+}
+let currentCase=null;
 async function changeReview(btn){
-  const box=$("reviewActions");const id=box.dataset.id;
+  const box=$("reviewActions");const id=box.dataset.id;const c0=currentCase;
   box.querySelectorAll("button").forEach(b=>b.disabled=true);
   try{
     const review=await postReview(id,{state:btn.dataset.review});
     setLocalReview(id,review);
-    box.innerHTML=reviewButtons(review);
+    box.innerHTML=reviewButtons(review,c0);
     const c=cases.find(x=>x.id===id);const meta=$("sheetMeta");
     if(meta){meta.querySelectorAll(".pill.hold,.pill.del").forEach(e=>e.remove());if(c)meta.insertAdjacentHTML("afterbegin",reviewPill(c))}
   }catch(e){box.querySelectorAll("button").forEach(b=>b.disabled=false);alert(`保存できませんでした(${e.message})`)}
@@ -659,8 +679,9 @@ document.addEventListener("click",ev=>{
   const dy=ev.target.closest("[data-days]");if(dy){statsDays=Number(dy.dataset.days);renderStats();return}
   const tb=ev.target.closest("[data-tab]");if(tb){state.tab=tb.dataset.tab;save();render();window.scrollTo({top:0});return}
   const rv=ev.target.closest("[data-review]");if(rv){changeReview(rv);return}
-  if(ev.target.closest("[data-black-open]")){$("blackBox").innerHTML=blackForm();$("blackForm").onsubmit=e=>{e.preventDefault();saveBlack(e.target)};return}
-  if(ev.target.closest("[data-black-cancel]")){$("blackBox").innerHTML=blackOpenButton();return}
+  if(ev.target.closest("[data-black-open]")){$("blackBox").innerHTML=blackForm();$("blackForm").onsubmit=e=>{e.preventDefault();saveBlack(e.target)};
+    $("blackBox").scrollIntoView({behavior:"smooth",block:"nearest"});return}
+  if(ev.target.closest("[data-black-cancel]")){$("blackBox").innerHTML="";return}
   const ub=ev.target.closest("[data-unblack]");if(ub){unblack(ub);return}
   if(ev.target.closest("[data-db]")||ev.target.closest("[data-dbback]")){openDb();return}
   const dbt=ev.target.closest("[data-dbt]");if(dbt){openTable(dbt.dataset.dbt);return}
