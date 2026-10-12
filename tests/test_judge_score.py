@@ -153,7 +153,7 @@ def test_production_judges_and_scores(wired, monkeypatch, make_tweet):
     assert status == {"1": ("judged", None), "2": ("rejected", "カメラマン募集ではない"), "3": ("judged", None)}
     j = {r["post_id"]: r for r in d1.query("SELECT * FROM judgments")}
     assert j["1"]["score"] == 50 and j["3"]["score"] == 20 and j["2"]["score"] is None
-    assert d1.query("SELECT COUNT(*) AS n FROM costs WHERE service = 'gemini'")[0]["n"] == 1
+    assert d1.query("SELECT COUNT(*) AS n FROM costs WHERE service = 'claude'")[0]["n"] == 1
     text = summary.read_text()
     assert "対象 2件 / 対象外 1件" in text and "今月の費用" in text
 
