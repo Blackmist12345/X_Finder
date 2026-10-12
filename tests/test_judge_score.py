@@ -25,13 +25,17 @@ class FakeResponse:
 
 
 class FakeGemini:
-    """プロンプトに書かれた id を読み、answers[id] を返す。skip に入れた id は 1 回目だけ返さない。"""
+    """プロンプトに書かれた id を読み、answers[id] を返す。skip に入れた id は 1 回目だけ返さない。
+
+    呼ばれた URL に合わせて、Claude と Gemini それぞれの返事の形で返す。
+    """
 
     def __init__(self, answers=None, skip=(), status=200):
         self.answers, self.skip, self.status, self.prompts = answers or {}, set(skip), status, []
 
     def post(self, url, headers=None, json=None, timeout=None):
-        prompt = json["contents"][0]["parts"][0]["text"]
+        claude = "anthropic" in url
+        prompt = json["messages"][0]["content"] if claude else json["contents"][0]["parts"][0]["text"]
         self.prompts.append(prompt)
         if self.status != 200:
             return FakeResponse(self.status, {"error": "bad"})
@@ -41,6 +45,9 @@ class FakeGemini:
             if pid in self.skip and len(ids) > 1:
                 continue
             out.append(self.answers.get(pid, ai_result(pid)))
+        if claude:
+            return FakeResponse(200, {"content": [{"type": "tool_use", "name": "submit_results", "input": {"results": out}}],
+                                      "usage": {"input_tokens": 1000, "output_tokens": 250}})
         return FakeResponse(200, {"candidates": [{"content": {"parts": [{"text": _dumps(out)}]}}],
                                   "usageMetadata": {"promptTokenCount": 1000, "candidatesTokenCount": 200, "thoughtsTokenCount": 50}})
 
@@ -125,7 +132,7 @@ def wired(d1, monkeypatch, tmp_path):
     monkeypatch.setattr(run_collect, "Notion", lambda key: notion)
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-    monkeypatch.setenv("GEMINI_API_KEY", "key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
     return d1, summary
 
 
@@ -176,6 +183,24 @@ def test_dry_run_judges_without_saving(wired, monkeypatch, make_tweet):
     assert "50点" in summary.read_text()
 
 
+def test_claude_call_reads_tool_result():
+    fake = FakeGemini()
+    results, t_in, t_out, calls = judge.judge([{"id": "1", "text": "募集"}], "key", "claude-haiku-5-5", [], 20, session=fake)
+    assert results["1"]["case_type"] == "コスプレ撮影" and (t_in, t_out, calls) == (1000, 250, 1)
+    assert judge.cost_usd("claude-haiku-5-5", 1_000_000, 1_000_000) == pytest.approx(0.60)
+
+
+def test_claude_schema_is_lowercase_json_schema():
+    schema = judge.json_schema(judge.SCHEMA)
+    assert schema["type"] == "array" and schema["items"]["properties"]["case_type"]["type"] == "string"
+    assert "コスプレ撮影" in schema["items"]["properties"]["case_type"]["enum"]
+
+
 def test_missing_key_skips_judging(d1):
-    lines = judge_step.run(d1, config(), True, None)
+    lines = judge_step.run(d1, config(), True, {})
     assert any("GEMINI_API_KEY" in line for line in lines)
+    cfg = config()
+    cfg["basic"]["判定に使うAI"] = "claude-haiku-5-5"
+    assert any("ANTHROPIC_API_KEY" in line for line in judge_step.run(d1, cfg, True, {}))
+    cfg["basic"]["判定に使うAI"] = "gpt-6-luna"
+    assert any("使えません" in line for line in judge_step.run(d1, cfg, True, {"X": "k"}))

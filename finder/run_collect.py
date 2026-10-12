@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from finder import collect, filters, judge_step, store
+from finder import collect, filters, judge, judge_step, store
 from finder.config import load_config
 from finder.d1 import D1
 from finder.notion import Notion
@@ -122,7 +122,8 @@ def main():
         lines.append("- 減点語に当たった数: " + "、".join(f"{k} {v}件" for k, v in penalty_count.most_common(10)))
     for w in warnings:
         lines.append(f"- ⚠️ {w}")
-    lines += judge_step.run(d1, config, production, os.environ.get("GEMINI_API_KEY"), tweets=fresh, decisions=decisions)
+    lines += judge_step.run(d1, config, production, {k: os.environ.get(k) for k in judge.KEY_NAMES.values()},
+                            tweets=fresh, decisions=decisions)
     lines += month_cost_lines(d1, basic)
     write_summary(lines)
 

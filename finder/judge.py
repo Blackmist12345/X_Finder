@@ -1,4 +1,4 @@
-"""N4 AI 判定: ポストの文字だけを、まとめて AI(Gemini)に読ませる。
+"""N4 AI 判定: ポストの文字だけを、まとめて AI(Claude または Gemini)に読ませる。
 
 画像は読まない(費用を抑えるため。画像は点数の高い案件だけ、参加者情報 N7 で読む)。
 AI には事実の読み取りだけを頼み、対象外にするかどうかは reject_reason() がルールで決める。
@@ -10,14 +10,31 @@ import requests
 
 from finder.tables import TYPES
 
-API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+class JudgeError(Exception):
+    pass
+
+
+GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+CLAUDE_API = "https://api.anthropic.com/v1/messages"
+DEFAULT_MODEL = "claude-haiku-5-5"
 
 # 100万トークンあたりの料金(ドル)。(入力, 出力)。考える分のトークンも出力として課金される。
 PRICES = {
+    "claude-haiku-5-5": (0.10, 0.50),
     "gemini-3.5-flash-lite": (0.30, 2.50),
     "gemini-3.1-flash-lite": (0.25, 1.50),
 }
-DEFAULT_PRICE = PRICES["gemini-3.5-flash-lite"]
+DEFAULT_PRICE = PRICES["gemini-3.5-flash-lite"]  # 表にない機種は高めの料金で数える
+
+# 使う AI の会社ごとの、鍵の環境変数の名前。判定に使うAI の名前の先頭で決まる。
+KEY_NAMES = {"claude": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY"}
+
+
+def provider(model):
+    for name in KEY_NAMES:
+        if model.startswith(name):
+            return name
+    raise JudgeError(f"判定に使うAI「{model}」は使えません。claude- か gemini- で始まる名前にしてください")
 
 PREFECTURES = [
     "北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県", "茨城県", "栃木県", "群馬県",
@@ -76,10 +93,6 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
 """
 
 
-class JudgeError(Exception):
-    pass
-
-
 def build_prompt(items, excluded_works):
     lines = [RULES, "除外作品: " + ("、".join(excluded_works) if excluded_works else "なし"), ""]
     for it in items:
@@ -98,40 +111,75 @@ def cost_usd(model, prompt_tokens, output_tokens):
     return prompt_tokens / 1_000_000 * price_in + output_tokens / 1_000_000 * price_out
 
 
-def call(api_key, model, prompt, session=None):
-    """AI を 1 回呼ぶ。(結果の配列, 入力トークン, 出力トークン) を返す。"""
-    s = session or requests
-    body = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"responseMimeType": "application/json", "responseSchema": SCHEMA, "temperature": 0},
-    }
+def _post(s, url, headers, body):
+    """再試行つきで POST する。200 の応答の JSON を返す。"""
     last = ""
     for attempt in range(5):
         try:
-            res = s.post(API.format(model=model), headers={"x-goog-api-key": api_key}, json=body, timeout=120)
+            res = s.post(url, headers=headers, json=body, timeout=120)
         except requests.RequestException as e:
             last = str(e)
             time.sleep(2 ** attempt * 3)
             continue
-        if res.status_code in (429, 500, 503):
+        if res.status_code in (429, 500, 503, 529):
             last = f"{res.status_code}"
             time.sleep(2 ** attempt * 5)
             continue
         if res.status_code != 200:
             raise JudgeError(f"AI の呼び出しが失敗しました ({res.status_code}): {res.text[:300]}")
-        data = res.json()
-        usage = data.get("usageMetadata") or {}
-        tokens_in = usage.get("promptTokenCount", 0)
-        tokens_out = usage.get("candidatesTokenCount", 0) + usage.get("thoughtsTokenCount", 0)
-        try:
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
-            result = json.loads(text)
-        except (KeyError, IndexError, ValueError) as e:
-            raise JudgeError(f"AI の返事を読めませんでした: {str(data)[:300]}") from e
-        if not isinstance(result, list):
-            raise JudgeError("AI の返事が配列ではありませんでした")
-        return result, tokens_in, tokens_out
+        return res.json()
     raise JudgeError(f"AI の呼び出しが再試行後も失敗しました ({last})")
+
+
+def json_schema(schema):
+    """Gemini 形式のスキーマ(type が大文字)を、Claude 用の JSON Schema に直す。"""
+    out = {k: v for k, v in schema.items() if k not in ("type", "properties", "items")}
+    out["type"] = schema["type"].lower()
+    if "properties" in schema:
+        out["properties"] = {k: json_schema(v) for k, v in schema["properties"].items()}
+    if "items" in schema:
+        out["items"] = json_schema(schema["items"])
+    return out
+
+
+def _call_gemini(s, api_key, model, prompt):
+    body = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json", "responseSchema": SCHEMA, "temperature": 0},
+    }
+    data = _post(s, GEMINI_API.format(model=model), {"x-goog-api-key": api_key}, body)
+    usage = data.get("usageMetadata") or {}
+    try:
+        result = json.loads(data["candidates"][0]["content"]["parts"][0]["text"])
+    except (KeyError, IndexError, ValueError) as e:
+        raise JudgeError(f"AI の返事を読めませんでした: {str(data)[:300]}") from e
+    return result, usage.get("promptTokenCount", 0), usage.get("candidatesTokenCount", 0) + usage.get("thoughtsTokenCount", 0)
+
+
+def _call_claude(s, api_key, model, prompt):
+    # 決まった形で返させるため、結果を「道具」の引数として出させる。
+    tool = {"name": "submit_results", "description": "読み取った結果を提出する",
+            "input_schema": {"type": "object", "properties": {"results": json_schema(SCHEMA)}, "required": ["results"]}}
+    body = {"model": model, "max_tokens": 16000, "tools": [tool],
+            "tool_choice": {"type": "tool", "name": "submit_results"},
+            "messages": [{"role": "user", "content": prompt}]}
+    headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+    data = _post(s, CLAUDE_API, headers, body)
+    usage = data.get("usage") or {}
+    blocks = [b for b in data.get("content", []) if b.get("type") == "tool_use"]
+    if not blocks or not isinstance(blocks[0].get("input"), dict):
+        raise JudgeError(f"AI の返事を読めませんでした: {str(data)[:300]}")
+    return blocks[0]["input"].get("results"), usage.get("input_tokens", 0), usage.get("output_tokens", 0)
+
+
+def call(api_key, model, prompt, session=None):
+    """AI を 1 回呼ぶ。(結果の配列, 入力トークン, 出力トークン) を返す。"""
+    s = session or requests
+    fn = _call_claude if provider(model) == "claude" else _call_gemini
+    result, tokens_in, tokens_out = fn(s, api_key, model, prompt)
+    if not isinstance(result, list):
+        raise JudgeError("AI の返事が配列ではありませんでした")
+    return result, tokens_in, tokens_out
 
 
 def judge(items, api_key, model, excluded_works, batch_size, session=None):

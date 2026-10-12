@@ -79,18 +79,26 @@ def save(d1, evaluated, missing_ids, model):
                      [status, reason] + part)
 
 
-def run(d1, config, production, api_key, tweets=None, decisions=None, session=None):
-    """判定と採点を行い、要約の行を返す。失敗しても例外は出さない(ポストは判定待ちのまま残る)。"""
+def run(d1, config, production, api_keys, tweets=None, decisions=None, session=None):
+    """判定と採点を行い、要約の行を返す。失敗しても例外は出さない(ポストは判定待ちのまま残る)。
+
+    api_keys は {環境変数の名前: 鍵}。判定に使うAI の会社に合う鍵を使う。
+    """
     lines = ["", "## AI 判定と採点" + ("" if production else "(試し実行: 何も保存していません)"), ""]
+    basic = config["basic"]
+    model = basic["判定に使うAI"]
+    try:
+        key_name = judge.KEY_NAMES[judge.provider(model)]
+    except judge.JudgeError as e:
+        return lines + [f"- ⚠️ {e}(ポストは判定待ちのまま残ります)"]
+    api_key = (api_keys or {}).get(key_name)
     if not api_key:
-        return lines + ["- ⚠️ GEMINI_API_KEY が登録されていないので、判定は行いませんでした(ポストは判定待ちのまま残ります)"]
+        return lines + [f"- ⚠️ {key_name} が登録されていないので、判定は行いませんでした(ポストは判定待ちのまま残ります)"]
 
     items = items_from_db(d1) if production else items_from_tweets(tweets or [], decisions or {})
     if not items:
         return lines + ["- 判定待ちのポストはありませんでした"]
 
-    basic = config["basic"]
-    model = basic["判定に使うAI"]
     try:
         results, t_in, t_out, calls = judge.judge(items, api_key, model, config["excluded_works"],
                                                   max(1, basic["まとめて判定する件数"]), session)
