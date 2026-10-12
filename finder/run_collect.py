@@ -70,6 +70,12 @@ def main():
             d1.ensure_schema()
         except Exception as e:  # 表がそろっていれば収集は続けられる
             warnings.append(f"D1 の表の確認に失敗しました: {e}")
+        try:
+            purged = store.purge_deleted(d1)
+            if purged:
+                warnings.append(f"「削除予定」の案件のうち投稿から{store.DELETE_AFTER_DAYS}日たった {purged}件を消しました")
+        except Exception as e:  # 消せなくても収集は続ける(次の実行でもう一度試す)
+            warnings.append(f"「削除予定」の案件を消せませんでした: {e}")
         run_id = d1.query(
             "INSERT INTO runs (started_at, window_start, window_end, status) VALUES (?, ?, ?, 'running') RETURNING id",
             [started, datetime.fromtimestamp(since_ts, timezone.utc).isoformat(), datetime.fromtimestamp(until_ts, timezone.utc).isoformat()],
