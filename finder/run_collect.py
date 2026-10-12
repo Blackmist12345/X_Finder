@@ -97,10 +97,17 @@ def main():
     existing = store.existing_post_ids(d1, [str(t.get("id")) for t in tweets])
     fresh = [t for t in tweets if str(t.get("id")) not in existing]
 
+    try:
+        blocked = store.blacklisted_ids(d1)
+    except Exception as e:  # 読めなくても収集は続ける(その回はブラックリストの人も判定に回る)
+        blocked = set()
+        warnings.append(f"ブラックリストを読めませんでした: {e}")
+
     decisions, reasons, penalty_count = {}, Counter(), Counter()
     min_followers = basic["最小フォロワー数"]
     for tw in fresh:
-        reason = filters.skip_reason(tw, overflow, min_followers)
+        in_blacklist = str((tw.get("author") or {}).get("id")) in blocked
+        reason = store.BLACKLIST_REASON if in_blacklist else filters.skip_reason(tw, overflow, min_followers)
         hits = filters.penalty_hits(tw.get("text", ""), config["penalty_words"])
         decisions[str(tw.get("id"))] = ("skipped" if reason else "new", reason, hits)
         if reason:

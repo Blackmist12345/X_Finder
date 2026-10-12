@@ -9,6 +9,12 @@ export function fakeD1() {
   for (const s of body.split(";").map((s) => s.trim()).filter(Boolean)) db.exec(s);
   return {
     raw: db,
+    // D1 の batch はまとめて 1 回で、途中で失敗したら全部取り消す
+    async batch(stmts) {
+      db.exec("BEGIN");
+      try { const out = []; for (const st of stmts) out.push(await st.run()); db.exec("COMMIT"); return out; }
+      catch (e) { db.exec("ROLLBACK"); throw e; }
+    },
     prepare(q) {
       let args = [];
       const stmt = db.prepare(q);

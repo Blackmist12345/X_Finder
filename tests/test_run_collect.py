@@ -55,3 +55,17 @@ def test_dry_run_writes_nothing(wired, monkeypatch, make_tweet):
     run_collect.main()
     assert d1.query("SELECT COUNT(*) AS n FROM posts")[0]["n"] == 0
     assert d1.get_meta(run_collect.WINDOW_KEY) is None
+
+
+def test_blacklisted_author_is_skipped_before_judging(wired, monkeypatch, make_tweet):
+    d1, summary = wired
+    d1.query("INSERT INTO blacklist (user_id, username, reason, added_at) VALUES ('666', 'spam', 'spam', '2026-10-12T00:00:00+00:00')")
+    tweets = [make_tweet("1", text="カメラマン募集"), make_tweet("2", text="カメラマン募集", author_id="666")]
+    monkeypatch.setattr(collect, "fetch", lambda *a, **k: (tweets, 1))
+    monkeypatch.setenv("MODE", "production")
+    run_collect.main()
+
+    posts = {r["id"]: r for r in d1.query("SELECT id, status, skip_reason FROM posts")}
+    assert posts["1"]["status"] == "new"
+    assert posts["2"] == {"id": "2", "status": "skipped", "skip_reason": "ブラックリスト"}
+    assert "ブラックリスト 1件" in summary.read_text()

@@ -15,14 +15,23 @@ const SETTINGS_KEY = "finder_settings";
 const SWIPE_CHOICES = ["hold", "delete", "seen", "none"];
 const DEFAULT_SETTINGS = { swipe_right: "hold", swipe_left: "delete" };
 
-// 収集の実行(schema.sql)より先に画面が使われても困らないよう、確認の状態の表はここでも作る
-const REVIEWS_DDL = `CREATE TABLE IF NOT EXISTS reviews (
-  post_id TEXT PRIMARY KEY, state TEXT NOT NULL, opened_at TEXT, updated_at TEXT NOT NULL)`;
-let reviewsReady = false;
-async function ensureReviews(db) {
-  if (reviewsReady) return;
-  await db.prepare(REVIEWS_DDL).run();
-  reviewsReady = true;
+// ブラックリストの理由。spam=スパム / false=虚偽の申告 / other=その他
+const BLACKLIST_REASONS = ["spam", "false", "other"];
+const BLACKLIST_SKIP = "ブラックリスト"; // 判定前のポストに付ける除外理由(finder/store.py と同じ)
+const NOT_BLACKLISTED = "NOT EXISTS (SELECT 1 FROM blacklist b WHERE b.user_id = p.author_id)";
+
+// 収集の実行(schema.sql)より先に画面が使われても困らないよう、画面が書く表はここでも作る
+const TABLES_DDL = [
+  `CREATE TABLE IF NOT EXISTS reviews (
+    post_id TEXT PRIMARY KEY, state TEXT NOT NULL, opened_at TEXT, updated_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS blacklist (
+    user_id TEXT PRIMARY KEY, username TEXT, reason TEXT NOT NULL, note TEXT, added_at TEXT NOT NULL)`,
+];
+let tablesReady = false;
+async function ensureTables(db) {
+  if (tablesReady) return;
+  await db.batch(TABLES_DDL.map((sql) => db.prepare(sql)));
+  tablesReady = true;
 }
 
 const SECURITY_HEADERS = {
@@ -76,7 +85,7 @@ function daysAgoIso(days) {
 const CASE_COLUMNS = `
   p.id, p.text, p.url, p.created_at, p.collected_at, p.status, p.skip_reason, p.quoted_id,
   j.case_type, j.works, j.prefecture, j.place, j.dates, j.summary, j.score, j.critical, j.critical_reason, j.reject_reason,
-  u.username, u.name, u.followers, u.following, u.profile_image, COALESCE(r.state, 'unread') AS review`;
+  p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, COALESCE(r.state, 'unread') AS review`;
 
 export async function listCases(db, params) {
   const view = params.get("view") === "rejected" ? "rejected" : "judged";
@@ -87,7 +96,7 @@ export async function listCases(db, params) {
         (SELECT COUNT(*) FROM post_users pu WHERE pu.post_id = p.id AND pu.role IN ('mention', 'quoted')) AS others
        FROM posts p JOIN judgments j ON j.post_id = p.id LEFT JOIN users u ON u.id = p.author_id
        LEFT JOIN reviews r ON r.post_id = p.id
-       WHERE p.status = ? AND (p.collected_at >= ? OR r.state = 'hold')
+       WHERE p.status = ? AND (p.collected_at >= ? OR r.state = 'hold') AND ${NOT_BLACKLISTED}
        ORDER BY j.score DESC, p.created_at DESC LIMIT ?`,
     )
     .bind(view, daysAgoIso(days), MAX_LIST)
@@ -117,6 +126,7 @@ export async function getCase(db, id) {
     )
     .bind(id)
     .all();
+  const black = await db.prepare("SELECT reason, note, added_at FROM blacklist WHERE user_id = ?").bind(row.author_id).first();
   const { media_json, score_json, ...rest } = row;
   return {
     ...rest,
@@ -125,7 +135,47 @@ export async function getCase(db, id) {
     media: parseJson(media_json, []),
     score_detail: parseJson(score_json, []),
     people,
+    blacklist: black || null,
   };
+}
+
+// ブラックリスト。載せた人の判定待ちのポストは判定にかけない(AI の費用を使わない)
+export async function listBlacklist(db) {
+  const { results } = await db
+    .prepare(
+      `SELECT b.user_id, COALESCE(u.username, b.username) AS username, u.name, u.profile_image, b.reason, b.note, b.added_at,
+         (SELECT COUNT(*) FROM posts p WHERE p.author_id = b.user_id) AS posts
+       FROM blacklist b LEFT JOIN users u ON u.id = b.user_id ORDER BY b.added_at DESC`,
+    )
+    .all();
+  return results;
+}
+
+export async function changeBlacklist(db, body) {
+  const id = String(body.user_id || "");
+  if (!/^\d{1,25}$/.test(id)) throw new RangeError("user_id");
+  if (body.remove === true) {
+    // 載っていた間に判定を飛ばした直近のポストは、判定待ちに戻す(次の収集で判定され、一覧に出る)
+    await db.batch([
+      db.prepare("DELETE FROM blacklist WHERE user_id = ?").bind(id),
+      db
+        .prepare("UPDATE posts SET status = 'new', skip_reason = NULL WHERE author_id = ? AND status = 'skipped' AND skip_reason = ? AND collected_at >= ?")
+        .bind(id, BLACKLIST_SKIP, daysAgoIso(14)),
+    ]);
+    return { user_id: id, blacklisted: false };
+  }
+  if (!BLACKLIST_REASONS.includes(body.reason)) throw new RangeError("reason");
+  const note = typeof body.note === "string" ? body.note.trim().slice(0, 200) : "";
+  const user = await db.prepare("SELECT username FROM users WHERE id = ?").bind(id).first();
+  if (!user) return null;
+  await db.batch([
+    db
+      .prepare(`INSERT INTO blacklist (user_id, username, reason, note, added_at) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET reason = excluded.reason, note = excluded.note`)
+      .bind(id, user.username, body.reason, note || null, nowIso()),
+    db.prepare("UPDATE posts SET status = 'skipped', skip_reason = ? WHERE author_id = ? AND status = 'new'").bind(BLACKLIST_SKIP, id),
+  ]);
+  return { user_id: id, blacklisted: true };
 }
 
 function nowIso() {
@@ -316,13 +366,25 @@ export default {
         return json({ error: "保存できませんでした" }, 500);
       }
     }
+    if (url.pathname === "/api/blacklist" && request.method === "POST") {
+      if (!sameOriginWrite(request, url)) return text("このページからだけ変更できます。", 403);
+      try {
+        await ensureTables(env.DB);
+        const r = await changeBlacklist(env.DB, await request.json().catch(() => ({})));
+        return r ? json(r) : json({ error: "見つかりません" }, 404);
+      } catch (e) {
+        if (e instanceof RangeError) return json({ error: "指定が正しくありません" }, 400);
+        console.error(e);
+        return json({ error: "保存できませんでした" }, 500);
+      }
+    }
     const write = url.pathname.match(/^\/api\/cases\/(\d{1,25})\/review$/);
     if (write) {
       if (request.method !== "POST") return text("POST だけ使えます。", 405);
       if (!sameOriginWrite(request, url)) return text("このページからだけ変更できます。", 403);
       try {
         const body = await request.json().catch(() => ({}));
-        await ensureReviews(env.DB);
+        await ensureTables(env.DB);
         const review = await setReview(env.DB, write[1], { state: body.state, opened: body.opened === true });
         return review ? json({ review }) : json({ error: "見つかりません" }, 404);
       } catch (e) {
@@ -333,7 +395,7 @@ export default {
     }
     if (request.method !== "GET") return text("GET だけ使えます。", 405);
     try {
-      if (url.pathname.startsWith("/api/")) await ensureReviews(env.DB);
+      if (url.pathname.startsWith("/api/")) await ensureTables(env.DB);
       if (url.pathname === "/") {
         return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", ...SECURITY_HEADERS } });
       }
@@ -346,6 +408,7 @@ export default {
       if (url.pathname === "/api/cases") return json({ cases: await listCases(env.DB, url.searchParams) });
       if (url.pathname === "/api/summary") return json(await getSummary(env.DB));
       if (url.pathname === "/api/settings") return json(await getSettings(env.DB));
+      if (url.pathname === "/api/blacklist") return json({ blacklist: await listBlacklist(env.DB) });
       if (url.pathname === "/api/stats") return json(await getStats(env.DB, url.searchParams));
       const m = url.pathname.match(/^\/api\/cases\/(\d{1,25})$/);
       if (m) {

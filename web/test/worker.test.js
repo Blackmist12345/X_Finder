@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 
 import { resetCertsCache, verifyAccess } from "../src/auth.js";
-import worker, { getCase, getSettings, getStats, getSummary, listCases, saveSettings, setReview } from "../src/index.js";
+import worker, { changeBlacklist, getCase, getSettings, getStats, getSummary, listBlacklist, listCases, saveSettings, setReview } from "../src/index.js";
 import { fakeD1 } from "./fake-d1.js";
 
 const TEAM = "example.cloudflareaccess.com";
@@ -106,6 +106,27 @@ test("サマリー: 日ごとの数・累計・今月と先月の比べ・種類
   assert.equal((await getStats(db, new URLSearchParams("days=5"))).days, 30); // 決まった期間以外は 30 日
 });
 
+test("ブラックリスト: 載せた人の案件は一覧に出ず、判定待ちのポストは判定に回さない。解除すると戻る", async () => {
+  assert.deepEqual(await changeBlacklist(db, { user_id: "100", reason: "spam", note: "  同じ文面を連投  " }), { user_id: "100", blacklisted: true });
+  assert.deepEqual(await listCases(db, new URLSearchParams()), []);
+  assert.deepEqual(await listCases(db, new URLSearchParams("view=rejected")), []);
+  const p5 = db.raw.prepare("SELECT status, skip_reason FROM posts WHERE id = '5'").get();
+  assert.deepEqual({ ...p5 }, { status: "skipped", skip_reason: "ブラックリスト" });
+  assert.equal((await getCase(db, "1")).blacklist.reason, "spam");
+  const list = await listBlacklist(db);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].username, "client");
+  assert.equal(list[0].note, "同じ文面を連投");
+  assert.equal(list[0].posts, 5);
+  assert.equal(await changeBlacklist(db, { user_id: "999", reason: "spam" }), null); // 台帳にいない人
+  await assert.rejects(changeBlacklist(db, { user_id: "100", reason: "bad" }), RangeError);
+  await assert.rejects(changeBlacklist(db, { user_id: "abc", reason: "spam" }), RangeError);
+  assert.deepEqual(await changeBlacklist(db, { user_id: "100", remove: true }), { user_id: "100", blacklisted: false });
+  assert.deepEqual((await listCases(db, new URLSearchParams())).map((c) => c.id), ["2", "1"]);
+  assert.equal((await getCase(db, "1")).blacklist, null);
+  assert.equal(db.raw.prepare("SELECT status FROM posts WHERE id = '5'").get().status, "new"); // 判定待ちに戻る
+});
+
 test("スワイプの設定は初期値があり、変えると保存される", async () => {
   assert.deepEqual(await getSettings(db), { swipe_right: "hold", swipe_left: "delete" });
   assert.deepEqual(await saveSettings(db, { swipe_left: "seen" }), { swipe_right: "hold", swipe_left: "seen" });
@@ -194,6 +215,16 @@ test("Access を通れば画面と API が返る", async () => {
     }), env);
     assert.equal((await setting.json()).swipe_right, "none");
     assert.equal((await (await worker.fetch(req("/api/settings", token), env)).json()).swipe_right, "none");
+    const black = (body, headers = {}) => worker.fetch(new Request("https://x-finder.example.workers.dev/api/blacklist", {
+      method: "POST", body: JSON.stringify(body),
+      headers: { "cf-access-jwt-assertion": token, "content-type": "application/json", "x-finder": "1", ...headers },
+    }), env);
+    assert.equal((await black({ user_id: "100", reason: "spam" }, { origin: "https://evil.example" })).status, 403);
+    assert.equal((await black({ user_id: "100", reason: "nope" })).status, 400);
+    assert.equal((await black({ user_id: "999", reason: "spam" })).status, 404);
+    assert.equal((await black({ user_id: "100", reason: "false" })).status, 200);
+    assert.equal((await (await worker.fetch(req("/api/blacklist", token), env)).json()).blacklist[0].reason, "false");
+    assert.equal((await (await worker.fetch(req("/api/cases", token), env)).json()).cases.length, 0);
   } finally {
     globalThis.fetch = realFetch;
   }
