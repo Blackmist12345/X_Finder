@@ -115,6 +115,13 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .num{font-family:var(--font-num);font-size:15px;font-variant-numeric:tabular-nums}
 .ff{margin-left:auto;text-align:right;white-space:nowrap}
 .ff small{display:block;color:var(--muted);font-size:10.5px;font-family:var(--font-body)}
+/* 下へスクロールしている間は上部をたたむ: 状態タブは数字と色だけ、絞り込みの行は隠す。上へ戻すと広げる */
+.tab .t{display:block;max-height:1.4em;overflow:hidden;transition:max-height .22s ease,opacity .18s ease}
+.filters{display:grid;grid-template-rows:1fr;transition:grid-template-rows .22s ease,opacity .18s ease}
+.filters>div{min-height:0;overflow:hidden}
+header.top.slim .tab .t{max-height:0;opacity:0}
+header.top.slim .filters{grid-template-rows:0fr;opacity:0;pointer-events:none}
+header.top.slim .tab .c{font-size:17px}
 .tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:10px;background:var(--surface-2);border-radius:12px;padding:3px}
 .tab{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12.5px;border-radius:9px;padding:6px 2px;cursor:pointer;white-space:nowrap}
 .tab .c{display:block;font-family:var(--font-num);font-size:16px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
@@ -209,6 +216,7 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
       <button class="cost" id="cost" title="今月の API 費用 / 目標。タップでサマリー" aria-label="サマリーを見る">今月 —</button>
     </div>
     <div class="tabs" id="tabs" role="group" aria-label="確認の状態"></div>
+    <div class="filters" id="filters"><div>
     <div class="scroller" id="presets" role="group" aria-label="絞り込み"></div>
     <div class="row2">
       <div class="scroller" id="types" role="group" aria-label="種類" style="margin-top:0;flex:1;min-width:0"></div>
@@ -221,6 +229,7 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
       <button class="icon-btn" id="reload" aria-label="最新にする" title="最新にする">↻</button>
       <button class="icon-btn" id="openSettings" aria-label="設定" title="設定">⚙</button>
     </div>
+    </div></div>
   </header>
   <div class="ptr" id="ptr" aria-live="polite"><span id="ptrText"></span></div>
   <p class="note" id="status" hidden></p>
@@ -311,7 +320,7 @@ async function load(){
 }
 function renderControls(){
   const n=k=>matching().filter(c=>c.review===k).length;
-  $("tabs").innerHTML=TABS.map(t=>`<button class="tab" aria-pressed="${state.tab===t.k}" data-tab="${t.k}"><span class="c">${n(t.k)}</span>${t.t}</button>`).join("");
+  $("tabs").innerHTML=TABS.map(t=>`<button class="tab" aria-pressed="${state.tab===t.k}" data-tab="${t.k}"><span class="c">${n(t.k)}</span><span class="t">${t.t}</span></button>`).join("");
   $("presets").innerHTML=PRESETS.map(p=>`<button class="chip ${p.cls||""}" aria-pressed="${state.preset===p.k}" data-p="${p.k}">${p.t}</button>`).join("");
   $("types").innerHTML=TYPES.map(t=>`<button class="chip" aria-pressed="${state.types.has(t)}" data-t="${t}">${t}</button>`).join("");
   $("sort").value=state.sort;
@@ -655,6 +664,18 @@ $("viewer").addEventListener("touchend",ev=>{
 $("viewer").addEventListener("touchcancel",()=>{vdrag=null;resetViewerDrag()});
 $("sort").addEventListener("change",e=>{state.sort=e.target.value;save();render()});
 $("reload").addEventListener("click",load);
+// ---- スクロールの向きで上部をたたむ・広げる ----
+// たたむと上部が低くなってページの位置がずれるので、切り替えたあとの動きが落ち着くまでは向きを見ない(行ったり来たりしないように)
+let lastY=window.scrollY,moved=0,slimHold=0;
+function setSlim(on){const h=document.querySelector("header.top");if(h.classList.contains("slim")===on)return;
+  h.classList.toggle("slim",on);slimHold=Date.now()+320;moved=0}
+window.addEventListener("scroll",()=>{
+  const y=window.scrollY,dy=y-lastY;lastY=y;
+  if(y<=40){setSlim(false);return}
+  if(Date.now()<slimHold)return;
+  moved=(Math.sign(dy)===Math.sign(moved))?moved+dy:dy;
+  if(moved>24)setSlim(true);else if(moved<-24)setSlim(false);
+},{passive:true});
 // ---- 引っぱって再読み込み(一番上にいるときだけ。開いている詳細や画像の上では動かない) ----
 const PTR_GO=64;let ptr=null,ptrBusy=false;
 function ptrShow(h,txt){const el=$("ptr");el.classList.toggle("back",h===0||txt==="busy");el.style.height=`${h}px`;
