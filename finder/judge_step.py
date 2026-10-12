@@ -132,4 +132,10 @@ def run(d1, config, production, api_keys, tweets=None, decisions=None, session=N
             pref = r.get("prefecture") or "不明"
             lines.append(f"- {mark}**{total:g}点** {r.get('case_type')} / {pref} / {r.get('summary') or ''} {it.get('url') or ''}")
             lines.append("  - " + "、".join(f"{d['label']} {d['points']:+g}" for d in detail))
+    rejected = [e for e in evaluated if e[2]]
+    if rejected:
+        lines += ["", "### 対象外にしたポスト(先頭10件、見落としの確認用)", ""]
+        for it, r, reject, *_ in rejected[:10]:
+            body = (it.get("text") or "").replace("\n", " ")[:40]
+            lines.append(f"- {reject} / {body}… {it.get('url') or ''}")
     return lines

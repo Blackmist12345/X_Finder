@@ -204,3 +204,9 @@ def test_missing_key_skips_judging(d1):
     assert any("ANTHROPIC_API_KEY" in line for line in judge_step.run(d1, cfg, True, {}))
     cfg["basic"]["判定に使うAI"] = "gpt-6-luna"
     assert any("使えません" in line for line in judge_step.run(d1, cfg, True, {"X": "k"}))
+
+
+def test_out_of_list_prefecture_becomes_unknown():
+    r = judge.normalize(ai_result("1", prefecture="関東", case_type="撮影会"))
+    assert (r["prefecture"], r["prefecture_source"], r["place"], r["case_type"]) == ("不明", "不明", "関東", "その他")
+    assert judge.normalize(ai_result("1", prefecture="千葉県"))["prefecture"] == "千葉県"

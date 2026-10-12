@@ -74,6 +74,7 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
 
 - wants_photographer: 投稿者(引用ポストなら引用元の募集者を含む)が、撮影してくれるカメラマン・撮影者を探していれば true。
   被写体やモデルだけを募集している、カメラマン自身が被写体を探している、募集の締め切り報告・お礼・雑談なら false。
+  他人の募集への返信や質問(「まだ募集していますか」「立候補します」など)も false。
 - official_or_job: 企業や公式イベントの撮影スタッフ募集、仕事としての求人なら true。個人どうしの撮影なら false。
 - case_type: 次のどれか1つ。
   コスプレ撮影 = コスプレの写真撮影(併せ・ロケ・スタジオ・イベント会場での個撮を含む)
@@ -196,13 +197,25 @@ def judge(items, api_key, model, excluded_works, batch_size, session=None):
         wanted = {it["id"] for it in batch}
         for r in out:
             if isinstance(r, dict) and str(r.get("id")) in wanted:
-                results[str(r["id"])] = r
+                results[str(r["id"])] = normalize(r)
 
     for i in range(0, len(items), batch_size):
         run(items[i:i + batch_size])
     for it in [it for it in items if it["id"] not in results]:
         run([it])
     return results, tokens_in, tokens_out, calls
+
+
+def normalize(result):
+    """決められた選択肢以外の値を直す(AI が「関東」などを返すことがあるため)。"""
+    pref = result.get("prefecture")
+    if pref not in PREFECTURES and pref != UNKNOWN_PLACE:
+        if pref and not result.get("place"):
+            result["place"] = pref  # 「関東」などは場所の欄に残す
+        result["prefecture"], result["prefecture_source"] = UNKNOWN_PLACE, UNKNOWN_PLACE
+    if result.get("case_type") not in TYPES:
+        result["case_type"] = "その他"
+    return result
 
 
 def reject_reason(result, cosplay_only):
