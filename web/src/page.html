@@ -347,6 +347,7 @@ function reviewPill(c){
 }
 async function load(){
   const view=state.preset==="rejected"?"rejected":"judged";
+  detailCache.clear();
   $("count").textContent="読み込み中…";
   try{
     const [list,sum,set]=await Promise.all([api(`/api/cases?view=${view}`),api("/api/summary"),api("/api/settings").catch(()=>null)]);
@@ -444,16 +445,20 @@ async function unblack(btn){
   catch(e){btn.disabled=false;alert(`解除できませんでした(${e.message})`)}
 }
 let blacklistChanged=false;
-async function openSheet(id){
-  $("sheetRoot").innerHTML=`<div class="scrim" data-close="1"></div><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div><p class="sub">読み込み中…</p></div>`;
-  $("sheetRoot").hidden=false;document.body.style.overflow="hidden";
-  let c;try{c=await api(`/api/cases/${encodeURIComponent(id)}`)}catch(e){$("sheetRoot").querySelector(".sheet").innerHTML=`<div class="grab"></div><p>読み込めませんでした(${esc(e.message)})。</p><div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;return}
-  currentCase=c;
-  if(c.review==="unread"){c.review="seen";setLocalReview(id,"seen");postReview(id,{opened:true}).catch(()=>setLocalReview(id,"unread"))}
+// 詳細はタップした瞬間に一覧のデータで開き、画像・点数の内訳・関係するアカウントなどは届いたら足す。
+// 指が触れた時点で読み込みを始め、一度読んだ詳細は覚えておく。
+const detailCache=new Map();
+function fetchDetail(id){
+  let p=detailCache.get(id);
+  if(!p){p=api(`/api/cases/${encodeURIComponent(id)}`);detailCache.set(id,p);p.catch(()=>detailCache.delete(id))}
+  return p;
+}
+function prefetchDetail(card){const id=card&&card.dataset.id;if(id)fetchDetail(id).catch(()=>{})}
+function sheetHtml(c,full){
   const xurl=safeX(c.url);const media=(c.media||[]).map(safeImg).filter(Boolean);currentMedia=media;
   const cu=safeUser(c.username);
   const detail=c.score_detail||[];
-  $("sheetRoot").querySelector(".sheet").innerHTML=`<div class="grab"></div>
+  return `<div class="grab"></div>
    <div class="meta" id="sheetMeta">${reviewPill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span>${c.score!=null?`<span class="pill">${Math.round(c.score)}点</span>`:""}<span class="pill">${ago(c.created_at)}に投稿</span>${c.reject_reason?`<span class="pill warn">${esc(c.reject_reason)}</span>`:""}</div>
    <h2>${esc(c.summary||"(要約なし)")}</h2>
    <dl class="facts"><dt>日程</dt><dd>${esc(c.dates||"不明")}</dd><dt>場所</dt><dd>${esc(c.place||"")}${c.place?" ・ ":""}${esc(place(c))}${c.prefecture_source==="プロフィール"?"(プロフィールから推定)":""}</dd>
@@ -468,7 +473,33 @@ async function openSheet(id){
     ${c.blacklist?`<p class="sub" style="color:var(--rec)">🚫 ブラックリストに登録済み(${esc(BLACK_REASON[c.blacklist.reason]||"")})</p>`:""}</div>
    ${c.people&&c.people.length?`<div class="sec"><h3>関係するアカウント</h3><div class="people">${c.people.map(person).join("")}</div></div>`:""}
    <div class="black" id="blackBox" data-uid="${esc(c.author_id||"")}" data-name="${esc(c.username?"@"+c.username:(c.name||"この人"))}"></div>
-   <div class="detail-actions" id="reviewActions" data-id="${esc(c.id)}">${reviewButtons(c.review,c)}</div>`;
+   ${full?"":'<p class="sub" id="sheetLoading" style="text-align:center">くわしい情報を読み込み中…</p>'}
+   <div class="detail-actions" id="reviewActions" data-id="${esc(c.id)}">${reviewButtons(c.review,full?c:{...c,blacklist:null})}</div>`;
+}
+async function openSheet(id){
+  const base=cases.find(x=>x.id===id);
+  $("sheetRoot").innerHTML=`<div class="scrim" data-close="1"></div><div class="sheet" role="dialog" aria-modal="true">${base?sheetHtml(base,false):'<div class="grab"></div><p class="sub">読み込み中…</p>'}</div>`;
+  $("sheetRoot").hidden=false;document.body.style.overflow="hidden";
+  const sheet=$("sheetRoot").querySelector(".sheet");
+  currentCase=base||null;
+  const review0=base?base.review:null;
+  if(review0==="unread"){base.review="seen";setLocalReview(id,"seen");postReview(id,{opened:true}).catch(()=>setLocalReview(id,"unread"))}
+  let c;try{c=await fetchDetail(id)}catch(e){
+    if(!sheet.isConnected)return;
+    const l=$("sheetLoading");if(l){l.textContent=`くわしい情報を読み込めませんでした(${esc(e.message)})`;return}
+    sheet.innerHTML=`<div class="grab"></div><p>読み込めませんでした(${esc(e.message)})。</p><div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;return}
+  if(!sheet.isConnected||$("sheetRoot").hidden)return; // 読み込みの間に閉じた・別の案件を開いた
+  c={...c};
+  const now=cases.find(x=>x.id===id);
+  if(now)c.review=now.review; // 確認の状態は一覧の最新を使う(開いたら確認済みになる・ボタンで変えた分)
+  else if(c.review==="unread"&&!base){c.review="seen";postReview(id,{opened:true}).catch(()=>{})}
+  currentCase=c;
+  // 開いたあとにブラックリストの入力欄を出していたら、そのまま残す
+  const box=$("blackBox");const keep=box&&box.innerHTML?box.innerHTML:"";
+  const top=sheet.scrollTop;
+  sheet.innerHTML=sheetHtml(c,true);
+  sheet.scrollTop=top;
+  if(keep){$("blackBox").innerHTML=keep;const f=$("blackForm");if(f)f.onsubmit=e=>{e.preventDefault();saveBlack(e.target)}}
 }
 // 本文はタップで X アプリのそのポストを開く
 function postBox(text,url,id,from){
@@ -541,6 +572,7 @@ function endDrag(commit){
 document.addEventListener("touchstart",ev=>{
   const card=ev.target.closest(".swipe .card");
   if(!card||ev.touches.length>1){drag=null;return}
+  prefetchDetail(card);
   startDrag(card,ev.touches[0].clientX,ev.touches[0].clientY);
 },{passive:true});
 document.addEventListener("touchmove",ev=>{
