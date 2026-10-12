@@ -1,4 +1,4 @@
--- ファインダーのデータベース(Cloudflare D1)。N12 データ保存 / N15 ユーザー台帳。
+-- X Finderのデータベース(Cloudflare D1)。N12 データ保存 / N15 ユーザー台帳。
 -- 何度実行しても壊れないように IF NOT EXISTS で作る。
 
 -- 収集したポスト。検索で見つけたもの(source=search)と、引用元として一緒に届いたもの(source=quoted)。
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS judgments (
 );
 CREATE INDEX IF NOT EXISTS judgments_score ON judgments (score);
 
--- N13 ファインダーでの確認の状態(案件カード 1 枚 = 1 行)。行がなければ「未確認」(一度も開いていない)。
+-- N13 X Finderでの確認の状態(案件カード 1 枚 = 1 行)。行がなければ「未確認」(一度も開いていない)。
 -- seen(確認済み) / hold(保留: ピン留め、期間が過ぎても一覧に残す) / delete(削除予定: 投稿日から 14 日で消す)
 CREATE TABLE IF NOT EXISTS reviews (
   post_id TEXT PRIMARY KEY,

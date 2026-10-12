@@ -1,4 +1,4 @@
-// Cloudflare Access の確認。ファインダーは自分だけが見るページなので、Access を通った人だけに中身を返す。
+// Cloudflare Access の確認。X Finderは自分だけが見るページなので、Access を通った人だけに中身を返す。
 // Access が付けてくる署名つきトークン(JWT)を、Access の公開鍵で検証する。
 // 設定(Worker の変数): ACCESS_TEAM_DOMAIN(例 xxx.cloudflareaccess.com)、ACCESS_AUD(アプリの AUD タグ)
 

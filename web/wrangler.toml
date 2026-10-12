@@ -1,4 +1,4 @@
-# N13 ファインダーの Worker。GitHub の Deploy Finder ワークフローが公開する。
+# N13 X Finderの Worker。GitHub の Deploy Finder ワークフローが公開する。
 # database_id は公開リポジトリに書かず、公開のときに secrets の D1_DATABASE_ID で置き換える。
 name = "x-finder"
 main = "src/index.js"
@@ -7,6 +7,12 @@ workers_dev = true
 preview_urls = false
 # ACCESS_TEAM_DOMAIN と ACCESS_AUD は Cloudflare のダッシュボードで入れる。公開し直しても消さない。
 keep_vars = true
+
+# ホーム画面に追加したときのアイコン(PNG)をそのまま Worker に入れる
+[[rules]]
+type = "Data"
+globs = ["**/*.png"]
+fallthrough = false
 
 [[d1_databases]]
 binding = "DB"

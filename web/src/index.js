@@ -1,8 +1,11 @@
-// N13 ファインダー: D1 にたまった判定・採点の結果を、スマホで見るための Web ページ。
+// N13 X Finder: D1 にたまった判定・採点の結果を、スマホで見るための Web ページ。
 // D1 は読むだけ。ただし案件カードの確認の状態(未確認 / 確認済み / 保留 / 削除予定)と、画面の設定だけは書く。
 // Cloudflare Access を通った人だけが見られる(auth.js)。
 import { verifyAccess } from "./auth.js";
 import page from "./page.html";
+import icon180 from "./icons/icon-180.png";
+import icon192 from "./icons/icon-192.png";
+import icon512 from "./icons/icon-512.png";
 
 const NEAR = ["東京都", "神奈川県", "埼玉県", "千葉県"];
 const MAX_LIST = 300;
@@ -29,6 +32,23 @@ const SECURITY_HEADERS = {
   "referrer-policy": "no-referrer",
   "x-frame-options": "DENY",
 };
+
+// ホーム画面に追加してアプリのように使うための情報(PWA)
+const MANIFEST = {
+  name: "X Finder",
+  short_name: "X Finder",
+  start_url: "/",
+  scope: "/",
+  display: "standalone",
+  orientation: "portrait",
+  background_color: "#f3f5f8",
+  theme_color: "#141a24",
+  icons: [
+    { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },
+    { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
+  ],
+};
+const ICONS = { "/icon-180.png": icon180, "/apple-touch-icon.png": icon180, "/icon-192.png": icon192, "/icon-512.png": icon512 };
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -230,6 +250,12 @@ export default {
       if (url.pathname.startsWith("/api/")) await ensureReviews(env.DB);
       if (url.pathname === "/") {
         return new Response(page, { headers: { "content-type": "text/html; charset=utf-8", ...SECURITY_HEADERS } });
+      }
+      if (url.pathname === "/manifest.webmanifest") {
+        return new Response(JSON.stringify(MANIFEST), { headers: { "content-type": "application/manifest+json", ...SECURITY_HEADERS } });
+      }
+      if (ICONS[url.pathname]) {
+        return new Response(ICONS[url.pathname], { headers: { "content-type": "image/png", ...SECURITY_HEADERS, "cache-control": "private, max-age=86400" } });
       }
       if (url.pathname === "/api/cases") return json({ cases: await listCases(env.DB, url.searchParams) });
       if (url.pathname === "/api/summary") return json(await getSummary(env.DB));
