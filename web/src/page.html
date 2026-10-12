@@ -215,7 +215,16 @@ header.top.slim .tab .c{font-size:17px}
 .empty{text-align:center;color:var(--muted);padding:40px 0}
 .scrim{position:fixed;inset:0;background:rgba(10,14,20,.45);z-index:20;touch-action:none}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:21;background:var(--surface);border-radius:20px 20px 0 0;max-height:88%;overflow-y:auto;overscroll-behavior:none;-webkit-overflow-scrolling:touch;padding:8px 16px calc(24px + env(safe-area-inset-bottom,0px));max-width:560px;margin:0 auto;box-shadow:0 -8px 30px rgba(0,0,0,.18)}
-@media (prefers-reduced-motion:no-preference){.sheet{animation:up .22s ease-out}@keyframes up{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}}}
+/* 詳細は下からなめらかにせり上がる(中身は開ききってから差し替えるので、途中で形が変わらない) */
+@media (prefers-reduced-motion:no-preference){
+  .sheet{animation:up .36s cubic-bezier(.2,.85,.25,1) both;will-change:transform}
+  .scrim{animation:fade .36s ease-out both}
+  @keyframes up{from{transform:translate3d(0,100%,0)}to{transform:none}}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  .sheet.swap{animation:swap .18s ease-out both}
+  @keyframes swap{from{opacity:.55}to{opacity:1}}
+}
+.card.opening{opacity:.7;transition:opacity .1s}
 /* 一度でも引っぱったシートは、開くときのアニメーションをもう出さない(戻したときに一瞬薄くなるのを防ぐ) */
 .sheet.drag,.sheet.settled{animation:none}
 .sheet.drag{will-change:transform}
@@ -465,7 +474,7 @@ function sheetHtml(c,full){
     ${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}${c.critical_reason?`<dt>REC</dt><dd>${esc(c.critical_reason)}</dd>`:""}</dl>
    <div class="sec"><h3>募集ポスト</h3>${postBox(c.text,xurl,c.id)}
     ${c.quoted_text?postBox(c.quoted_text,safeX(c.quoted_url),c.quoted_id,"引用元のポスト"):""}
-    ${media.length?`<div class="media">${media.map((u,i)=>`<button type="button" data-img="${i}" aria-label="画像 ${i+1} を大きく見る"><img src="${esc(u)}" alt="添付画像" loading="lazy" referrerpolicy="no-referrer"></button>`).join("")}</div>`:""}</div>
+    ${media.length?`<div class="media">${media.map((u,i)=>`<button type="button" data-img="${i}" aria-label="画像 ${i+1} を大きく見る"><img src="${esc(u)}" alt="添付画像" loading="lazy" decoding="async" referrerpolicy="no-referrer"></button>`).join("")}</div>`:""}</div>
    ${detail.length?`<div class="sec"><h3>点数の内訳</h3><dl class="breakdown">${detail.map(d=>`<dt>${esc(d.label)}</dt><dd>${d.points>0?"+":""}${Math.round(d.points)}</dd>`).join("")}<dt class="total">合計</dt><dd class="total">${Math.round(c.score)}</dd></dl></div>`:""}
    <div class="sec"><h3>クライアント</h3><div class="people"><${cu?`a class="person link" href="https://x.com/${cu}" data-xuser="${cu}"`:'div class="person"'}>${ava(c)}<div class="who"><div>${esc(c.name||"")}</div>
     <div class="id">@${esc(c.username||"")} ・ フォロワー <span class="num">${fmt(c.followers)}</span> ・ フォロー <span class="num">${fmt(c.following)}</span> ・ FF率 <span class="num">${ffText(c)}</span></div>
@@ -476,29 +485,48 @@ function sheetHtml(c,full){
    ${full?"":'<p class="sub" id="sheetLoading" style="text-align:center">くわしい情報を読み込み中…</p>'}
    <div class="detail-actions" id="reviewActions" data-id="${esc(c.id)}">${reviewButtons(c.review,full?c:{...c,blacklist:null})}</div>`;
 }
-async function openSheet(id){
+const WAIT_DETAIL=280; // 詳細がこの時間内に届けば、はじめから全部そろった形で開く(途中で描き直さない)
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let opening=false;
+async function openSheet(id,cardEl){
+  if(opening)return; // 開くのを待っている間の二度押し
+  opening=true;try{await openSheetNow(id,cardEl)}catch(e){opening=false;throw e}
+}
+async function openSheetNow(id,cardEl){
   const base=cases.find(x=>x.id===id);
-  $("sheetRoot").innerHTML=`<div class="scrim" data-close="1"></div><div class="sheet" role="dialog" aria-modal="true">${base?sheetHtml(base,false):'<div class="grab"></div><p class="sub">読み込み中…</p>'}</div>`;
+  const p=fetchDetail(id);p.catch(()=>{});
+  if(base&&base.review==="unread"){base.review="seen";setLocalReview(id,"seen");postReview(id,{opened:true}).catch(()=>setLocalReview(id,"unread"))}
+  const fresh=d=>{const c={...d};const now=cases.find(x=>x.id===id);
+    if(now)c.review=now.review; // 確認の状態は一覧の最新を使う(開いたら確認済みになる・ボタンで変えた分)
+    else if(c.review==="unread"&&!base){c.review="seen";postReview(id,{opened:true}).catch(()=>{})}
+    return c};
+  // 少しだけ待って、届いていれば全部そろった形で開く。押したカードは薄くして、押せたことが分かるようにする
+  let c=null;
+  if(cardEl)cardEl.classList.add("opening");
+  c=await Promise.race([p.then(fresh,()=>null),sleep(WAIT_DETAIL).then(()=>null)]);
+  if(cardEl)cardEl.classList.remove("opening");
+  if(!c&&!base){try{c=fresh(await p)}catch(e){c=null}}
+  $("sheetRoot").innerHTML=`<div class="scrim" data-close="1"></div><div class="sheet" role="dialog" aria-modal="true">${c?sheetHtml(c,true):base?sheetHtml(base,false):'<div class="grab"></div><p>読み込めませんでした。</p><div class="actions"><button class="btn" data-close="1">閉じる</button></div>'}</div>`;
   $("sheetRoot").hidden=false;document.body.style.overflow="hidden";
+  opening=false; // ここから先(あとから差し替え)の間も、閉じて別のカードを開ける
   const sheet=$("sheetRoot").querySelector(".sheet");
-  currentCase=base||null;
-  const review0=base?base.review:null;
-  if(review0==="unread"){base.review="seen";setLocalReview(id,"seen");postReview(id,{opened:true}).catch(()=>setLocalReview(id,"unread"))}
-  let c;try{c=await fetchDetail(id)}catch(e){
-    if(!sheet.isConnected)return;
-    const l=$("sheetLoading");if(l){l.textContent=`くわしい情報を読み込めませんでした(${esc(e.message)})`;return}
-    sheet.innerHTML=`<div class="grab"></div><p>読み込めませんでした(${esc(e.message)})。</p><div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;return}
+  currentCase=c||base||null;
+  if(c||!base)return;
+  // 間に合わなかったときは、せり上がりが終わってから差し替える
+  const opened=getComputedStyle(sheet).animationName==="none"?Promise.resolve():new Promise(r=>{sheet.addEventListener("animationend",r,{once:true});setTimeout(r,600)});
+  let full;try{full=await p}catch(e){
+    await opened;if(!sheet.isConnected)return;
+    const l=$("sheetLoading");if(l)l.textContent=`くわしい情報を読み込めませんでした(${esc(e.message)})`;return}
+  await opened;
   if(!sheet.isConnected||$("sheetRoot").hidden)return; // 読み込みの間に閉じた・別の案件を開いた
-  c={...c};
-  const now=cases.find(x=>x.id===id);
-  if(now)c.review=now.review; // 確認の状態は一覧の最新を使う(開いたら確認済みになる・ボタンで変えた分)
-  else if(c.review==="unread"&&!base){c.review="seen";postReview(id,{opened:true}).catch(()=>{})}
-  currentCase=c;
+  c=fresh(full);currentCase=c;
   // 開いたあとにブラックリストの入力欄を出していたら、そのまま残す
   const box=$("blackBox");const keep=box&&box.innerHTML?box.innerHTML:"";
   const top=sheet.scrollTop;
+  sheet.classList.add("settled");
   sheet.innerHTML=sheetHtml(c,true);
   sheet.scrollTop=top;
+  sheet.classList.remove("settled");sheet.classList.add("swap");
   if(keep){$("blackBox").innerHTML=keep;const f=$("blackForm");if(f)f.onsubmit=e=>{e.preventDefault();saveBlack(e.target)}}
 }
 // 本文はタップで X アプリのそのポストを開く
@@ -750,7 +778,7 @@ document.addEventListener("click",ev=>{
   const dbm=ev.target.closest("[data-dbmore]");if(dbm){dbm.disabled=true;openTable(dbState.name,dbState.q,Number(dbm.dataset.dbmore));return}
   const t=ev.target.closest("[data-t]");if(t){const v=t.dataset.t;state.types.has(v)?state.types.delete(v):state.types.add(v);save();render();return}
   if(ev.target.closest("[data-close]")){closeSheet();return}
-  const c=ev.target.closest(".card");if(c&&!suppressClick)openSheet(c.dataset.id);
+  const c=ev.target.closest(".card");if(c&&!suppressClick)openSheet(c.dataset.id,c);
 });
 document.addEventListener("keydown",e=>{
   if(!$("viewer").hidden){const s=$("strip");
