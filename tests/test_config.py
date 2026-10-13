@@ -133,3 +133,12 @@ def test_emojis_missing_table_id(d1):
     d1.set_meta(config.TABLE_IDS_KEY, {t["key"]: t["key"] for t in TABLES if t["key"] != "emojis"})
     cfg, warnings = config.load_config(FakeNotion(good_tables()), d1)
     assert cfg["emojis"] == [] and not any("絵文字" in w for w in warnings)
+
+
+def test_emoji_seed_file():
+    table = next(t for t in TABLES if t["key"] == "emojis")
+    rows = seed_rows(table)
+    assert len(rows) > 200
+    first = rows[0]
+    assert first["絵文字"]["title"][0]["text"]["content"] == "🐰"
+    assert first["キャラ名"]["rich_text"][0]["text"]["content"] == "月ノ美兎"

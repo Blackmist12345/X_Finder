@@ -139,12 +139,13 @@ EMOJI_SEED_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(_
 
 
 def emoji_seed(path=EMOJI_SEED_FILE):
-    """data/emojis.tsv(絵文字・キャラ名・グループ のタブ区切り)を読む。"""
+    """data/emojis.tsv(絵文字・キャラ名・グループ・説明 のタブ区切り)を読む。"""
     if not os.path.exists(path):
         return []
     with open(path, encoding="utf-8") as f:
         rows = [r for r in csv.reader(f, delimiter="\t") if r and not r[0].startswith("#")]
-    return [(r[0].strip(), r[1].strip(), (r[2] if len(r) > 2 else "").strip()) for r in rows if len(r) >= 2 and r[0].strip() and r[1].strip()]
+    rows = [r + [""] * (4 - len(r)) for r in rows]
+    return [tuple(c.strip() for c in r[:4]) for r in rows if r[0].strip() and r[1].strip()]
 
 
 def seed_rows(table):
@@ -154,7 +155,8 @@ def seed_rows(table):
         items = BASIC if seed == "BASIC" else PERIODS
         return [{"項目": p_title(k), "値": p_text(v), "説明": p_text(d)} for k, v, _, d in items]
     if seed == "EMOJIS":
-        return [{"絵文字": p_title(e), "キャラ名": p_text(n), "グループ": p_text(g), "有効": p_check(True)} for e, n, g in emoji_seed()]
+        return [{"絵文字": p_title(e), "キャラ名": p_text(n), "グループ": p_text(g), "有効": p_check(True), "備考": p_text(d)}
+                for e, n, g, d in emoji_seed()]
     if not seed:
         return []
     return [table["seed_props"](r) for r in seed]
