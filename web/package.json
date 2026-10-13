@@ -2,6 +2,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test --experimental-sqlite --import ./test/html-loader.js test/worker.test.js"
+    "test": "node --test --experimental-sqlite --import ./test/html-loader.js test/worker.test.js test/calendar.test.js"
   }
 }

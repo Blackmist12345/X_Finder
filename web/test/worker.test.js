@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 
 import { resetCertsCache, verifyAccess } from "../src/auth.js";
-import worker, { changeBlacklist, listTables, readTable, getCase, getSettings, getStats, getSummary, listBlacklist, listCases, saveSettings, setReview } from "../src/index.js";
+import worker, { changeBlacklist, listTables, readTable, getCase, getSettings, getStats, getSummary, listBlacklist, listCases, saveSettings, setReview, setReviews } from "../src/index.js";
 import { fakeD1 } from "./fake-d1.js";
 
 const TEAM = "example.cloudflareaccess.com";
@@ -155,6 +155,18 @@ test("一覧にも添付画像の URL が入る(詳細を開いた瞬間から�
   const cases = await listCases(db, new URLSearchParams());
   assert.deepEqual(cases.find((c) => c.id === "1").media, ["https://pbs.twimg.com/m.jpg"]);
   assert.equal("media_json" in cases[0], false);
+});
+
+test("まとめて状態を変えられる(見つからない ID は飛ばし、未確認に戻すこともできる)", async () => {
+  const r = await setReviews(db, { ids: ["1", "2", "999"], state: "delete" });
+  assert.deepEqual(r, { updated: ["1", "2"], state: "delete" });
+  const states = async () => Object.fromEntries((await listCases(db, new URLSearchParams())).map((c) => [c.id, c.review]));
+  assert.deepEqual(await states(), { "1": "delete", "2": "delete" });
+  await setReviews(db, { ids: ["1"], state: "unread" });
+  assert.equal((await states())["1"], "unread");
+  await assert.rejects(setReviews(db, { ids: [], state: "delete" }), RangeError);
+  await assert.rejects(setReviews(db, { ids: ["1"], state: "nope" }), RangeError);
+  await assert.rejects(setReviews(db, { ids: ["1; DROP"], state: "seen" }), RangeError);
 });
 
 test("対象外の一覧も見られる", async () => {
