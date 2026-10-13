@@ -125,7 +125,7 @@ def run(d1, config, production, api_keys, tweets=None, decisions=None, session=N
 
     try:
         results, t_in, t_out, calls = judge.judge(items, api_key, model, config["excluded_works"], batch_size, session,
-                                                     config.get("emojis"))
+                                                     config.get("emojis"), config.get("events"))
     except judge.JudgeError as e:
         return lines + [f"- ⚠️ 判定に失敗しました。ポストは判定待ちのまま、次の実行でもう一度判定します。{e}"]
 

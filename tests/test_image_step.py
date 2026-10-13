@@ -16,8 +16,9 @@ class FakeResp:
 class FakeSession:
     """画像の取得(GET)と Claude(POST)の代わり。answers[ポストの画像URL] = AI が返すアカウント。"""
 
-    def __init__(self, accounts, broken=()):
+    def __init__(self, accounts, broken=(), place=None):
         self.accounts, self.broken, self.gets, self.posts = accounts, set(broken), [], []
+        self.place = place or {"prefecture": "不明", "venue": "", "event": ""}
 
     def get(self, url, timeout=None):
         self.gets.append(url)
@@ -27,7 +28,7 @@ class FakeSession:
 
     def post(self, url, headers=None, json=None, timeout=None):
         self.posts.append(json)
-        return FakeResp(data={"content": [{"type": "tool_use", "input": {"accounts": self.accounts}}],
+        return FakeResp(data={"content": [{"type": "tool_use", "input": {"accounts": self.accounts, "place": self.place}}],
                               "usage": {"input_tokens": 1500, "output_tokens": 80}})
 
 
@@ -72,3 +73,36 @@ def test_needs_key_and_production(d1):
     assert image_step.run(d1, CONFIG, False, {"ANTHROPIC_API_KEY": "k"}, session=s) == []
     assert any("登録されていない" in l for l in image_step.run(d1, CONFIG, True, {}, session=s))
     assert s.gets == [] and d1.query("SELECT * FROM image_reads") == []
+
+
+def add_judgment(d1, pid, pref, source, place=""):
+    raw = {"case_type": "コスプレ撮影", "prefecture": pref, "prefecture_source": source, "place": place, "works": ""}
+    d1.query("INSERT INTO judgments (post_id, judged_at, model, case_type, prefecture, prefecture_source, place, score, raw_json) "
+             "VALUES (?, 'x', 'm', 'コスプレ撮影', ?, ?, ?, 0, ?)", [pid, pref, source, place, json.dumps(raw, ensure_ascii=False)])
+
+
+SCORE_CONFIG = dict(CONFIG, penalty_words=[], events=[
+    {"aliases": ["ストフェス"], "name": "日本橋ストリートフェスタ", "venue": "日本橋", "prefecture": "大阪府"}],
+    scores=[{"condition": "コスプレ撮影", "kind": "種類", "points": 50}, {"condition": "東京都", "kind": "都道府県", "points": 0},
+            {"condition": "その他の道府県", "kind": "都道府県", "points": -30}, {"condition": "場所不明", "kind": "都道府県", "points": 0}],
+    critical={"threshold": 70, "conditions": []})
+
+
+def test_image_place_replaces_unknown_or_profile_place(d1):
+    add_post(d1, "1")
+    add_judgment(d1, "1", "東京都", "プロフィール")
+    s = FakeSession([], place={"prefecture": "不明", "venue": "", "event": "ストフェス"})
+    lines = image_step.run(d1, SCORE_CONFIG, True, {"ANTHROPIC_API_KEY": "k"}, session=s)
+    row = d1.query("SELECT prefecture, prefecture_source, place, score, raw_json FROM judgments")[0]
+    assert (row["prefecture"], row["prefecture_source"], row["place"], row["score"]) == ("大阪府", "画像", "ストフェス", 20)
+    assert json.loads(row["raw_json"])["prefecture"] == "大阪府"
+    assert any("場所が分かった 1件" in l for l in lines)
+
+
+def test_image_place_does_not_override_text(d1):
+    add_post(d1, "1")
+    add_judgment(d1, "1", "東京都", "本文", "池袋")
+    s = FakeSession([], place={"prefecture": "大阪府", "venue": "難波", "event": ""})
+    image_step.run(d1, SCORE_CONFIG, True, {"ANTHROPIC_API_KEY": "k"}, session=s)
+    assert d1.query("SELECT prefecture, prefecture_source, place FROM judgments") == [
+        {"prefecture": "東京都", "prefecture_source": "本文", "place": "池袋"}]

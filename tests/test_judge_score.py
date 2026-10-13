@@ -257,3 +257,20 @@ def test_emoji_hints_in_prompt():
     assert "🌸=さくら(A) / はな(B)" in line
     assert "❤‍🔥=ほのお" in line and "はーと" not in line  # 組み合わせの絵文字を先に取る。異体字セレクタは無視
     assert "絵文字の意味" not in judge.build_prompt([{"id": "2", "text": "募集"}], [], emojis).split("除外作品")[1]
+
+
+def test_event_hints_in_prompt():
+    events = [{"aliases": ["コミケ", "夏コミ"], "name": "コミックマーケット", "venue": "東京ビッグサイト", "prefecture": "東京都"},
+              {"aliases": ["TGS"], "name": "東京ゲームショウ", "venue": "幕張メッセ", "prefecture": "千葉県"},
+              {"aliases": ["acosta"], "name": "acosta!", "venue": "", "prefecture": "毎回ちがう"}]
+    prompt = judge.build_prompt([{"id": "1", "text": "夏コミ 3日目 と ACOSTA の併せ", "quoted_text": ""}], [], None, events)
+    line = [l for l in prompt.splitlines() if l.startswith("イベントの意味")][0]
+    assert "夏コミ=コミックマーケット(東京ビッグサイト、東京都)" in line
+    assert "acosta=acosta!(開催地は回ごとにちがう)" in line
+    assert "TGS" not in line
+    assert not judge.event_hints("STGSX の撮影", events)  # 英字の略称はほかの単語の一部では当たらない
+    assert judge.event_hints("TGSで撮影", events)
+
+
+def test_normalize_unknown_place_source():
+    assert judge.normalize(ai_result("1", prefecture="千葉県", prefecture_source="画面"))["prefecture_source"] == "本文"

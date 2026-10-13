@@ -89,7 +89,7 @@ function daysAgoIso(days) {
 
 const CASE_COLUMNS = `
   p.id, p.text, p.url, p.created_at, p.collected_at, p.status, p.skip_reason, p.quoted_id,
-  j.case_type, j.works, j.prefecture, j.place, j.dates, j.summary, j.score, j.critical, j.critical_reason, j.reject_reason,
+  j.case_type, j.works, j.prefecture, j.prefecture_source, j.place, j.dates, j.summary, j.score, j.critical, j.critical_reason, j.reject_reason,
   p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, COALESCE(r.state, 'unread') AS review`;
 
 export async function listCases(db, params) {
@@ -118,7 +118,7 @@ export async function listCases(db, params) {
 export async function getCase(db, id) {
   const row = await db
     .prepare(
-      `SELECT ${CASE_COLUMNS}, p.media_json, j.score_json, j.prefecture_source, q.text AS quoted_text, q.url AS quoted_url,
+      `SELECT ${CASE_COLUMNS}, p.media_json, j.score_json, q.text AS quoted_text, q.url AS quoted_url,
          u.description, u.location
        FROM posts p JOIN judgments j ON j.post_id = p.id LEFT JOIN users u ON u.id = p.author_id
        LEFT JOIN reviews r ON r.post_id = p.id
