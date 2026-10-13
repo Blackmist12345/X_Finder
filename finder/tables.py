@@ -1,4 +1,7 @@
-"""Notion 8表の定義(列と初期値)。初期設定スクリプトと N1 設定読込が共有する。"""
+"""Notion の設定の表の定義(列と初期値)。初期設定スクリプトと N1 設定読込が共有する。"""
+import csv
+import os
+
 from finder.notion import p_check, p_number, p_select, p_text, p_title
 
 CATEGORIES = [
@@ -96,6 +99,19 @@ TABLES = [
         "props": {"項目": {"title": {}}, "値": {"rich_text": {}}, "説明": {"rich_text": {}}},
         "seed": "PERIODS",
     },
+    {
+        # VTuber などは、キャラ名の代わりに決まった絵文字(推しマーク)で書かれることがある。判定のときに読み替える。
+        "key": "emojis", "title": "【9】絵文字の一覧",
+        "optional": True,  # あとから足した表。まだ作っていなくても設定は読める
+        "props": {
+            "絵文字": {"title": {}},
+            "キャラ名": {"rich_text": {}},
+            "グループ": {"rich_text": {}},
+            "有効": {"checkbox": {}},
+            "備考": {"rich_text": {}},
+        },
+        "seed": "EMOJIS",
+    },
 ]
 
 # 1つの値だけの設定。(項目名, 初期値, 種類, 説明)。種類は int / choice:A/B / text。
@@ -119,12 +135,26 @@ PERIODS = [
 ]
 
 
+EMOJI_SEED_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "emojis.tsv")
+
+
+def emoji_seed(path=EMOJI_SEED_FILE):
+    """data/emojis.tsv(絵文字・キャラ名・グループ のタブ区切り)を読む。"""
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        rows = [r for r in csv.reader(f, delimiter="\t") if r and not r[0].startswith("#")]
+    return [(r[0].strip(), r[1].strip(), (r[2] if len(r) > 2 else "").strip()) for r in rows if len(r) >= 2 and r[0].strip() and r[1].strip()]
+
+
 def seed_rows(table):
     """初期値を Notion のプロパティ形式で返す。"""
     seed = table.get("seed")
     if seed in ("BASIC", "PERIODS"):
         items = BASIC if seed == "BASIC" else PERIODS
         return [{"項目": p_title(k), "値": p_text(v), "説明": p_text(d)} for k, v, _, d in items]
+    if seed == "EMOJIS":
+        return [{"絵文字": p_title(e), "キャラ名": p_text(n), "グループ": p_text(g), "有効": p_check(True)} for e, n, g in emoji_seed()]
     if not seed:
         return []
     return [table["seed_props"](r) for r in seed]

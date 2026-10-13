@@ -9,7 +9,7 @@
 
 | 番号 | 名前 | 場所 |
 | --- | --- | --- |
-| N1 | 設定読込 | `finder/config.py`(Notion 8表から読む。不正な値は前回の値を使う) |
+| N1 | 設定読込 | `finder/config.py`(Notion 8表と【9】絵文字の一覧から読む。不正な値は前回の値を使う) |
 | N2 | 収集 | `finder/collect.py`(TwitterAPI.io。失敗したら検索時間枠を進めない) |
 | N3 | 一次フィルタ(一部) | `finder/filters.py`(リポスト・フォロワー数・入りきらなかった除外語。減点語は記録だけ) |
 | N12 | データ保存 | `finder/store.py`, `schema.sql`(Cloudflare D1) |
@@ -43,9 +43,16 @@ GitHub の X_Finder → Settings → Secrets and variables → Actions → New r
 Actions → Setup → Run workflow で、task を選んで 1 回ずつ実行します。
 
 1. `d1_schema`: D1 にテーブルを作る
-2. `notion_tables`: Notion 8表を作る(親ページにインテグレーションを招待しておく)
+2. `notion_tables`: Notion 8表を作る(親ページにインテグレーションを招待しておく)。あとから足した表(【9】絵文字の一覧)も、もう一度実行すればその表だけ作られる
 3. `migrate_preview`: 今の 4表からの振り分け案を見る(何も書き込まない)
 4. `migrate_apply`: 振り分け案のとおりに新しい表へ移す(今の 4表はそのまま残る)
+
+### 絵文字の一覧(【9】)
+
+VTuber などはキャラ名の代わりに決まった絵文字(推しマーク)で書かれることがあります。
+【9】絵文字の一覧に「絵文字・キャラ名・グループ」を入れておくと、判定のときにポストの本文から一覧の絵文字を探し、
+その意味を AI に渡します。AI はそれを見て、作品・キャラ欄にキャラ名を書きます(同じ絵文字に何人かいるときは本文の流れから選ぶ)。
+表を初めて作るときの中身は `data/emojis.tsv`(タブ区切り)です。作ったあとは Notion の表を直接直してください。
 
 ### 3. Collect ワークフローを試す
 

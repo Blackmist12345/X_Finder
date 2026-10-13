@@ -87,6 +87,9 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
   その他 = 上のどれでもない
 - is_cosplay: コスプレに関係する撮影なら true。
 - works: 作品名・キャラクター名(分かる範囲。なければ空文字)。
+  VTuber などはキャラ名の代わりに決まった絵文字(推しマーク)で書かれることがある。ポストに「絵文字の意味」が付いていれば、
+  それを使ってキャラクター名を works に書く(例: 「にじさんじ 〇〇」)。同じ絵文字に候補が何人もあるときは、本文の流れから選ぶ。
+  ただの飾りとして使われている絵文字なら無視する。
 - excluded_work: works が下の「除外作品」のどれかに当たれば、その除外作品名(略称・キャラクター名からの判断も含む)。当たらなければ空文字。
 - prefecture: 撮影する場所の都道府県。本文から分からなければ、投稿者プロフィールの活動地域から分かる場合だけそれを使う。どちらでも分からなければ「不明」。
 - prefecture_source: prefecture をどこから判断したか(本文 / プロフィール / 不明)。
@@ -96,8 +99,36 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
 """
 
 
-def build_prompt(items, excluded_works):
+VS16 = "\ufe0f"  # 絵文字の見た目を変えるだけの文字。あってもなくても同じ絵文字として扱う
+
+
+def emoji_index(emojis):
+    """[{emoji, name, group}] を {絵文字: ["キャラ名(グループ)", ...]} にする。"""
+    index = {}
+    for e in emojis or []:
+        key = (e.get("emoji") or "").replace(VS16, "").strip()
+        if not key or not e.get("name"):
+            continue
+        label = e["name"] + (f"({e['group']})" if e.get("group") else "")
+        if label not in index.setdefault(key, []):
+            index[key].append(label)
+    return index
+
+
+def emoji_hints(text, index):
+    """本文に出てくる、一覧にある絵文字の意味を返す。長い絵文字(何文字かを組み合わせたもの)から先に探す。"""
+    rest = (text or "").replace(VS16, "")
+    found = []
+    for key in sorted(index, key=len, reverse=True):
+        if key in rest:
+            found.append(f"{key}={' / '.join(index[key])}")
+            rest = rest.replace(key, " ")
+    return found
+
+
+def build_prompt(items, excluded_works, emojis=None):
     lines = [RULES, "除外作品: " + ("、".join(excluded_works) if excluded_works else "なし"), ""]
+    index = emoji_index(emojis)
     for it in items:
         lines.append(f"### id: {it['id']}")
         if it.get("author_location") or it.get("author_description"):
@@ -105,6 +136,9 @@ def build_prompt(items, excluded_works):
         lines.append("本文: " + (it.get("text") or ""))
         if it.get("quoted_text"):
             lines.append("引用元の本文: " + it["quoted_text"])
+        hints = emoji_hints((it.get("text") or "") + "\n" + (it.get("quoted_text") or ""), index)
+        if hints:
+            lines.append("絵文字の意味: " + "、".join(hints))
         lines.append("")
     return "\n".join(lines)
 
@@ -185,7 +219,7 @@ def call(api_key, model, prompt, session=None):
     return result, tokens_in, tokens_out
 
 
-def judge(items, api_key, model, excluded_works, batch_size, session=None):
+def judge(items, api_key, model, excluded_works, batch_size, session=None, emojis=None):
     """items をまとめて判定する。(結果 {id: 判定}, 入力トークン, 出力トークン, 呼び出し回数) を返す。
 
     AI が返し忘れたポストは 1 件ずつ聞き直す。それでも返らなければ結果に入れない。
@@ -194,7 +228,7 @@ def judge(items, api_key, model, excluded_works, batch_size, session=None):
 
     def run(batch):
         nonlocal tokens_in, tokens_out, calls
-        out, t_in, t_out = call(api_key, model, build_prompt(batch, excluded_works), session)
+        out, t_in, t_out = call(api_key, model, build_prompt(batch, excluded_works, emojis), session)
         tokens_in, tokens_out, calls = tokens_in + t_in, tokens_out + t_out, calls + 1
         wanted = {it["id"] for it in batch}
         for r in out:

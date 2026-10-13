@@ -58,6 +58,7 @@ class Notion:
 
     def create_page(self, database_id, properties):
         self._request("POST", "/pages", {"parent": {"database_id": database_id}, "properties": properties})
+        time.sleep(0.35)  # Notion は 1 秒に 3 回まで
         time.sleep(0.35)  # Notion の上限は平均 3 リクエスト/秒
 
 
