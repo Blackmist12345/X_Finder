@@ -75,3 +75,11 @@ test("URL がなければ未設定、あれば読んで短い間は覚えてお�
   resetCalendarCache();
   await assert.rejects(getCalendar(env, new URLSearchParams(), async () => new Response("no", { status: 404 }), now));
 });
+
+test("「休み」「有給」などの予定には off を付ける(言葉は設定で変えられる)", async () => {
+  const { markOff, offWords } = await import("../src/calendar.js");
+  const days = { "2026-10-25": [{ title: "有給", time: null, free: false }, { title: "撮影", time: "13:00–17:00", free: false }] };
+  markOff(days, offWords(undefined));
+  assert.deepEqual(days["2026-10-25"].map((e) => !!e.off), [true, false]);
+  assert.deepEqual(offWords("お休み、 リフレッシュ"), ["お休み", "リフレッシュ"]);
+});
