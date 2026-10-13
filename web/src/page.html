@@ -113,6 +113,27 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .pill{font-size:11.5px;border-radius:6px;padding:2px 7px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
 .pill.type{background:var(--accent-soft);color:var(--accent);font-weight:500}
 .pill.warn{background:var(--warn-soft);color:var(--warn)}
+/* Google カレンダーの照合 */
+.cal{font-size:11px;border-radius:5px;padding:1px 6px;margin-left:6px;white-space:nowrap;font-weight:500}
+.cal.busy{background:var(--warn-soft);color:var(--warn)}
+.cal.free{background:var(--ok-soft);color:var(--ok)}
+.calday{display:block}
+.calday+.calday{margin-top:4px}
+.calday .ev{color:var(--warn)}
+.calday .none{color:var(--ok)}
+/* まとめて状態を変える */
+.bulk-chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.bulk-list{margin-top:8px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.bulk-list label{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-top:1px solid var(--line);font-size:14px}
+.bulk-list label:first-child{border-top:0}
+.bulk-list input{margin-top:3px;width:18px;height:18px;flex:none;accent-color:var(--accent)}
+.bulk-list .sub{display:block;font-size:12px}
+.bulk-bar{display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:13px;color:var(--muted)}
+.bulk-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.bulk-actions .btn{padding:12px 4px;font-size:14px;white-space:nowrap}
+.btn.ok{border-color:var(--ok);color:var(--ok);background:var(--ok-soft)}
+.btn.uread{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.bulk-input{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--fg)}
 .rec{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-num);font-weight:700;letter-spacing:.08em;font-size:12px;color:var(--rec);background:var(--rec-soft);border-radius:6px;padding:1px 7px}
 .rec::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--rec)}
 .score{grid-row:1 / span 2;grid-column:2;text-align:right;line-height:1}
@@ -285,6 +306,7 @@ header.top.slim .tab .c{font-size:17px}
         <option value="ff">FF率順</option>
         <option value="followers">フォロワー数順</option>
       </select>
+      <button class="icon-btn" id="openBulk" aria-label="まとめて状態を変える" title="まとめて状態を変える">まとめて</button>
     </div>
     </div></div>
   </header>
@@ -344,6 +366,47 @@ function ago(iso){if(!iso)return"";const m=Math.round((Date.now()-new Date(iso))
 function ava(u){const img=safeImg(u.profile_image);const ch=esc((u.name||u.username||"?").trim()[0]||"?");
   return img?`<img class="ava" src="${esc(img)}" alt="" loading="lazy" referrerpolicy="no-referrer">`:`<span class="ava">${ch}</span>`}
 
+// ---- 撮影日と Google カレンダー(N9) ----
+let cal={configured:false,days:{}};
+const DOW="日月火水木金土";
+const jstDay=(plus=0)=>new Date(Date.now()+9*36e5+plus*864e5).toISOString().slice(0,10);
+const dayLabel=d=>{const t=new Date(`${d}T00:00:00Z`);return `${t.getUTCMonth()+1}/${t.getUTCDate()}(${DOW[t.getUTCDay()]})`};
+// AI が読み取った日程(「10/25(土)」「11月3日」「10/25〜26」など)を日付にする。年がなければ投稿日から近い未来の年にする
+function caseDates(c){
+  const s=String(c.dates||"");if(!s)return [];
+  const b=new Date((c.created_at?Date.parse(c.created_at):Date.now())+9*36e5);
+  const by=b.getUTCFullYear(),baseMs=Date.UTC(by,b.getUTCMonth(),b.getUTCDate());
+  const out=new Set();
+  const day=(y,m,d)=>{if(m<1||m>12||d<1||d>31)return null;let yy=y||by,ms=Date.UTC(yy,m-1,d);
+    if(!y&&ms<baseMs-60*864e5){yy++;ms=Date.UTC(yy,m-1,d)}
+    return new Date(ms).getUTCDate()===d?ms:null};
+  const re=/(?:(\d{4})[\/年.\-])?(\d{1,2})[\/月](\d{1,2})(?![\d人名枚件組])日?(?:\s*[(（]([日月火水木金土])?[^)）]{0,3}[)）])?(?:\s*[〜~～\-－]\s*(?:(\d{1,2})[\/月])?(\d{1,2})日?(?![\d:：時]))?/g;
+  let m;
+  while((m=re.exec(s))&&out.size<14){
+    const y=m[1]?+m[1]:0;let start=day(y,+m[2],+m[3]);if(start==null)continue;
+    // 曜日が書いてあって合わなければ、次の年の同じ日を試す(年をまたぐ募集のため)
+    if(!y&&m[4]&&DOW[new Date(start).getUTCDay()]!==m[4]){const next=day(new Date(start).getUTCFullYear()+1,+m[2],+m[3]);if(next!=null&&DOW[new Date(next).getUTCDay()]===m[4])start=next}
+    out.add(new Date(start).toISOString().slice(0,10));
+    if(m[6]){const sy=y||new Date(start).getUTCFullYear(),em=m[5]?+m[5]:+m[2];
+      let end=day(sy,em,+m[6]);if(end!=null&&end<start)end=day(sy+1,em,+m[6]); // 12/31〜1/2 のように年をまたぐ
+      for(let t=start+864e5;end!=null&&t<=end&&t<=start+7*864e5;t+=864e5)out.add(new Date(t).toISOString().slice(0,10))}
+  }
+  return [...out].sort();
+}
+// その案件の撮影日に予定があるか。カレンダー未設定・日程不明・範囲外なら null
+function calCheck(c){
+  if(!cal.configured||cal.error)return null;
+  const dates=caseDates(c).filter(d=>(!cal.from||d>=cal.from)&&(!cal.to||d<=cal.to));
+  if(!dates.length)return null;
+  const days=dates.map(d=>({d,events:(cal.days[d]||[]).filter(e=>!e.free)}));
+  return {days,busy:days.some(x=>x.events.length)};
+}
+function calBadge(c){const k=calCheck(c);return k?`<span class="cal ${k.busy?"busy":"free"}">${k.busy?"予定あり":"空き"}</span>`:""}
+function calDetail(c){
+  const k=calCheck(c);
+  if(!k){if(cal.configured&&cal.error)return `<dt>予定</dt><dd class="sub">${esc(cal.error)}</dd>`;return ""}
+  return `<dt>予定</dt><dd>${k.days.map(x=>`<span class="calday">${dayLabel(x.d)} ${x.events.length?x.events.map(e=>`<span class="ev">${esc(e.title)}${e.time?` ${esc(e.time)}`:"(終日)"}</span>`).join("、"):'<span class="none">予定なし</span>'}</span>`).join("")}</dd>`;
+}
 async function api(path){const r=await fetch(path,{credentials:"same-origin"});if(!r.ok)throw new Error(`${r.status}`);return r.json()}
 async function postJson(path,body){
   const r=await fetch(path,{method:"POST",credentials:"same-origin",headers:{"content-type":"application/json","x-finder":"1"},body:JSON.stringify(body)});
@@ -364,8 +427,9 @@ async function load(){
   detailCache.clear();
   $("count").textContent="読み込み中…";
   try{
-    const [list,sum,set]=await Promise.all([api(`/api/cases?view=${view}`),api("/api/summary"),api("/api/settings").catch(()=>null)]);
-    cases=list.cases;loadedView=view;if(set)settings=set;
+    const [list,sum,set,calr]=await Promise.all([api(`/api/cases?view=${view}`),api("/api/summary"),api("/api/settings").catch(()=>null),
+      api(`/api/calendar?from=${jstDay(0)}&to=${jstDay(120)}`).catch(()=>null)]);
+    cases=list.cases;loadedView=view;if(set)settings=set;if(calr)cal=calr;
     $("cost").innerHTML=`今月 <b>¥${fmt(sum.month_cost_yen)}</b> / ¥${fmt(sum.goal_yen)}`;$("cost").dataset.goal=sum.goal_yen||0;
     const st=$("status");
     const parts=[];
@@ -414,7 +478,7 @@ function card(c){
    <div class="score">${rejected?"":`<span class="n">${c.score==null?"—":Math.round(c.score)}</span><span class="l">点</span>`}</div>
    <div class="title">${esc(c.summary||"(要約なし)")}</div>
    <p class="excerpt">${esc((c.text||"").replace(/\s+/g," "))}</p>
-   ${c.dates||c.place||c.works?`<dl class="facts">${c.dates?`<dt>日程</dt><dd>${esc(c.dates)}</dd>`:""}${c.place?`<dt>場所</dt><dd>${esc(c.place)}</dd>`:""}${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}</dl>`:""}
+   ${c.dates||c.place||c.works?`<dl class="facts">${c.dates?`<dt>日程</dt><dd>${esc(c.dates)}${calBadge(c)}</dd>`:""}${c.place?`<dt>場所</dt><dd>${esc(c.place)}</dd>`:""}${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}</dl>`:""}
    <div class="client">${ava(c)}
     <span class="who">${esc(c.name||"")} <span class="sub">@${esc(c.username||"")}</span>${c.others?` <span class="sub">ほか${c.others}人</span>`:""}</span>
     <span class="ff"><span class="num">${ffText(c)}</span><small>FF率</small></span></div>
@@ -503,7 +567,7 @@ function sheetHtml(c,full){
   return `<div class="grab"></div>
    <div class="meta" id="sheetMeta">${reviewPill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span>${c.score!=null?`<span class="pill">${Math.round(c.score)}点</span>`:""}<span class="pill">${ago(c.created_at)}に投稿</span>${c.reject_reason?`<span class="pill warn">${esc(c.reject_reason)}</span>`:""}</div>
    <h2>${esc(c.summary||"(要約なし)")}</h2>
-   <dl class="facts"><dt>日程</dt><dd>${esc(c.dates||"不明")}</dd><dt>場所</dt><dd>${esc(c.place||"")}${c.place?" ・ ":""}${esc(place(c))}${c.prefecture_source==="プロフィール"?"(プロフィールから推定)":""}</dd>
+   <dl class="facts"><dt>日程</dt><dd>${esc(c.dates||"不明")}</dd>${calDetail(c)}<dt>場所</dt><dd>${esc(c.place||"")}${c.place?" ・ ":""}${esc(place(c))}${c.prefecture_source==="プロフィール"?"(プロフィールから推定)":""}</dd>
     ${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}${c.critical_reason?`<dt>REC</dt><dd>${esc(c.critical_reason)}</dd>`:""}</dl>
    <div class="sec"><h3>募集ポスト</h3>${postBox(c.text,xurl,c.id)}
     ${c.quoted_text?postBox(c.quoted_text,safeX(c.quoted_url),c.quoted_id,"引用元のポスト"):""}
@@ -673,6 +737,8 @@ function openSettings(){
    <label class="setting"><span>右にスワイプ →</span><select id="swR">${opt(settings.swipe_right)}</select></label>
    <label class="setting"><span>← 左にスワイプ</span><select id="swL">${opt(settings.swipe_left)}</select></label>
    <p class="sub" id="setMsg"></p></div>
+   <div class="sec"><h3>Google カレンダー</h3><p class="sub" style="margin:0">${!cal.configured?"まだつながっていません。Google カレンダーの「設定」→ 予定表を選ぶ →「iCal 形式の非公開 URL」をコピーし、GitHub のリポジトリの Settings → Secrets and variables → Actions に、名前 GCAL_ICS_URL で登録してください(チャットには貼らないでください)。次に X Finder を公開し直すと使えるようになります。複数の予定表は改行で区切って入れられます。"
+     :cal.error?esc(cal.error):"つながっています。案件の撮影日に予定があるかをカードに出します(予定は X Finder の中で見るだけで、保存しません)。"}</p></div>
    <div class="sec"><h3>ブラックリスト</h3><div class="blist" id="blist"><p class="sub" style="margin:0">読み込み中…</p></div></div>
    <div class="sec"><h3>データベース</h3><p class="sub" style="margin:0 0 8px">集めたポスト、AI の判定、ユーザー台帳、費用などの中身を見られます(見るだけで、変更はしません)。</p>
     <button type="button" class="btn" data-db="1" style="width:100%">中身を見る ›</button></div>
@@ -686,6 +752,60 @@ function openSettings(){
   };
   $("swR").onchange=onChange;$("swL").onchange=onChange;
   blacklistChanged=false;loadBlacklist();
+}
+// ---- まとめて状態を変える ----
+// いま見ているタブ(と絞り込み)の案件から、言葉(作品名・イベント名・場所など)で選んで、まとめて状態を変える
+let bulk=null; // { base: 対象の案件, q: 言葉, picked: Set(id) }
+const BULK_ACTIONS=[{k:"delete",t:"削除予定にする",cls:"del"},{k:"hold",t:"保留にする",cls:"hold"},{k:"seen",t:"確認済みにする",cls:"ok"},{k:"unread",t:"未確認に戻す",cls:"uread"}];
+const bulkText=c=>[c.summary,c.works,c.place,c.dates,c.text].filter(Boolean).join(" ").toLowerCase();
+function bulkMatches(){
+  const terms=bulk.q.toLowerCase().split(/[\s　]+/).filter(Boolean);
+  return terms.length?bulk.base.filter(c=>{const t=bulkText(c);return terms.every(w=>t.includes(w))}):bulk.base;
+}
+// よく出る作品名・場所を候補として出す
+function bulkSuggest(){
+  const n=new Map();
+  for(const c of bulk.base)for(const w of [...String(c.works||"").split(/[、,／/・]+/),c.place||""].map(x=>x.trim()).filter(x=>x&&x.length<=20))n.set(w,(n.get(w)||0)+1);
+  return [...n].sort((a,b)=>b[1]-a[1]).slice(0,10).map(([w])=>w);
+}
+function openBulk(){
+  bulk={base:filtered(),q:"",picked:new Set()};
+  const tab=TABS.find(t=>t.k===state.tab);
+  presentSheet(`<div class="grab"></div><h2>まとめて状態を変える</h2>
+   <p class="sub">「${esc(tab.t)}」の ${bulk.base.length}件から、言葉で絞って選びます。作品名・イベント名・場所・本文のどれかに入っていれば当たります(空白で区切ると全部を含むもの)。</p>
+   <input class="bulk-input" id="bulkQ" type="search" placeholder="例: ブルアカ コミケ" enterkeyhint="search" autocomplete="off">
+   <div class="bulk-chips" id="bulkChips">${bulkSuggest().map(w=>`<button type="button" class="chip" data-bulk-chip="${esc(w)}">${esc(w)}</button>`).join("")}</div>
+   <div id="bulkBody"></div>`,"まとめて状態を変える");
+  $("bulkQ").addEventListener("input",e=>{bulk.q=e.target.value;bulkPickAll(!!bulk.q.trim());renderBulk()});
+  renderBulk();
+}
+function bulkPickAll(on){bulk.picked=new Set(on?bulkMatches().map(c=>c.id):[])}
+function renderBulk(){
+  const list=bulkMatches();
+  const picked=list.filter(c=>bulk.picked.has(c.id)).length;
+  const acts=BULK_ACTIONS.filter(a=>a.k!==state.tab);
+  $("bulkBody").innerHTML=`<div class="bulk-bar"><span>${bulk.q.trim()?`当たったもの ${list.length}件`:`全部で ${list.length}件`} ・ 選んだもの <b>${picked}件</b></span>
+     ${list.length?`<button type="button" class="chip" data-bulk-all="${picked===list.length?0:1}">${picked===list.length?"全部外す":"全部選ぶ"}</button>`:""}</div>
+   ${list.length?`<div class="bulk-list">${list.slice(0,300).map(c=>`<label><input type="checkbox" data-bulk-id="${esc(c.id)}" ${bulk.picked.has(c.id)?"checked":""}><span>${esc(c.summary||"(要約なし)")}<span class="sub">${esc([c.works,c.place,c.dates].filter(Boolean).join(" ・ "))}</span></span></label>`).join("")}</div>`:'<p class="sub">当たる案件はありません。</p>'}
+   <div class="bulk-actions">${acts.map(a=>`<button type="button" class="btn ${a.cls}" data-bulk-act="${a.k}" ${picked?"":"disabled"}>${a.t}</button>`).join("")}</div>
+   <div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;
+}
+async function bulkApply(stateTo){
+  const ids=[...bulk.picked];if(!ids.length)return;
+  const before=new Map(ids.map(id=>[id,(cases.find(c=>c.id===id)||{}).review||"unread"]));
+  document.querySelectorAll("[data-bulk-act]").forEach(b=>b.disabled=true);
+  try{await postJson("/api/reviews",{ids,state:stateTo})}
+  catch(e){alert(`変えられませんでした(${e.message})`);renderBulk();return}
+  ids.forEach(id=>setLocalReview(id,stateTo));
+  closeSheet();
+  const label=BULK_ACTIONS.find(a=>a.k===stateTo).t.replace(/(にする|に戻す)$/,"");
+  showToast(`${ids.length}件を${label}にしました`,async()=>{
+    // 元の状態ごとにまとめて戻す
+    const groups=new Map();for(const [id,r] of before){if(!groups.has(r))groups.set(r,[]);groups.get(r).push(id)}
+    try{for(const [r,g] of groups){await postJson("/api/reviews",{ids:g,state:r});g.forEach(id=>setLocalReview(id,r))}}
+    catch(e){alert(`元に戻せませんでした(${e.message})`)}
+    render();
+  });
 }
 // ---- データベースの中身(見るだけ) ----
 const DB_LABEL={posts:"ポスト",judgments:"AI の判定と点数",reviews:"確認の状態",blacklist:"ブラックリスト",users:"ユーザー台帳",user_aliases:"読み間違いの別名",
@@ -795,6 +915,9 @@ document.addEventListener("click",ev=>{
     $("blackBox").scrollIntoView({behavior:"smooth",block:"nearest"});return}
   if(ev.target.closest("[data-black-cancel]")){$("blackBox").innerHTML="";return}
   const ub=ev.target.closest("[data-unblack]");if(ub){unblack(ub);return}
+  const bc=ev.target.closest("[data-bulk-chip]");if(bc){const q=$("bulkQ");q.value=bc.dataset.bulkChip;bulk.q=q.value;bulkPickAll(true);renderBulk();return}
+  const ba=ev.target.closest("[data-bulk-all]");if(ba){bulkPickAll(ba.dataset.bulkAll==="1");renderBulk();return}
+  const bx=ev.target.closest("[data-bulk-act]");if(bx){bulkApply(bx.dataset.bulkAct);return}
   const tp=ev.target.closest("[data-theme-pick]");if(tp){pickTheme(tp.dataset.themePick);return}
   if(ev.target.closest("[data-db]")||ev.target.closest("[data-dbback]")){openDb();return}
   const dbt=ev.target.closest("[data-dbt]");if(dbt){openTable(dbt.dataset.dbt);return}
@@ -944,6 +1067,9 @@ async function ptrEnd(){
 document.addEventListener("touchend",ptrEnd);
 document.addEventListener("touchcancel",()=>{ptr=null;ptrShow(0)});
 $("openSettings").addEventListener("click",openSettings);
+$("openBulk").addEventListener("click",openBulk);
+document.addEventListener("change",ev=>{const b=ev.target.closest("[data-bulk-id]");if(!b||!bulk)return;
+  if(b.checked)bulk.picked.add(b.dataset.bulkId);else bulk.picked.delete(b.dataset.bulkId);renderBulk()});
 $("cost").addEventListener("click",openStats);
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&$("sheetRoot").hidden)load()});
 renderControls();load();

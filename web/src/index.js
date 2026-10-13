@@ -2,6 +2,7 @@
 // D1 は読むだけ。ただし案件カードの確認の状態(未確認 / 確認済み / 保留 / 削除予定)と、画面の設定だけは書く。
 // Cloudflare Access を通った人だけが見られる(auth.js)。
 import { verifyAccess } from "./auth.js";
+import { getCalendar } from "./calendar.js";
 import page from "./page.html";
 import icon180 from "./icons/icon-180.png";
 import icon192 from "./icons/icon-192.png";
@@ -298,6 +299,38 @@ export async function setReview(db, id, { state, opened }) {
   return row?.state || "unread";
 }
 
+// まとめて状態を変える(ホームの「まとめて」から)。ids は 300 件まで。見つからない ID は飛ばす。
+const BULK_MAX = 300;
+export async function setReviews(db, body) {
+  const ids = [...new Set(Array.isArray(body.ids) ? body.ids.map(String) : [])];
+  if (!ids.length || ids.length > BULK_MAX || ids.some((id) => !/^\d{1,25}$/.test(id))) throw new RangeError("ids");
+  const state = body.state;
+  if (!REVIEW_STATES.includes(state)) throw new RangeError("state");
+  const known = new Set();
+  for (let i = 0; i < ids.length; i += 90) {
+    const part = ids.slice(i, i + 90);
+    const { results } = await db
+      .prepare(`SELECT post_id FROM judgments WHERE post_id IN (${part.map(() => "?").join(", ")})`)
+      .bind(...part)
+      .all();
+    for (const r of results) known.add(r.post_id);
+  }
+  const hit = ids.filter((id) => known.has(id));
+  if (!hit.length) return { updated: [] };
+  const now = nowIso();
+  await db.batch(
+    hit.map((id) =>
+      state === "unread"
+        ? db.prepare("DELETE FROM reviews WHERE post_id = ?").bind(id)
+        : db
+            .prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES (?, ?, ?, ?)
+                      ON CONFLICT(post_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`)
+            .bind(id, state, now, now),
+    ),
+  );
+  return { updated: hit, state };
+}
+
 export async function getSettings(db) {
   const row = await db.prepare("SELECT value FROM meta WHERE key = ?").bind(SETTINGS_KEY).first();
   const saved = parseJson(row?.value, {});
@@ -467,6 +500,17 @@ export default {
         return json({ error: "保存できませんでした" }, 500);
       }
     }
+    if (url.pathname === "/api/reviews" && request.method === "POST") {
+      if (!sameOriginWrite(request, url)) return text("このページからだけ変更できます。", 403);
+      try {
+        await ensureTables(env.DB);
+        return json(await setReviews(env.DB, await request.json().catch(() => ({}))));
+      } catch (e) {
+        if (e instanceof RangeError) return json({ error: "指定が正しくありません" }, 400);
+        console.error(e);
+        return json({ error: "保存できませんでした" }, 500);
+      }
+    }
     const write = url.pathname.match(/^\/api\/cases\/(\d{1,25})\/review$/);
     if (write) {
       if (request.method !== "POST") return text("POST だけ使えます。", 405);
@@ -505,6 +549,14 @@ export default {
       }
       if (url.pathname === "/api/blacklist") return json({ blacklist: await listBlacklist(env.DB) });
       if (url.pathname === "/api/stats") return json(await getStats(env.DB, url.searchParams));
+      if (url.pathname === "/api/calendar") {
+        try {
+          return json(await getCalendar(env, url.searchParams));
+        } catch (e) {
+          console.error(e);
+          return json({ configured: true, error: "Google カレンダーを読めませんでした", days: {} });
+        }
+      }
       const m = url.pathname.match(/^\/api\/cases\/(\d{1,25})$/);
       if (m) {
         const c = await getCase(env.DB, m[1]);
