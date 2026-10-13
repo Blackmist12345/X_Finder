@@ -471,10 +471,14 @@ function render(){
   prefetchTop(a);
 }
 function place(c){return c.prefecture&&c.prefecture!=="不明"?c.prefecture:"場所不明"}
+// 都道府県をどこから判断したか。本文以外は、カードでも分かるように短く付ける
+const PLACE_FROM={"本文":"本文から","イベント表":"イベント表から","画像":"画像から","プロフィール":"プロフィールから推定"};
+function placeShort(c){const k=c.prefecture&&c.prefecture!=="不明"?c.prefecture_source:"";return k&&k!=="本文"&&PLACE_FROM[k]?`${place(c)}・${k==="プロフィール"?"推定":k==="イベント表"?"イベント":k}`:place(c)}
+function placeFrom(c){const k=c.prefecture&&c.prefecture!=="不明"?c.prefecture_source:"";return PLACE_FROM[k]?`(${PLACE_FROM[k]})`:""}
 function card(c){
   const rejected=state.preset==="rejected";
   return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card ${c.critical?"crit":""} ${c.review==="unread"?"unread":""}" data-id="${esc(c.id)}">
-   <div class="meta">${reviewPill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(place(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
+   <div class="meta">${reviewPill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(placeShort(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
    <div class="score">${rejected?"":`<span class="n">${c.score==null?"—":Math.round(c.score)}</span><span class="l">点</span>`}</div>
    <div class="title">${esc(c.summary||"(要約なし)")}</div>
    <p class="excerpt">${esc((c.text||"").replace(/\s+/g," "))}</p>
@@ -567,7 +571,7 @@ function sheetHtml(c,full){
   return `<div class="grab"></div>
    <div class="meta" id="sheetMeta">${reviewPill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span>${c.score!=null?`<span class="pill">${Math.round(c.score)}点</span>`:""}<span class="pill">${ago(c.created_at)}に投稿</span>${c.reject_reason?`<span class="pill warn">${esc(c.reject_reason)}</span>`:""}</div>
    <h2>${esc(c.summary||"(要約なし)")}</h2>
-   <dl class="facts"><dt>日程</dt><dd>${esc(c.dates||"不明")}</dd>${calDetail(c)}<dt>場所</dt><dd>${esc(c.place||"")}${c.place?" ・ ":""}${esc(place(c))}${c.prefecture_source==="プロフィール"?"(プロフィールから推定)":""}</dd>
+   <dl class="facts"><dt>日程</dt><dd>${esc(c.dates||"不明")}</dd>${calDetail(c)}<dt>場所</dt><dd>${esc(c.place||"")}${c.place?" ・ ":""}${esc(place(c))}${esc(placeFrom(c))}</dd>
     ${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}${c.critical_reason?`<dt>REC</dt><dd>${esc(c.critical_reason)}</dd>`:""}</dl>
    <div class="sec"><h3>募集ポスト</h3>${postBox(c.text,xurl,c.id)}
     ${c.quoted_text?postBox(c.quoted_text,safeX(c.quoted_url),c.quoted_id,"引用元のポスト"):""}

@@ -112,6 +112,20 @@ TABLES = [
         },
         "seed": "EMOJIS",
     },
+    {
+        # イベントは略称で書かれることが多い。判定のときに、略称から開催地を補う。
+        "key": "events", "title": "【10】イベントの一覧",
+        "optional": True,
+        "props": {
+            "略称": {"title": {}},  # 何通りもあるときはカンマ区切り
+            "正式名": {"rich_text": {}},
+            "会場": {"rich_text": {}},
+            "都道府県": {"rich_text": {}},  # 回ごとに変わるイベントは「毎回ちがう」
+            "有効": {"checkbox": {}},
+            "備考": {"rich_text": {}},
+        },
+        "seed": "EVENTS",
+    },
 ]
 
 # 1つの値だけの設定。(項目名, 初期値, 種類, 説明)。種類は int / choice:A/B / text。
@@ -135,17 +149,30 @@ PERIODS = [
 ]
 
 
-EMOJI_SEED_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "emojis.tsv")
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+EMOJI_SEED_FILE = os.path.join(DATA_DIR, "emojis.tsv")
+EVENT_SEED_FILE = os.path.join(DATA_DIR, "events.tsv")
+VARIES = "毎回ちがう"
 
 
-def emoji_seed(path=EMOJI_SEED_FILE):
-    """data/emojis.tsv(絵文字・キャラ名・グループ・説明 のタブ区切り)を読む。"""
+def _read_tsv(path, columns):
+    """タブ区切りのファイルを読む(# で始まる行は飛ばす)。1・2列目が空の行は使わない。"""
     if not os.path.exists(path):
         return []
     with open(path, encoding="utf-8") as f:
         rows = [r for r in csv.reader(f, delimiter="\t") if r and not r[0].startswith("#")]
-    rows = [r + [""] * (4 - len(r)) for r in rows]
-    return [tuple(c.strip() for c in r[:4]) for r in rows if r[0].strip() and r[1].strip()]
+    rows = [r + [""] * (columns - len(r)) for r in rows]
+    return [tuple(c.strip() for c in r[:columns]) for r in rows if r[0].strip() and r[1].strip()]
+
+
+def emoji_seed(path=EMOJI_SEED_FILE):
+    """data/emojis.tsv(絵文字・キャラ名・グループ・説明)を読む。"""
+    return _read_tsv(path, 4)
+
+
+def event_seed(path=EVENT_SEED_FILE):
+    """data/events.tsv(略称・正式名・会場・都道府県・備考)を読む。"""
+    return _read_tsv(path, 5)
 
 
 def seed_rows(table):
@@ -157,6 +184,9 @@ def seed_rows(table):
     if seed == "EMOJIS":
         return [{"絵文字": p_title(e), "キャラ名": p_text(n), "グループ": p_text(g), "有効": p_check(True), "備考": p_text(d)}
                 for e, n, g, d in emoji_seed()]
+    if seed == "EVENTS":
+        return [{"略称": p_title(a), "正式名": p_text(n), "会場": p_text(v), "都道府県": p_text(pref), "有効": p_check(True), "備考": p_text(d)}
+                for a, n, v, pref, d in event_seed()]
     if not seed:
         return []
     return [table["seed_props"](r) for r in seed]

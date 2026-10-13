@@ -4,11 +4,12 @@
 AI には事実の読み取りだけを頼み、対象外にするかどうかは reject_reason() がルールで決める。
 """
 import json
+import re
 import time
 
 import requests
 
-from finder.tables import TYPES
+from finder.tables import TYPES, VARIES
 
 class JudgeError(Exception):
     pass
@@ -44,6 +45,9 @@ PREFECTURES = [
     "佐賀県", "長崎県", "熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県",
 ]
 UNKNOWN_PLACE = "不明"
+EVENT_SOURCE = "イベント表"
+IMAGE_SOURCE = "画像"  # 判定のあとに image_step.py が画像から読んだとき
+PLACE_SOURCES = ["本文", EVENT_SOURCE, "プロフィール", UNKNOWN_PLACE]
 
 SCHEMA = {
     "type": "ARRAY",
@@ -58,7 +62,7 @@ SCHEMA = {
             "works": {"type": "STRING"},
             "excluded_work": {"type": "STRING"},
             "prefecture": {"type": "STRING", "enum": PREFECTURES + [UNKNOWN_PLACE]},
-            "prefecture_source": {"type": "STRING", "enum": ["本文", "プロフィール", UNKNOWN_PLACE]},
+            "prefecture_source": {"type": "STRING", "enum": PLACE_SOURCES},
             "place": {"type": "STRING"},
             "dates": {"type": "STRING"},
             "summary": {"type": "STRING"},
@@ -91,9 +95,13 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
   それを使ってキャラクター名を works に書く(例: 「にじさんじ 〇〇」)。同じ絵文字に候補が何人もあるときは、本文の流れから選ぶ。
   ただの飾りとして使われている絵文字なら無視する。
 - excluded_work: works が下の「除外作品」のどれかに当たれば、その除外作品名(略称・キャラクター名からの判断も含む)。当たらなければ空文字。
-- prefecture: 撮影する場所の都道府県。本文から分からなければ、投稿者プロフィールの活動地域から分かる場合だけそれを使う。どちらでも分からなければ「不明」。
-- prefecture_source: prefecture をどこから判断したか(本文 / プロフィール / 不明)。
-- place: 会場名や地域(本文に書かれていれば。なければ空文字)。
+- prefecture: 撮影する場所の都道府県。次の順で判断する。
+  1. 本文・引用元の本文に書かれた地名・会場名・駅名
+  2. ポストに「イベントの意味」が付いていれば、そこに書かれた開催地(「回ごとにちがう」なら本文から判断する)
+  3. 投稿者プロフィールの地域・自己紹介に書かれた活動地域
+  どれでも分からなければ「不明」。全国のポストが混ざっているので、推測で東京などにしないこと。
+- prefecture_source: prefecture をどこから判断したか(本文 / イベント表 / プロフィール / 不明)。
+- place: 会場名やイベント名・地域(本文に書かれていれば。イベント表から分かった会場でもよい。なければ空文字)。
 - dates: 撮影日や候補日(本文の書き方のまま短く。なければ空文字)。
 - summary: 何の撮影の募集か、30文字以内の日本語。
 """
@@ -126,7 +134,37 @@ def emoji_hints(text, index):
     return found
 
 
-def build_prompt(items, excluded_works, emojis=None):
+def _alias_pattern(alias):
+    """英数字だけの略称(TGS など)は、ほかの単語の一部に当たらないように前後を区切る。"""
+    if re.fullmatch(r"[A-Za-z0-9 .!&'-]+", alias):
+        return re.compile(r"(?<![A-Za-z0-9])" + re.escape(alias) + r"(?![A-Za-z0-9])", re.IGNORECASE)
+    return re.compile(re.escape(alias))
+
+
+def match_events(text, events):
+    """本文に略称が出てくるイベントを返す。[(出てきた略称, イベント)]"""
+    out = []
+    for ev in events or []:
+        for alias in ev.get("aliases") or []:
+            if alias and _alias_pattern(alias).search(text or ""):
+                out.append((alias, ev))
+                break
+    return out
+
+
+def event_label(ev):
+    """「正式名(会場、都道府県)」の形にする。"""
+    where = [x for x in (ev.get("venue"), ev.get("prefecture")) if x]
+    if ev.get("prefecture") == VARIES:
+        where = [x for x in where if x != VARIES] + ["開催地は回ごとにちがう"]
+    return (ev.get("name") or ev["aliases"][0]) + (f"({'、'.join(where)})" if where else "")
+
+
+def event_hints(text, events):
+    return [f"{alias}={event_label(ev)}" for alias, ev in match_events(text, events)]
+
+
+def build_prompt(items, excluded_works, emojis=None, events=None):
     lines = [RULES, "除外作品: " + ("、".join(excluded_works) if excluded_works else "なし"), ""]
     index = emoji_index(emojis)
     for it in items:
@@ -136,9 +174,13 @@ def build_prompt(items, excluded_works, emojis=None):
         lines.append("本文: " + (it.get("text") or ""))
         if it.get("quoted_text"):
             lines.append("引用元の本文: " + it["quoted_text"])
-        hints = emoji_hints((it.get("text") or "") + "\n" + (it.get("quoted_text") or ""), index)
+        body = (it.get("text") or "") + "\n" + (it.get("quoted_text") or "")
+        hints = emoji_hints(body, index)
         if hints:
             lines.append("絵文字の意味: " + "、".join(hints))
+        hints = event_hints(body, events)
+        if hints:
+            lines.append("イベントの意味: " + "、".join(hints))
         lines.append("")
     return "\n".join(lines)
 
@@ -219,7 +261,7 @@ def call(api_key, model, prompt, session=None):
     return result, tokens_in, tokens_out
 
 
-def judge(items, api_key, model, excluded_works, batch_size, session=None, emojis=None):
+def judge(items, api_key, model, excluded_works, batch_size, session=None, emojis=None, events=None):
     """items をまとめて判定する。(結果 {id: 判定}, 入力トークン, 出力トークン, 呼び出し回数) を返す。
 
     AI が返し忘れたポストは 1 件ずつ聞き直す。それでも返らなければ結果に入れない。
@@ -228,7 +270,7 @@ def judge(items, api_key, model, excluded_works, batch_size, session=None, emoji
 
     def run(batch):
         nonlocal tokens_in, tokens_out, calls
-        out, t_in, t_out = call(api_key, model, build_prompt(batch, excluded_works, emojis), session)
+        out, t_in, t_out = call(api_key, model, build_prompt(batch, excluded_works, emojis, events), session)
         tokens_in, tokens_out, calls = tokens_in + t_in, tokens_out + t_out, calls + 1
         wanted = {it["id"] for it in batch}
         for r in out:
@@ -249,6 +291,8 @@ def normalize(result):
         if pref and not result.get("place"):
             result["place"] = pref  # 「関東」などは場所の欄に残す
         result["prefecture"], result["prefecture_source"] = UNKNOWN_PLACE, UNKNOWN_PLACE
+    elif result.get("prefecture_source") not in PLACE_SOURCES:
+        result["prefecture_source"] = "本文" if pref != UNKNOWN_PLACE else UNKNOWN_PLACE
     if result.get("case_type") not in TYPES:
         result["case_type"] = "その他"
     return result

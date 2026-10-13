@@ -61,6 +61,8 @@ def good_tables():
         "periods": kv_rows(PERIODS),
         "emojis": [row(絵文字=title("🐑"), キャラ名=rt("ひつじ太郎"), グループ=rt("にじさんじ"), 有効=chk()),
                    row(絵文字=title("🌸"), キャラ名=rt(""), 有効=chk()), row(絵文字=title("🍙"), キャラ名=rt("おにぎり"), 有効=chk(False))],
+        "events": [row(略称=title("コミケ、夏コミ, C107"), 正式名=rt("コミックマーケット"), 会場=rt("東京ビッグサイト"), 都道府県=rt("東京都"), 有効=chk()),
+                   row(略称=title("無効イベ"), 有効=chk(False))],
     }
 
 
@@ -142,3 +144,13 @@ def test_emoji_seed_file():
     first = rows[0]
     assert first["絵文字"]["title"][0]["text"]["content"] == "🐰"
     assert first["キャラ名"]["rich_text"][0]["text"]["content"] == "月ノ美兎"
+
+
+def test_events_table_is_parsed(d1):
+    cfg, _ = config.load_config(setup(d1, good_tables()), d1)
+    assert cfg["events"] == [{"aliases": ["コミケ", "夏コミ", "C107"], "name": "コミックマーケット", "venue": "東京ビッグサイト", "prefecture": "東京都"}]
+
+
+def test_event_seed_file():
+    rows = seed_rows(next(t for t in TABLES if t["key"] == "events"))
+    assert rows and all(r["略称"]["title"][0]["text"]["content"] for r in rows)

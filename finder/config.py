@@ -1,8 +1,10 @@
-"""N1 設定読込: Notion の設定の表(8表+絵文字の一覧)から設定を読む。
+"""N1 設定読込: Notion の設定の表(8表+絵文字の一覧・イベントの一覧)から設定を読む。
 
 読めなかった表や、値が不正な項目は、前回正しく読めた値(D1 の meta に保存)を使い、
 warnings に理由を残す。
 """
+import re
+
 from finder import notion as nt
 from finder.tables import BASIC, PERIODS, TABLES
 
@@ -111,6 +113,18 @@ def parse_emojis(rows):
     return out
 
 
+def parse_events(rows):
+    out = []
+    for r in rows:
+        p = r["properties"]
+        aliases = [a.strip() for a in re.split(r"[,、，]", nt.text(p.get("略称"))) if a.strip()]
+        if not _enabled(r) or not aliases:
+            continue
+        out.append({"aliases": aliases, "name": nt.text(p.get("正式名")).strip(), "venue": nt.text(p.get("会場")).strip(),
+                    "prefecture": nt.text(p.get("都道府県")).strip()})
+    return out
+
+
 def _check(value, kind):
     if kind == "int":
         return int(str(value).replace(",", "").strip())
@@ -176,6 +190,7 @@ def load_config(notion, d1):
     load("scores", lambda rows: parse_scores(rows, warnings))
     load("critical", parse_critical)
     load("emojis", parse_emojis)
+    load("events", parse_events)
     missing = {"basic": [], "periods": []}
     load("basic", lambda rows: parse_key_values(rows, BASIC, last_good.get("basic"), warnings, titles["basic"], missing["basic"]))
     load("periods", lambda rows: parse_key_values(rows, PERIODS, last_good.get("periods"), warnings, titles["periods"], missing["periods"]))
