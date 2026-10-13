@@ -2,7 +2,7 @@
 // D1 は読むだけ。ただし案件カードの確認の状態(未確認 / 確認済み / 保留 / 削除予定)と、画面の設定だけは書く。
 // Cloudflare Access を通った人だけが見られる(auth.js)。
 import { verifyAccess } from "./auth.js";
-import { getCalendar } from "./calendar.js";
+import { getCalendar, offWords } from "./calendar.js";
 import page from "./page.html";
 import icon180 from "./icons/icon-180.png";
 import icon192 from "./icons/icon-192.png";
@@ -551,7 +551,8 @@ export default {
       if (url.pathname === "/api/stats") return json(await getStats(env.DB, url.searchParams));
       if (url.pathname === "/api/calendar") {
         try {
-          return json(await getCalendar(env, url.searchParams));
+          const config = parseJson((await env.DB.prepare("SELECT value FROM meta WHERE key = 'config_last_good'").first())?.value, {});
+          return json(await getCalendar(env, url.searchParams, fetch, Date.now(), offWords(config.basic?.["休みとみなす予定の言葉"])));
         } catch (e) {
           console.error(e);
           return json({ configured: true, error: "Google カレンダーを読めませんでした", days: {} });

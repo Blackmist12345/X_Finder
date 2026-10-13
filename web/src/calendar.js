@@ -193,7 +193,22 @@ export function calendarUrls(env) {
   return String(env.GCAL_ICS_URL || "").split(/[\s,]+/).filter((u) => /^https:\/\/\S+$/.test(u));
 }
 
-export async function getCalendar(env, params, fetchFn = fetch, now = Date.now()) {
+// 予定名にこの言葉が入っていれば「休み」(予定ありに数えない)。Notion【7】の「休みとみなす予定の言葉」で変えられる
+export const DEFAULT_OFF_WORDS = ["休み", "有給", "休日", "公休", "代休", "振休"];
+
+export function offWords(value) {
+  if (typeof value !== "string" || !value.trim()) return DEFAULT_OFF_WORDS;
+  return value.split(/[,、，\s]+/).map((w) => w.trim()).filter(Boolean);
+}
+
+export function markOff(days, words) {
+  for (const list of Object.values(days)) {
+    for (const ev of list) if (words.some((w) => ev.title.includes(w))) ev.off = true;
+  }
+  return days;
+}
+
+export async function getCalendar(env, params, fetchFn = fetch, now = Date.now(), words = DEFAULT_OFF_WORDS) {
   const urls = calendarUrls(env);
   if (!urls.length) return { configured: false, days: {} };
   const today = ymd(now + JST_MS);
@@ -210,7 +225,7 @@ export async function getCalendar(env, params, fetchFn = fetch, now = Date.now()
     }));
     cache = { key, at: now, events: texts.flatMap(parseIcs) };
   }
-  return { configured: true, from, to, days: eventsByDay(cache.events, from, to) };
+  return { configured: true, from, to, days: markOff(eventsByDay(cache.events, from, to), words) };
 }
 
 export function resetCalendarCache() {

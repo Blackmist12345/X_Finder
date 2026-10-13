@@ -398,14 +398,17 @@ function calCheck(c){
   if(!cal.configured||cal.error)return null;
   const dates=caseDates(c).filter(d=>(!cal.from||d>=cal.from)&&(!cal.to||d<=cal.to));
   if(!dates.length)return null;
-  const days=dates.map(d=>({d,events:(cal.days[d]||[]).filter(e=>!e.free)}));
-  return {days,busy:days.some(x=>x.events.length)};
+  // 「表示方法: 空き」の予定は出さない。「休み」「有給」などは予定ありに数えず、休みとして出す
+  const days=dates.map(d=>{const all=(cal.days[d]||[]).filter(e=>!e.free);return {d,events:all.filter(e=>!e.off),off:all.filter(e=>e.off)}});
+  const busy=days.some(x=>x.events.length);
+  return {days,busy,off:!busy&&days.some(x=>x.off.length)};
 }
-function calBadge(c){const k=calCheck(c);return k?`<span class="cal ${k.busy?"busy":"free"}">${k.busy?"予定あり":"空き"}</span>`:""}
+function calBadge(c){const k=calCheck(c);return k?`<span class="cal ${k.busy?"busy":"free"}">${k.busy?"予定あり":k.off?"休み":"空き"}</span>`:""}
 function calDetail(c){
   const k=calCheck(c);
   if(!k){if(cal.configured&&cal.error)return `<dt>予定</dt><dd class="sub">${esc(cal.error)}</dd>`;return ""}
-  return `<dt>予定</dt><dd>${k.days.map(x=>`<span class="calday">${dayLabel(x.d)} ${x.events.length?x.events.map(e=>`<span class="ev">${esc(e.title)}${e.time?` ${esc(e.time)}`:"(終日)"}</span>`).join("、"):'<span class="none">予定なし</span>'}</span>`).join("")}</dd>`;
+  const ev=e=>`${esc(e.title)}${e.time?` ${esc(e.time)}`:"(終日)"}`;
+  return `<dt>予定</dt><dd>${k.days.map(x=>`<span class="calday">${dayLabel(x.d)} ${x.events.length||x.off.length?[...x.events.map(e=>`<span class="ev">${ev(e)}</span>`),...x.off.map(e=>`<span class="none">${ev(e)}</span>`)].join("、"):'<span class="none">予定なし</span>'}</span>`).join("")}</dd>`;
 }
 async function api(path){const r=await fetch(path,{credentials:"same-origin"});if(!r.ok)throw new Error(`${r.status}`);return r.json()}
 async function postJson(path,body){
