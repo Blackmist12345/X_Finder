@@ -245,3 +245,15 @@ def test_old_penalties_get_category_from_config():
     items = [{"id": "1", "text": "大阪", "penalties": [{"word": "大阪", "points": -30}]}]
     (_, _, _, total, *_), = judge_step.evaluate(items, {"1": ai_result("1", prefecture="大阪府")}, cfg)
     assert total == 20  # 地名の減点語は使われず、都道府県の -30 だけ
+
+
+def test_emoji_hints_in_prompt():
+    emojis = [{"emoji": "🐑", "name": "ひつじ太郎", "group": "にじさんじ"},
+              {"emoji": "🌸", "name": "さくら", "group": "A"}, {"emoji": "🌸", "name": "はな", "group": "B"},
+              {"emoji": "❤️‍🔥", "name": "ほのお", "group": ""}, {"emoji": "❤️", "name": "はーと", "group": ""}]
+    prompt = judge.build_prompt([{"id": "1", "text": "🐑の併せ募集 ❤‍🔥", "quoted_text": "🌸 も"}], [], emojis)
+    line = [l for l in prompt.splitlines() if l.startswith("絵文字の意味")][0]
+    assert "🐑=ひつじ太郎(にじさんじ)" in line
+    assert "🌸=さくら(A) / はな(B)" in line
+    assert "❤‍🔥=ほのお" in line and "はーと" not in line  # 組み合わせの絵文字を先に取る。異体字セレクタは無視
+    assert "絵文字の意味" not in judge.build_prompt([{"id": "2", "text": "募集"}], [], emojis).split("除外作品")[1]

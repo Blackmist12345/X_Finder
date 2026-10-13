@@ -1,6 +1,6 @@
-"""Notion 8表を親ページの下に作り、表の ID を D1 に保存する。
+"""Notion の設定の表を親ページの下に作り、表の ID を D1 に保存する。
 
-すでに作ってある場合は何もしない(作り直すときは FORCE=1)。
+すでに作ってある表はそのままにして、まだない表(あとから足した表)だけを作る(全部作り直すときは FORCE=1)。
 """
 import os
 import re
@@ -24,20 +24,21 @@ def page_id(raw):
 
 def main():
     d1 = D1.from_env()
-    if d1.get_meta(TABLE_IDS_KEY) and os.environ.get("FORCE") != "1":
-        print("Notion 8表はすでに作成済みです。作り直す場合は FORCE=1 で実行してください。")
+    ids = {} if os.environ.get("FORCE") == "1" else dict(d1.get_meta(TABLE_IDS_KEY) or {})
+    todo = [t for t in TABLES if t["key"] not in ids]
+    if not todo:
+        print("Notion の表はすべて作成済みです。作り直す場合は FORCE=1 で実行してください。")
         return
     notion = Notion(os.environ.get("NOTION_API_KEY"))
     parent = page_id(os.environ.get("NOTION_PARENT_PAGE_ID"))
 
-    ids = {}
-    for table in TABLES:
+    for table in todo:
         ids[table["key"]] = notion.create_database(parent, table["title"], table["props"])
         rows = seed_rows(table)
         for props in rows:
             notion.create_page(ids[table["key"]], props)
+        d1.set_meta(TABLE_IDS_KEY, ids)  # 途中で止まっても、作った表は二重に作らない
         print(f"作成しました: {table['title']}(初期値 {len(rows)}行)")
-    d1.set_meta(TABLE_IDS_KEY, ids)
     print("表の ID を D1 に保存しました。")
 
 

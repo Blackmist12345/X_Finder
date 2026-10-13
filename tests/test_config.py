@@ -59,6 +59,8 @@ def good_tables():
         "critical": [row(名前=title("基準点"), 種類=sel("基準点"), 値=rt("70"), 有効=chk())],
         "basic": kv_rows(BASIC),
         "periods": kv_rows(PERIODS),
+        "emojis": [row(絵文字=title("🐑"), キャラ名=rt("ひつじ太郎"), グループ=rt("にじさんじ"), 有効=chk()),
+                   row(絵文字=title("🌸"), キャラ名=rt(""), 有効=chk()), row(絵文字=title("🍙"), キャラ名=rt("おにぎり"), 有効=chk(False))],
     }
 
 
@@ -120,3 +122,23 @@ def test_missing_key_row_is_added_to_notion(d1):
     assert cfg["periods"]["自動削除までの日数"] == 14
     assert notion.created[0][0] == "periods"
     assert any("行を足しました" in w for w in warnings)
+
+
+def test_emojis_table_is_parsed(d1):
+    cfg, _ = config.load_config(setup(d1, good_tables()), d1)
+    assert cfg["emojis"] == [{"emoji": "🐑", "name": "ひつじ太郎", "group": "にじさんじ"}]  # キャラ名が空・無効の行は使わない
+
+
+def test_emojis_missing_table_id(d1):
+    d1.set_meta(config.TABLE_IDS_KEY, {t["key"]: t["key"] for t in TABLES if t["key"] != "emojis"})
+    cfg, warnings = config.load_config(FakeNotion(good_tables()), d1)
+    assert cfg["emojis"] == [] and not any("絵文字" in w for w in warnings)
+
+
+def test_emoji_seed_file():
+    table = next(t for t in TABLES if t["key"] == "emojis")
+    rows = seed_rows(table)
+    assert len(rows) > 200
+    first = rows[0]
+    assert first["絵文字"]["title"][0]["text"]["content"] == "🐰"
+    assert first["キャラ名"]["rich_text"][0]["text"]["content"] == "月ノ美兎"

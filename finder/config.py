@@ -1,4 +1,4 @@
-"""N1 設定読込: Notion 8表から設定を読む。
+"""N1 設定読込: Notion の設定の表(8表+絵文字の一覧)から設定を読む。
 
 読めなかった表や、値が不正な項目は、前回正しく読めた値(D1 の meta に保存)を使い、
 warnings に理由を残す。
@@ -101,6 +101,16 @@ def parse_critical(rows):
     return {"threshold": threshold, "conditions": conditions}
 
 
+def parse_emojis(rows):
+    out = []
+    for r in rows:
+        p = r["properties"]
+        emoji, name = nt.text(p.get("絵文字")).strip(), nt.text(p.get("キャラ名")).strip()
+        if _enabled(r) and emoji and name:
+            out.append({"emoji": emoji, "name": name, "group": nt.text(p.get("グループ")).strip()})
+    return out
+
+
 def _check(value, kind):
     if kind == "int":
         return int(str(value).replace(",", "").strip())
@@ -140,12 +150,15 @@ def load_config(notion, d1):
     """設定を読み、(config, warnings) を返す。"""
     ids = d1.get_meta(TABLE_IDS_KEY)
     if not ids:
-        raise ConfigError("Notion 8表の ID が見つかりません。先に setup ワークフローの notion_tables を実行してください")
+        raise ConfigError("Notion の表の ID が見つかりません。先に setup ワークフローの notion_tables を実行してください")
     last_good = d1.get_meta(LAST_GOOD_KEY, {}) or {}
     warnings, config = [], {}
     titles = {t["key"]: t["title"] for t in TABLES}
 
     def load(key, parse):
+        if key not in ids and next(t for t in TABLES if t["key"] == key).get("optional"):
+            config[key] = []  # まだ作っていない表(あとから足した表)
+            return
         try:
             rows = notion.query_all(ids[key])
             config[key] = parse(rows)
@@ -162,6 +175,7 @@ def load_config(notion, d1):
     load("excluded_works", parse_excluded_works)
     load("scores", lambda rows: parse_scores(rows, warnings))
     load("critical", parse_critical)
+    load("emojis", parse_emojis)
     missing = {"basic": [], "periods": []}
     load("basic", lambda rows: parse_key_values(rows, BASIC, last_good.get("basic"), warnings, titles["basic"], missing["basic"]))
     load("periods", lambda rows: parse_key_values(rows, PERIODS, last_good.get("periods"), warnings, titles["periods"], missing["periods"]))
