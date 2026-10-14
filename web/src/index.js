@@ -3,6 +3,7 @@
 // Cloudflare Access を通った人だけが見られる(auth.js)。
 import { verifyAccess } from "./auth.js";
 import { getCalendar, offWords } from "./calendar.js";
+import { profileInfo } from "./profile.js";
 import page from "./page.html";
 import icon180 from "./icons/icon-180.png";
 import icon192 from "./icons/icon-192.png";
@@ -90,7 +91,8 @@ function daysAgoIso(days) {
 const CASE_COLUMNS = `
   p.id, p.text, p.url, p.created_at, p.collected_at, p.status, p.skip_reason, p.quoted_id,
   j.case_type, j.works, j.prefecture, j.prefecture_source, j.place, j.dates, j.summary, j.score, j.critical, j.critical_reason, j.reject_reason,
-  p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, COALESCE(r.state, 'unread') AS review`;
+  p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, COALESCE(r.state, 'unread') AS review,
+  u.description, u.location`;
 
 export async function listCases(db, params) {
   const view = params.get("view") === "rejected" ? "rejected" : "judged";
@@ -107,8 +109,10 @@ export async function listCases(db, params) {
     .bind(view, daysAgoIso(days), MAX_LIST)
     .all();
   // 添付画像の URL も返す(詳細を開いた瞬間から画像の場所を取っておき、あとから表示がずれないように)
-  return results.map(({ media_json, ...r }) => ({
+  // 自己紹介は一覧では使わないので返さない(年齢と活動地域だけ読み取って付ける)
+  return results.map(({ media_json, description, location, ...r }) => ({
     ...r,
+    ...profileInfo({ name: r.name, description, location }),
     critical: !!r.critical,
     near: NEAR.includes(r.prefecture),
     media: parseJson(media_json, []),
@@ -118,8 +122,7 @@ export async function listCases(db, params) {
 export async function getCase(db, id) {
   const row = await db
     .prepare(
-      `SELECT ${CASE_COLUMNS}, p.media_json, j.score_json, q.text AS quoted_text, q.url AS quoted_url,
-         u.description, u.location
+      `SELECT ${CASE_COLUMNS}, p.media_json, j.score_json, q.text AS quoted_text, q.url AS quoted_url
        FROM posts p JOIN judgments j ON j.post_id = p.id LEFT JOIN users u ON u.id = p.author_id
        LEFT JOIN reviews r ON r.post_id = p.id
        LEFT JOIN posts q ON q.id = p.quoted_id
@@ -182,6 +185,7 @@ export async function getCase(db, id) {
   const { media_json, score_json, ...rest } = row;
   return {
     ...rest,
+    ...profileInfo(row),
     critical: !!row.critical,
     near: NEAR.includes(row.prefecture),
     media: parseJson(media_json, []),

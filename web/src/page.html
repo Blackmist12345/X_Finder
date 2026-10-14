@@ -113,6 +113,8 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .pill{font-size:11.5px;border-radius:6px;padding:2px 7px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
 .pill.type{background:var(--accent-soft);color:var(--accent);font-weight:500}
 .pill.warn{background:var(--warn-soft);color:var(--warn)}
+.ctag{display:inline-block;font-size:11px;line-height:1.5;border-radius:5px;padding:0 5px;margin-left:4px;background:var(--surface-2);color:var(--muted);vertical-align:1px;white-space:nowrap}
+.ctag.minor{background:var(--rec-soft);color:var(--rec);font-weight:600}
 /* Google カレンダーの照合 */
 .cal{font-size:11px;border-radius:5px;padding:1px 6px;margin-left:6px;white-space:nowrap;font-weight:500}
 .cal.busy{background:var(--warn-soft);color:var(--warn)}
@@ -478,6 +480,11 @@ function place(c){return c.prefecture&&c.prefecture!=="不明"?c.prefecture:"場
 const PLACE_FROM={"本文":"本文から","イベント表":"イベント表から","画像":"画像から","プロフィール":"プロフィールから推定"};
 function placeShort(c){const k=c.prefecture&&c.prefecture!=="不明"?c.prefecture_source:"";return k&&k!=="本文"&&PLACE_FROM[k]?`${place(c)}・${k==="プロフィール"?"推定":k==="イベント表"?"イベント":k}`:place(c)}
 function placeFrom(c){const k=c.prefecture&&c.prefecture!=="不明"?c.prefecture_source:"";return PLACE_FROM[k]?`(${PLACE_FROM[k]})`:""}
+// プロフィールから読み取った年齢と活動地域(依頼主の名前の横に小さく出す)
+const areaText=c=>(c.areas||[]).slice(0,2).join("・")+((c.areas||[]).length>2?" ほか":"");
+function clientTags(c){
+  return `${c.age?`<span class="ctag ${c.age.minor?"minor":""}">${esc(c.age.label)}</span>`:""}${(c.areas||[]).length?`<span class="ctag">${esc(areaText(c))}</span>`:""}`;
+}
 function card(c){
   const rejected=state.preset==="rejected";
   return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card ${c.critical?"crit":""} ${c.review==="unread"?"unread":""}" data-id="${esc(c.id)}">
@@ -487,7 +494,7 @@ function card(c){
    <p class="excerpt">${esc((c.text||"").replace(/\s+/g," "))}</p>
    ${c.dates||c.place||c.works?`<dl class="facts">${c.dates?`<dt>日程</dt><dd>${esc(c.dates)}${calBadge(c)}</dd>`:""}${c.place?`<dt>場所</dt><dd>${esc(c.place)}</dd>`:""}${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}</dl>`:""}
    <div class="client">${ava(c)}
-    <span class="who">${esc(c.name||"")} <span class="sub">@${esc(c.username||"")}</span>${c.others?` <span class="sub">ほか${c.others}人</span>`:""}</span>
+    <span class="who">${esc(c.name||"")}${clientTags(c)} <span class="sub">@${esc(c.username||"")}</span>${c.others?` <span class="sub">ほか${c.others}人</span>`:""}</span>
     <span class="ff"><span class="num">${ffText(c)}</span><small>FF率</small></span></div>
   </button></div>`;
 }
@@ -582,6 +589,7 @@ function sheetHtml(c,full){
    ${detail.length?`<div class="sec"><h3>点数の内訳</h3><dl class="breakdown">${detail.map(d=>`<dt>${esc(d.label)}</dt><dd>${d.points>0?"+":""}${Math.round(d.points)}</dd>`).join("")}<dt class="total">合計</dt><dd class="total">${Math.round(c.score)}</dd></dl></div>`:""}
    <div class="sec"><h3>クライアント</h3><div class="people"><${cu?`a class="person link" href="https://x.com/${cu}" data-xuser="${cu}"`:'div class="person"'}>${ava(c)}<div class="who"><div>${esc(c.name||"")}</div>
     <div class="id">@${esc(c.username||"")} ・ フォロワー <span class="num">${fmt(c.followers)}</span> ・ フォロー <span class="num">${fmt(c.following)}</span> ・ FF率 <span class="num">${ffText(c)}</span></div>
+    ${c.age||(c.areas||[]).length?`<div class="id">${c.age?`年齢: ${esc(c.age.label)}${c.age.minor===true?"(未成年)":c.age.minor===false?"(成人)":""}`:"年齢: 不明"} ・ 活動地域: ${(c.areas||[]).length?esc(c.areas.join("・")):"不明"}<span class="sub">(プロフィールから)</span></div>`:""}
     ${c.location?`<div class="id">地域: ${esc(c.location)}</div>`:""}${c.description?`<div class="id">${esc(c.description)}</div>`:""}</div>${cu?'<span class="go">X で開く ›</span>':""}</${cu?"a":"div"}></div>
     ${c.blacklist?`<p class="sub" style="color:var(--rec)">🚫 ブラックリストに登録済み(${esc(BLACK_REASON[c.blacklist.reason]||"")})</p>`:""}</div>
    ${c.people&&c.people.length?`<div class="sec"><h3>関係するアカウント</h3><div class="people">${c.people.map(person).join("")}</div></div>`:""}
@@ -766,6 +774,7 @@ let bulk=null; // { base: 対象の案件, q: 言葉, conds: Set(条件の k), p
 // 言葉と一緒に使える決まった条件。どれも「かつ」で絞る
 const BULK_CONDS=[
   {k:"far",t:"首都圏以外",f:c=>!!c.prefecture&&c.prefecture!=="不明"&&!c.near},
+  {k:"afar",t:"活動地域が首都圏以外",f:c=>!!c.areas_far},
   {k:"busy",t:"予定あり",f:c=>!!calCheck(c)?.busy,show:()=>cal.configured&&!cal.error},
 ];
 const BULK_ACTIONS=[{k:"delete",t:"削除予定にする",cls:"del"},{k:"hold",t:"保留にする",cls:"hold"},{k:"seen",t:"確認済みにする",cls:"ok"},{k:"unread",t:"未確認に戻す",cls:"uread"}];
@@ -785,7 +794,7 @@ function openBulk(){
   bulk={base:filtered(),q:"",conds:new Set(),picked:new Set()};
   const tab=TABS.find(t=>t.k===state.tab);
   presentSheet(`<div class="grab"></div><h2>まとめて状態を変える</h2>
-   <p class="sub">「${esc(tab.t)}」の ${bulk.base.length}件から、条件や言葉で絞って選びます。「首都圏以外」は東京・神奈川・埼玉・千葉以外の都道府県の案件(場所不明は入りません)、「予定あり」はカレンダーで撮影日に予定がある案件です。言葉は、作品名・イベント名・場所・本文のどれかに入っていれば当たります(空白で区切ると全部を含むもの)。</p>
+   <p class="sub">「${esc(tab.t)}」の ${bulk.base.length}件から、条件や言葉で絞って選びます。「首都圏以外」は東京・神奈川・埼玉・千葉以外の都道府県の案件(場所不明は入りません)、「活動地域が首都圏以外」は依頼主のプロフィールに書かれた活動地域が首都圏・関東以外の案件(書かれていない人は入りません)、「予定あり」はカレンダーで撮影日に予定がある案件です。言葉は、作品名・イベント名・場所・本文のどれかに入っていれば当たります(空白で区切ると全部を含むもの)。</p>
    <input class="bulk-input" id="bulkQ" type="search" placeholder="例: ブルアカ コミケ" enterkeyhint="search" autocomplete="off">
    <div class="bulk-chips">${BULK_CONDS.filter(x=>!x.show||x.show()).map(x=>`<button type="button" class="chip" data-bulk-cond="${x.k}" aria-pressed="false">${x.t}</button>`).join("")}</div>
    <div class="bulk-chips" id="bulkChips">${bulkSuggest().map(w=>`<button type="button" class="chip" data-bulk-chip="${esc(w)}">${esc(w)}</button>`).join("")}</div>
