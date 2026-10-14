@@ -762,12 +762,18 @@ function openSettings(){
 }
 // ---- まとめて状態を変える ----
 // いま見ているタブ(と絞り込み)の案件から、言葉(作品名・イベント名・場所など)で選んで、まとめて状態を変える
-let bulk=null; // { base: 対象の案件, q: 言葉, picked: Set(id) }
+let bulk=null; // { base: 対象の案件, q: 言葉, conds: Set(条件の k), picked: Set(id) }
+// 言葉と一緒に使える決まった条件。どれも「かつ」で絞る
+const BULK_CONDS=[
+  {k:"far",t:"首都圏以外",f:c=>!!c.prefecture&&c.prefecture!=="不明"&&!c.near},
+  {k:"busy",t:"予定あり",f:c=>!!calCheck(c)?.busy,show:()=>cal.configured&&!cal.error},
+];
 const BULK_ACTIONS=[{k:"delete",t:"削除予定にする",cls:"del"},{k:"hold",t:"保留にする",cls:"hold"},{k:"seen",t:"確認済みにする",cls:"ok"},{k:"unread",t:"未確認に戻す",cls:"uread"}];
 const bulkText=c=>[c.summary,c.works,c.place,c.dates,c.text].filter(Boolean).join(" ").toLowerCase();
 function bulkMatches(){
   const terms=bulk.q.toLowerCase().split(/[\s　]+/).filter(Boolean);
-  return terms.length?bulk.base.filter(c=>{const t=bulkText(c);return terms.every(w=>t.includes(w))}):bulk.base;
+  const conds=BULK_CONDS.filter(x=>bulk.conds.has(x.k));
+  return bulk.base.filter(c=>conds.every(x=>x.f(c))&&(!terms.length||terms.every(w=>bulkText(c).includes(w))));
 }
 // よく出る作品名・場所を候補として出す
 function bulkSuggest(){
@@ -776,11 +782,12 @@ function bulkSuggest(){
   return [...n].sort((a,b)=>b[1]-a[1]).slice(0,10).map(([w])=>w);
 }
 function openBulk(){
-  bulk={base:filtered(),q:"",picked:new Set()};
+  bulk={base:filtered(),q:"",conds:new Set(),picked:new Set()};
   const tab=TABS.find(t=>t.k===state.tab);
   presentSheet(`<div class="grab"></div><h2>まとめて状態を変える</h2>
-   <p class="sub">「${esc(tab.t)}」の ${bulk.base.length}件から、言葉で絞って選びます。作品名・イベント名・場所・本文のどれかに入っていれば当たります(空白で区切ると全部を含むもの)。</p>
+   <p class="sub">「${esc(tab.t)}」の ${bulk.base.length}件から、条件や言葉で絞って選びます。「首都圏以外」は東京・神奈川・埼玉・千葉以外の都道府県の案件(場所不明は入りません)、「予定あり」はカレンダーで撮影日に予定がある案件です。言葉は、作品名・イベント名・場所・本文のどれかに入っていれば当たります(空白で区切ると全部を含むもの)。</p>
    <input class="bulk-input" id="bulkQ" type="search" placeholder="例: ブルアカ コミケ" enterkeyhint="search" autocomplete="off">
+   <div class="bulk-chips">${BULK_CONDS.filter(x=>!x.show||x.show()).map(x=>`<button type="button" class="chip" data-bulk-cond="${x.k}" aria-pressed="false">${x.t}</button>`).join("")}</div>
    <div class="bulk-chips" id="bulkChips">${bulkSuggest().map(w=>`<button type="button" class="chip" data-bulk-chip="${esc(w)}">${esc(w)}</button>`).join("")}</div>
    <div id="bulkBody"></div>`,"まとめて状態を変える");
   $("bulkQ").addEventListener("input",e=>{bulk.q=e.target.value;bulkPickAll(!!bulk.q.trim());renderBulk()});
@@ -791,7 +798,8 @@ function renderBulk(){
   const list=bulkMatches();
   const picked=list.filter(c=>bulk.picked.has(c.id)).length;
   const acts=BULK_ACTIONS.filter(a=>a.k!==state.tab);
-  $("bulkBody").innerHTML=`<div class="bulk-bar"><span>${bulk.q.trim()?`当たったもの ${list.length}件`:`全部で ${list.length}件`} ・ 選んだもの <b>${picked}件</b></span>
+  const narrowed=bulk.q.trim()||bulk.conds.size;
+  $("bulkBody").innerHTML=`<div class="bulk-bar"><span>${narrowed?`当たったもの ${list.length}件`:`全部で ${list.length}件`} ・ 選んだもの <b>${picked}件</b></span>
      ${list.length?`<button type="button" class="chip" data-bulk-all="${picked===list.length?0:1}">${picked===list.length?"全部外す":"全部選ぶ"}</button>`:""}</div>
    ${list.length?`<div class="bulk-list">${list.slice(0,300).map(c=>`<label><input type="checkbox" data-bulk-id="${esc(c.id)}" ${bulk.picked.has(c.id)?"checked":""}><span>${esc(c.summary||"(要約なし)")}<span class="sub">${esc([c.works,c.place,c.dates].filter(Boolean).join(" ・ "))}</span></span></label>`).join("")}</div>`:'<p class="sub">当たる案件はありません。</p>'}
    <div class="bulk-actions">${acts.map(a=>`<button type="button" class="btn ${a.cls}" data-bulk-act="${a.k}" ${picked?"":"disabled"}>${a.t}</button>`).join("")}</div>
@@ -923,6 +931,8 @@ document.addEventListener("click",ev=>{
   if(ev.target.closest("[data-black-cancel]")){$("blackBox").innerHTML="";return}
   const ub=ev.target.closest("[data-unblack]");if(ub){unblack(ub);return}
   const bc=ev.target.closest("[data-bulk-chip]");if(bc){const q=$("bulkQ");q.value=bc.dataset.bulkChip;bulk.q=q.value;bulkPickAll(true);renderBulk();return}
+  const bk=ev.target.closest("[data-bulk-cond]");if(bk&&bulk){const k=bk.dataset.bulkCond,on=!bulk.conds.has(k);
+    if(on)bulk.conds.add(k);else bulk.conds.delete(k);bk.setAttribute("aria-pressed",String(on));bulkPickAll(!!(bulk.q.trim()||bulk.conds.size));renderBulk();return}
   const ba=ev.target.closest("[data-bulk-all]");if(ba){bulkPickAll(ba.dataset.bulkAll==="1");renderBulk();return}
   const bx=ev.target.closest("[data-bulk-act]");if(bx){bulkApply(bx.dataset.bulkAct);return}
   const tp=ev.target.closest("[data-theme-pick]");if(tp){pickTheme(tp.dataset.themePick);return}
