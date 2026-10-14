@@ -84,6 +84,19 @@ CREATE TABLE IF NOT EXISTS users (
 );
 CREATE INDEX IF NOT EXISTS users_username ON users (lower(username));
 
+-- プロフィールの URL 欄と自己紹介にあるリンク(Litlink など)と、そのページから取り出した文字。1 人 = 1 行。
+-- 収集のときに urls_json を入れ、案件になった依頼主だけ link_step がページを読んで text に入れる。
+-- 画面は text から年齢と活動地域を読む(プロフィールに書いてないときだけ)。
+CREATE TABLE IF NOT EXISTS user_links (
+  user_id TEXT PRIMARY KEY,
+  urls_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  fetched_at TEXT,
+  page_url TEXT,
+  text TEXT,
+  error TEXT
+);
+
 -- 画像から読み間違えた文字列のうち、この人だと確定したもの。
 CREATE TABLE IF NOT EXISTS user_aliases (
   alias TEXT NOT NULL,

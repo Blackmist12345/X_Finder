@@ -1,4 +1,4 @@
-// 依頼主のプロフィール(名前・自己紹介・所在地)から、年齢と活動地域を読み取る。
+// 依頼主のプロフィール(名前・自己紹介・所在地)と、プロフィールのリンク先のページの文字から、年齢と活動地域を読み取る。
 // 決まった書き方を探すだけなので AI は使わない(費用なし・今ある案件にもすぐ効く)。
 
 const ADULT_AGE = 18;
@@ -107,13 +107,30 @@ export function parseAreas(text) {
 // 首都圏(東京・神奈川・埼玉・千葉)に関係する地域。関東は首都圏を含むので、こちらに入れる
 const NEAR_AREAS = ["東京都", "神奈川県", "埼玉県", "千葉県", "首都圏", "関東"];
 
+// プロフィールに書いてない項目だけ、リンク先のページ(Litlink など)の文字から読む。
+// age_from / areas_from は "profile"(プロフィールから) / "link"(リンク先から)
 export function profileInfo(user) {
   const text = [user.name, user.description, user.location].filter(Boolean).join("\n");
   const areaText = [user.location, user.description].filter(Boolean).join("\n");
-  const areas = parseAreas(areaText);
+  let age = parseAge(text);
+  let areas = parseAreas(areaText);
+  let ageFrom = age ? "profile" : null;
+  let areasFrom = areas.length ? "profile" : null;
+  if (user.link_text) {
+    if (!age) {
+      age = parseAge(user.link_text);
+      if (age) ageFrom = "link";
+    }
+    if (!areas.length) {
+      areas = parseAreas(user.link_text);
+      if (areas.length) areasFrom = "link";
+    }
+  }
   return {
-    age: parseAge(text),
+    age,
     areas,
+    age_from: ageFrom,
+    areas_from: areasFrom,
     areas_far: areas.length > 0 && !areas.some((a) => NEAR_AREAS.includes(a)),
   };
 }

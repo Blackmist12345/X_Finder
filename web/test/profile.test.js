@@ -35,3 +35,20 @@ test("首都圏以外の判定: 首都圏や関東が入っていれば外す", 
   assert.equal(profileInfo({ description: "撮影大好き" }).areas_far, false);
   assert.deepEqual(profileInfo({ name: "あいう@18↓", description: "", location: "" }).age, { label: "18↓", minor: true });
 });
+
+test("プロフィールに書いてない項目だけ、リンク先の文字から読む", () => {
+  const link_text = "はじめまして\n活動地域: 愛知・岐阜\n20代 社会人コスプレイヤー";
+  const both = profileInfo({ description: "コスプレしてます", location: "", link_text });
+  assert.deepEqual(both.areas, ["愛知県", "岐阜県"]);
+  assert.equal(both.areas_from, "link");
+  assert.deepEqual(both.age, { label: "20代", minor: false });
+  assert.equal(both.age_from, "link");
+  assert.equal(both.areas_far, true);
+  const mixed = profileInfo({ description: "", location: "東京", link_text });
+  assert.deepEqual(mixed.areas, ["東京都"]);
+  assert.equal(mixed.areas_from, "profile");
+  assert.equal(mixed.age_from, "link");
+  const none = profileInfo({ description: "", location: "" });
+  assert.equal(none.age_from, null);
+  assert.equal(none.areas_from, null);
+});
