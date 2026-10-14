@@ -1,11 +1,13 @@
-"""依頼主のプロフィールにあるリンク先(Litlink など)を読み、ページの文字を user_links に保存する。
+"""依頼主のプロフィールにあるリンク先(Litlink など)を読み、年齢・活動地域・性別を user_links に保存する。
 
 X のプロフィールに年齢や活動地域が書いてなくても、リンク先のページに書いてあることがある。
-ここでは文字を取り出して保存するだけで、年齢と活動地域は画面(web/src/profile.js)がプロフィールと同じ決まりで読む。
+読み方はプロフィールと同じ決まり(web/src/profile.js)を node で呼んで使う。ページの文字そのものは保存しない。
 AI は使わないので費用はかからない。案件になった依頼主だけ、1 人 1 回(REFRESH_DAYS ごとに読み直す)。
 """
 import json
+import os
 import re
+import subprocess
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 
@@ -16,8 +18,9 @@ from finder import store
 MAX_USERS = 20           # 1 回の実行で読む人数
 REFRESH_DAYS = 30        # これより古くなったら読み直す
 MAX_BYTES = 2_000_000    # これより大きいページは途中まで
-MAX_TEXT = 4000          # 保存する文字数
+MAX_TEXT = 20000         # 読み取りに使う文字数(保存はしない)
 TIMEOUT = 10
+READER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "scripts", "read-links.mjs")
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; XFinder/1.0)", "Accept-Language": "ja,en;q=0.5"}
 
 # ログインしないと中身が見えない SNS や、動画・ショップは読まない
@@ -154,8 +157,19 @@ def candidates(d1, now=None):
     )
 
 
-def run(d1, production, session=None):
-    """リンク先を読んで保存し、要約の行を返す。試し実行では何もしない。"""
+def read_found(texts):
+    """{user_id: ページの文字} から {user_id: {age, areas, gender}} を作る(web/src/profile.js の決まりで読む)。"""
+    if not texts:
+        return {}
+    items = [{"id": k, "text": v} for k, v in texts.items()]
+    res = subprocess.run(["node", READER], input=json.dumps(items, ensure_ascii=False), capture_output=True,
+                         text=True, encoding="utf-8", timeout=60, check=True)
+    return {r["id"]: {"age": r.get("age"), "areas": r.get("areas") or [], "gender": r.get("gender")}
+            for r in json.loads(res.stdout)}
+
+
+def run(d1, production, session=None, reader=read_found):
+    """リンク先を読んで結果を保存し、要約の行を返す。試し実行では何もしない。"""
     if not production:
         return []
     lines = ["", "## プロフィールのリンク先を読む", ""]
@@ -166,18 +180,35 @@ def run(d1, production, session=None):
     if not users:
         return lines + ["- 新しく読むリンクはありませんでした"]
     s = session or requests.Session()
-    ok = failed = 0
+    pages, texts = {}, {}
     for u in users:
         url = pick_url(json.loads(u.get("urls_json") or "[]"))
-        page_url, text, error = url, None, None
+        page_url, error = url, None
         if not url:
             error = "読めるリンクがありません"
         else:
             try:
                 page_url, text = fetch_page(s, url)
+                if text:
+                    texts[u["user_id"]] = text
+                else:
+                    error = "ページに文字がありません"
             except Exception as e:
                 error = str(e)[:300]
-        ok, failed = (ok + 1, failed) if text else (ok, failed + 1)
-        d1.query("UPDATE user_links SET fetched_at = ?, page_url = ?, text = ?, error = ? WHERE user_id = ?",
-                 [store.now_iso(), page_url, text or None, error, u["user_id"]])
-    return lines + [f"- リンク先を読んだ人: {ok}人" + (f"、読めなかった {failed}人" if failed else "")]
+        pages[u["user_id"]] = (page_url, error)
+    try:
+        found = reader(texts)
+    except Exception as e:  # 読み取れなければ保存せず、次の実行でもう一度読む
+        return lines + [f"- ⚠️ リンク先の文字から読み取れませんでした: {str(e)[:200]}"]
+    ok = failed = hit = 0
+    for uid, (page_url, error) in pages.items():
+        f = found.get(uid)
+        if f:
+            ok += 1
+            hit += bool(f["age"] or f["areas"] or f["gender"])
+        else:
+            failed += 1
+        d1.query("UPDATE user_links SET fetched_at = ?, page_url = ?, found_json = ?, error = ? WHERE user_id = ?",
+                 [store.now_iso(), page_url, json.dumps(f, ensure_ascii=False) if f else None, error, uid])
+    return lines + [f"- リンク先を読んだ人: {ok}人(年齢・活動地域・性別のどれかが分かった {hit}人)"
+                    + (f"、読めなかった {failed}人" if failed else "")]

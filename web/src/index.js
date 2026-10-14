@@ -32,9 +32,9 @@ const TABLES_DDL = [
   // 画像から読んだアカウント(書くのは収集の方。表がまだなくても詳細が開けるように作っておく)
   `CREATE TABLE IF NOT EXISTS image_reads (
     post_id TEXT PRIMARY KEY, read_at TEXT NOT NULL, model TEXT, images INTEGER NOT NULL DEFAULT 0, accounts_json TEXT, error TEXT)`,
-  // プロフィールのリンク先から取り出した文字(書くのは収集の方。表がまだなくても一覧が開けるように作っておく)
+  // プロフィールのリンク先から読み取った年齢・活動地域・性別(書くのは収集の方。表がまだなくても一覧が開けるように作っておく)
   `CREATE TABLE IF NOT EXISTS user_links (
-    user_id TEXT PRIMARY KEY, urls_json TEXT NOT NULL, updated_at TEXT NOT NULL, fetched_at TEXT, page_url TEXT, text TEXT, error TEXT)`,
+    user_id TEXT PRIMARY KEY, urls_json TEXT NOT NULL, updated_at TEXT NOT NULL, fetched_at TEXT, page_url TEXT, found_json TEXT, error TEXT)`,
 ];
 let tablesReady = false;
 async function ensureTables(db) {
@@ -95,7 +95,7 @@ const CASE_COLUMNS = `
   p.id, p.text, p.url, p.created_at, p.collected_at, p.status, p.skip_reason, p.quoted_id,
   j.case_type, j.works, j.prefecture, j.prefecture_source, j.place, j.dates, j.summary, j.score, j.critical, j.critical_reason, j.reject_reason,
   p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, COALESCE(r.state, 'unread') AS review,
-  u.description, u.location, (SELECT ul.text FROM user_links ul WHERE ul.user_id = p.author_id) AS link_text`;
+  u.description, u.location, (SELECT ul.found_json FROM user_links ul WHERE ul.user_id = p.author_id) AS link_found`;
 
 export async function listCases(db, params) {
   const view = params.get("view") === "rejected" ? "rejected" : "judged";
@@ -113,9 +113,9 @@ export async function listCases(db, params) {
     .all();
   // 添付画像の URL も返す(詳細を開いた瞬間から画像の場所を取っておき、あとから表示がずれないように)
   // 自己紹介は一覧では使わないので返さない(年齢と活動地域だけ読み取って付ける)
-  return results.map(({ media_json, description, location, link_text, ...r }) => ({
+  return results.map(({ media_json, description, location, link_found, ...r }) => ({
     ...r,
-    ...profileInfo({ name: r.name, description, location, link_text }),
+    ...profileInfo({ name: r.name, description, location, link: parseJson(link_found, null) }),
     critical: !!r.critical,
     near: NEAR.includes(r.prefecture),
     media: parseJson(media_json, []),
@@ -185,10 +185,10 @@ export async function getCase(db, id) {
     m.role = m.roles[0];
   }
   const black = await db.prepare("SELECT reason, note, added_at FROM blacklist WHERE user_id = ?").bind(row.author_id).first();
-  const { media_json, score_json, link_text, ...rest } = row;
+  const { media_json, score_json, link_found, ...rest } = row;
   return {
     ...rest,
-    ...profileInfo(row),
+    ...profileInfo({ ...row, link: parseJson(link_found, null) }),
     critical: !!row.critical,
     near: NEAR.includes(row.prefecture),
     media: parseJson(media_json, []),

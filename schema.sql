@@ -84,16 +84,16 @@ CREATE TABLE IF NOT EXISTS users (
 );
 CREATE INDEX IF NOT EXISTS users_username ON users (lower(username));
 
--- プロフィールの URL 欄と自己紹介にあるリンク(Litlink など)と、そのページから取り出した文字。1 人 = 1 行。
--- 収集のときに urls_json を入れ、案件になった依頼主だけ link_step がページを読んで text に入れる。
--- 画面は text から年齢と活動地域を読む(プロフィールに書いてないときだけ)。
+-- プロフィールの URL 欄と自己紹介にあるリンク(Litlink など)と、そのページから読み取った年齢・活動地域・性別。1 人 = 1 行。
+-- 収集のときに urls_json を入れ、案件になった依頼主だけ link_step がページを読んで found_json に結果を入れる。
+-- ページの文字そのものは保存しない。found_json = {"age": {"label": "20代", "minor": false}, "areas": ["愛知県"], "gender": "女性"}
 CREATE TABLE IF NOT EXISTS user_links (
   user_id TEXT PRIMARY KEY,
   urls_json TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   fetched_at TEXT,
   page_url TEXT,
-  text TEXT,
+  found_json TEXT,
   error TEXT
 );
 

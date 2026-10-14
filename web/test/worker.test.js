@@ -74,16 +74,18 @@ test("一覧は対象の案件を点数順に、直近の分だけ返す", async
   assert.equal(cases[1].username, "client");
 });
 
-test("プロフィールのリンク先の文字から年齢と活動地域を読み、文字そのものは返さない", async () => {
-  db.raw.prepare(`INSERT INTO user_links (user_id, urls_json, updated_at, text) VALUES ('100', '["https://lit.link/a"]', 'x', '活動地域 福岡 / 成人済み')`).run();
+test("プロフィールのリンク先から読んだ年齢・活動地域・性別を出す", async () => {
+  const found = JSON.stringify({ age: { label: "成人", minor: false }, areas: ["福岡県"], gender: "女性" });
+  db.raw.prepare(`INSERT INTO user_links (user_id, urls_json, updated_at, found_json) VALUES ('100', '["https://lit.link/a"]', 'x', ?)`).run(found);
   const c = (await listCases(db, new URLSearchParams()))[0];
   assert.deepEqual(c.areas, ["福岡県"]);
   assert.equal(c.areas_from, "link");
   assert.equal(c.age.label, "成人");
-  assert.equal(c.link_text, undefined);
+  assert.equal(c.gender, "女性");
+  assert.equal(c.link_found, undefined);
   const d = await getCase(db, "1");
   assert.equal(d.age_from, "link");
-  assert.equal(d.link_text, undefined);
+  assert.equal(d.link_found, undefined);
 });
 
 test("確認の状態: 開くと確認済み、保留・削除予定に変えられ、保留は古くても一覧に残る", async () => {

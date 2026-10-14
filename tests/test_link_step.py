@@ -16,7 +16,7 @@ def test_save_links_resets_fetch_only_when_links_change(d1, make_tweet):
     tw = make_tweet("1")
     tw["author"]["entities"] = {"url": {"urls": [{"expanded_url": "https://lit.link/a"}]}}
     store.save_links(d1, store.link_rows([tw], now="t1"))
-    d1.query("UPDATE user_links SET fetched_at = 'f1', text = '大阪'")
+    d1.query("UPDATE user_links SET fetched_at = 'f1', found_json = '{}'")
     store.save_links(d1, store.link_rows([tw], now="t2"))
     assert d1.query("SELECT fetched_at FROM user_links")[0]["fetched_at"] == "f1"
     tw["author"]["entities"] = {"url": {"urls": [{"expanded_url": "https://lit.link/b"}]}}
@@ -71,7 +71,13 @@ class FakeSession:
         return self.pages[url]
 
 
-def test_run_reads_links_only_for_clients_of_cases(d1, make_tweet):
+def test_read_found_uses_the_page_rules_in_node():
+    found = link_step.read_found({"100": link_step.page_text(NEXT_PAGE)})
+    assert found["100"] == {"age": {"label": "20代", "minor": False}, "areas": ["関西", "大阪府", "京都府"], "gender": None}
+    assert link_step.read_found({}) == {}
+
+
+def test_run_saves_only_the_results_not_the_page_text(d1, make_tweet):
     for uid, status in (("100", "judged"), ("200", "rejected"), ("300", "judged")):
         tw = make_tweet(uid, author_id=uid)
         tw["author"]["entities"] = {"url": {"urls": [{"expanded_url": f"https://lit.link/u{uid}"}]}}
@@ -83,9 +89,26 @@ def test_run_reads_links_only_for_clients_of_cases(d1, make_tweet):
     lines = link_step.run(d1, True, session=s)
     assert sorted(s.calls) == ["https://lit.link/u100", "https://lit.link/u300"]
     rows = {r["user_id"]: r for r in d1.query("SELECT * FROM user_links")}
-    assert "成人済み" in rows["100"]["text"] and rows["100"]["fetched_at"]
-    assert rows["300"]["text"] is None and "404" in rows["300"]["error"] and rows["300"]["fetched_at"]
+    assert "text" not in rows["100"]
+    found = json.loads(rows["100"]["found_json"])
+    assert "大阪府" in found["areas"] and found["age"]["label"] and rows["100"]["fetched_at"]
+    assert rows["300"]["found_json"] is None and "404" in rows["300"]["error"] and rows["300"]["fetched_at"]
     assert rows["200"]["fetched_at"] is None
-    assert "リンク先を読んだ人: 1人、読めなかった 1人" in lines[-1]
+    assert "リンク先を読んだ人: 1人(年齢・活動地域・性別のどれかが分かった 1人)、読めなかった 1人" in lines[-1]
     assert link_step.run(d1, True, session=s)[-1] == "- 新しく読むリンクはありませんでした"
     assert link_step.run(d1, False) == []
+
+
+def test_run_retries_later_when_reading_fails(d1, make_tweet):
+    tw = make_tweet("1")
+    tw["author"]["entities"] = {"url": {"urls": [{"expanded_url": "https://lit.link/a"}]}}
+    posts, full, partial, links = store.extract([tw], {"1": ("judged", None, [])})
+    store.save(d1, posts, full, partial, links)
+    store.save_links(d1, store.link_rows([tw]))
+    s = FakeSession({"https://lit.link/a": FakeResponse("https://lit.link/a", NEXT_PAGE)})
+
+    def broken(texts):
+        raise RuntimeError("node がない")
+
+    assert "読み取れませんでした" in link_step.run(d1, True, session=s, reader=broken)[-1]
+    assert d1.query("SELECT fetched_at FROM user_links")[0]["fetched_at"] is None
