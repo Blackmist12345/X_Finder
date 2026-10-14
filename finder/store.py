@@ -1,5 +1,6 @@
 """N12 データ保存 と N15 ユーザー台帳への書き込み。"""
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 USER_COLUMNS = ["id", "username", "name", "followers", "following", "description", "location", "profile_image",
@@ -119,6 +120,67 @@ def extract(tweets, decisions, now=None):
     for uid in full:  # プロフィールがそろっている人は partial から外す
         partial.pop(uid, None)
     return list(posts.values()), list(full.values()), list(partial.values()), sorted(links)
+
+
+# プロフィールのリンク。リンク先が変わったら、もう一度読むように fetched_at を消す
+# (SQLite の UPDATE の右辺は、書き換える前の値で計算される)
+USER_LINKS_UPSERT = (
+    "ON CONFLICT(user_id) DO UPDATE SET "
+    "fetched_at = CASE WHEN user_links.urls_json IS excluded.urls_json THEN user_links.fetched_at ELSE NULL END, "
+    "urls_json = excluded.urls_json, updated_at = excluded.updated_at"
+)
+MAX_PROFILE_LINKS = 5
+# 自己紹介に「lit.link/abc」のように http なしで書かれたものも拾う
+BARE_LINK = re.compile(r"(?:https?://)?(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}/[A-Za-z0-9_\-./~%?=&#@+]+")
+# X 自身のリンクは読まない
+SELF_HOSTS = ("x.com", "twitter.com", "t.co")
+
+
+def _url_entities(node):
+    out = []
+    for key in ("url", "description"):
+        for u in (((node or {}).get(key) or {}).get("urls") or []):
+            out.append(u.get("expanded_url") or u.get("url"))
+    return out
+
+
+def profile_links(author):
+    """プロフィールの URL 欄と自己紹介にあるリンク(重複なし、書かれた順)。"""
+    found = []
+    found += _url_entities(author.get("entities"))
+    found += _url_entities((author.get("profile_bio") or {}).get("entities"))
+    found += BARE_LINK.findall(author.get("description") or "")
+    out = []
+    for u in found:
+        if not u or not isinstance(u, str):
+            continue
+        u = u.strip().rstrip(".,、。)）")
+        if not u.startswith(("http://", "https://")):
+            u = "https://" + u
+        host = u.split("/")[2].lower().removeprefix("www.")
+        if host in SELF_HOSTS or u in out:
+            continue
+        out.append(u)
+    return out[:MAX_PROFILE_LINKS]
+
+
+def link_rows(tweets, now=None):
+    """投稿者(と引用元の投稿者)のうち、プロフィールにリンクがある人の user_links の行。"""
+    now = now or now_iso()
+    rows = {}
+    for tw in tweets:
+        for t in (tw, tw.get("quoted_tweet") or {}):
+            author = t.get("author") or {}
+            if not author.get("id"):
+                continue
+            urls = profile_links(author)
+            if urls:
+                rows[str(author["id"])] = [str(author["id"]), json.dumps(urls, ensure_ascii=False), now]
+    return list(rows.values())
+
+
+def save_links(d1, rows):
+    d1.insert_many("user_links", ["user_id", "urls_json", "updated_at"], rows, conflict="", upsert=USER_LINKS_UPSERT)
 
 
 def existing_post_ids(d1, ids):

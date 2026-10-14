@@ -482,8 +482,15 @@ function placeShort(c){const k=c.prefecture&&c.prefecture!=="不明"?c.prefectur
 function placeFrom(c){const k=c.prefecture&&c.prefecture!=="不明"?c.prefecture_source:"";return PLACE_FROM[k]?`(${PLACE_FROM[k]})`:""}
 // プロフィールから読み取った年齢と活動地域(依頼主の名前の横に小さく出す)
 const areaText=c=>(c.areas||[]).slice(0,2).join("・")+((c.areas||[]).length>2?" ほか":"");
+// どこから読んだか。プロフィールに書いてない項目だけリンク先(Litlink など)から読む
+function profileFrom(c){
+  const items=[["年齢",c.age,c.age_from],["活動地域",(c.areas||[]).length,c.areas_from],["性別",c.gender,c.gender_from]].filter(i=>i[1]);
+  const link=items.filter(i=>i[2]==="link").map(i=>i[0]);
+  if(!link.length)return "プロフィールから";
+  return link.length<items.length?`${link.join("と")}はリンク先から`:"リンク先から";
+}
 function clientTags(c){
-  return `${c.age?`<span class="ctag ${c.age.minor?"minor":""}">${esc(c.age.label)}</span>`:""}${(c.areas||[]).length?`<span class="ctag">${esc(areaText(c))}</span>`:""}`;
+  return `${c.gender?`<span class="ctag">${esc(c.gender)}</span>`:""}${c.age?`<span class="ctag ${c.age.minor?"minor":""}">${esc(c.age.label)}</span>`:""}${(c.areas||[]).length?`<span class="ctag">${esc(areaText(c))}</span>`:""}`;
 }
 function card(c){
   const rejected=state.preset==="rejected";
@@ -589,7 +596,7 @@ function sheetHtml(c,full){
    ${detail.length?`<div class="sec"><h3>点数の内訳</h3><dl class="breakdown">${detail.map(d=>`<dt>${esc(d.label)}</dt><dd>${d.points>0?"+":""}${Math.round(d.points)}</dd>`).join("")}<dt class="total">合計</dt><dd class="total">${Math.round(c.score)}</dd></dl></div>`:""}
    <div class="sec"><h3>クライアント</h3><div class="people"><${cu?`a class="person link" href="https://x.com/${cu}" data-xuser="${cu}"`:'div class="person"'}>${ava(c)}<div class="who"><div>${esc(c.name||"")}</div>
     <div class="id">@${esc(c.username||"")} ・ フォロワー <span class="num">${fmt(c.followers)}</span> ・ フォロー <span class="num">${fmt(c.following)}</span> ・ FF率 <span class="num">${ffText(c)}</span></div>
-    ${c.age||(c.areas||[]).length?`<div class="id">${c.age?`年齢: ${esc(c.age.label)}${c.age.minor===true?"(未成年)":c.age.minor===false?"(成人)":""}`:"年齢: 不明"} ・ 活動地域: ${(c.areas||[]).length?esc(c.areas.join("・")):"不明"}<span class="sub">(プロフィールから)</span></div>`:""}
+    ${c.age||c.gender||(c.areas||[]).length?`<div class="id">${c.gender?`性別: ${esc(c.gender)} ・ `:""}${c.age?`年齢: ${esc(c.age.label)}${c.age.minor===true?"(未成年)":c.age.minor===false?"(成人)":""}`:"年齢: 不明"} ・ 活動地域: ${(c.areas||[]).length?esc(c.areas.join("・")):"不明"}<span class="sub">(${profileFrom(c)})</span></div>`:""}
     ${c.location?`<div class="id">地域: ${esc(c.location)}</div>`:""}${c.description?`<div class="id">${esc(c.description)}</div>`:""}</div>${cu?'<span class="go">X で開く ›</span>':""}</${cu?"a":"div"}></div>
     ${c.blacklist?`<p class="sub" style="color:var(--rec)">🚫 ブラックリストに登録済み(${esc(BLACK_REASON[c.blacklist.reason]||"")})</p>`:""}</div>
    ${c.people&&c.people.length?`<div class="sec"><h3>関係するアカウント</h3><div class="people">${c.people.map(person).join("")}</div></div>`:""}
@@ -833,7 +840,7 @@ async function bulkApply(stateTo){
 }
 // ---- データベースの中身(見るだけ) ----
 const DB_LABEL={posts:"ポスト",judgments:"AI の判定と点数",reviews:"確認の状態",blacklist:"ブラックリスト",users:"ユーザー台帳",user_aliases:"読み間違いの別名",
-  post_users:"ポストと人のつながり",image_reads:"画像から読んだアカウント",runs:"収集の実行",costs:"費用",meta:"内部の記録"};
+  user_links:"プロフィールのリンク先",post_users:"ポストと人のつながり",image_reads:"画像から読んだアカウント",runs:"収集の実行",costs:"費用",meta:"内部の記録"};
 function dbSheet(inner){presentSheet(`<div class="grab"></div>${inner}`,"データベース")}
 async function openDb(){
   dbSheet('<h2>データベース</h2><p class="sub">読み込み中…</p>');

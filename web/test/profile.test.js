@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseAge, parseAreas, profileInfo } from "../src/profile.js";
+import { parseAge, parseAreas, parseGender, profileInfo, readLinkText } from "../src/profile.js";
 
 test("年齢: 矢印や言葉のいろいろな書き方を読む", () => {
   const cases = [
@@ -34,4 +34,35 @@ test("首都圏以外の判定: 首都圏や関東が入っていれば外す", 
   assert.equal(profileInfo({ location: "関東/関西" }).areas_far, false);
   assert.equal(profileInfo({ description: "撮影大好き" }).areas_far, false);
   assert.deepEqual(profileInfo({ name: "あいう@18↓", description: "", location: "" }).age, { label: "18↓", minor: true });
+});
+
+test("性別ははっきり書いてあるときだけ読む", () => {
+  assert.equal(parseGender("性別:女 / 20代"), "女性");
+  assert.equal(parseGender("コスプレ♂"), "男性");
+  assert.equal(parseGender("JK2です"), "女性");
+  assert.equal(parseGender("女性カメラマンさん募集"), null);
+  assert.equal(parseGender("♀♂どちらも撮ります"), null);
+  assert.equal(parseGender(""), null);
+});
+
+test("プロフィールに書いてない項目だけ、リンク先から読んだ結果を使う", () => {
+  const link = readLinkText("はじめまして\n活動地域: 愛知・岐阜\n20代 社会人コスプレイヤー 性別:女");
+  assert.deepEqual(link, { age: { label: "20代", minor: false }, areas: ["愛知県", "岐阜県"], gender: "女性" });
+  const both = profileInfo({ description: "コスプレしてます", location: "", link });
+  assert.deepEqual(both.areas, ["愛知県", "岐阜県"]);
+  assert.equal(both.areas_from, "link");
+  assert.equal(both.age_from, "link");
+  assert.equal(both.gender, "女性");
+  assert.equal(both.gender_from, "link");
+  assert.equal(both.areas_far, true);
+  const mixed = profileInfo({ description: "♂", location: "東京", link });
+  assert.deepEqual(mixed.areas, ["東京都"]);
+  assert.equal(mixed.areas_from, "profile");
+  assert.equal(mixed.gender, "男性");
+  assert.equal(mixed.gender_from, "profile");
+  assert.equal(mixed.age_from, "link");
+  const none = profileInfo({ description: "", location: "", link: null });
+  assert.equal(none.age_from, null);
+  assert.equal(none.areas_from, null);
+  assert.equal(none.gender, null);
 });

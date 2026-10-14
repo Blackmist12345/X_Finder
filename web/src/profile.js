@@ -1,4 +1,4 @@
-// 依頼主のプロフィール(名前・自己紹介・所在地)から、年齢と活動地域を読み取る。
+// 依頼主のプロフィール(名前・自己紹介・所在地)と、プロフィールのリンク先のページの文字から、年齢と活動地域を読み取る。
 // 決まった書き方を探すだけなので AI は使わない(費用なし・今ある案件にもすぐ効く)。
 
 const ADULT_AGE = 18;
@@ -44,6 +44,21 @@ export function parseAge(text) {
     return { label: `${n}歳`, minor: n < ADULT_AGE };
   }
   return null;
+}
+
+// ---- 性別 ----
+// はっきり書いてあるときだけ読む(「女性カメラマン募集」のような書き方は拾わない)
+const FEMALE = /性別\s*[:：]?\s*(?:女|♀|female)|♀|女性です|女です|女子(?:中学|高校?|大学?)生|(?<![A-Za-z])(?:JK|JC|JD)[1-4]?(?![A-Za-z])/i;
+const MALE = /性別\s*[:：]?\s*(?:男|♂|male)|♂|男性です|男です|男子(?:中学|高校?|大学?)生|(?<![A-Za-z])(?:DK|DC)[1-4]?(?![A-Za-z])/i;
+
+// 返り値: "女性" / "男性" / null(書いてない・両方ある)
+export function parseGender(text) {
+  const t = normalize(text);
+  if (!t) return null;
+  const f = FEMALE.test(t);
+  const m = MALE.test(t);
+  if (f === m) return null;
+  return f ? "女性" : "男性";
 }
 
 // ---- 活動地域 ----
@@ -107,13 +122,34 @@ export function parseAreas(text) {
 // 首都圏(東京・神奈川・埼玉・千葉)に関係する地域。関東は首都圏を含むので、こちらに入れる
 const NEAR_AREAS = ["東京都", "神奈川県", "埼玉県", "千葉県", "首都圏", "関東"];
 
+// プロフィールに書いてない項目だけ、リンク先のページ(Litlink など)から読み取った結果を使う。
+// link は収集のとき finder/link_step.py がリンク先から読んだ結果 { age, areas, gender }(ページの文字は保存しない)。
+// *_from は "profile"(プロフィールから) / "link"(リンク先から)
 export function profileInfo(user) {
   const text = [user.name, user.description, user.location].filter(Boolean).join("\n");
   const areaText = [user.location, user.description].filter(Boolean).join("\n");
-  const areas = parseAreas(areaText);
+  const link = user.link || {};
+  const pick = (own, fromLink, empty) => {
+    if (!empty(own)) return [own, "profile"];
+    if (!empty(fromLink)) return [fromLink, "link"];
+    return [own, null];
+  };
+  const none = (v) => !v;
+  const [age, ageFrom] = pick(parseAge(text), link.age || null, none);
+  const [areas, areasFrom] = pick(parseAreas(areaText), Array.isArray(link.areas) ? link.areas : [], (v) => !v.length);
+  const [gender, genderFrom] = pick(parseGender(text), link.gender || null, none);
   return {
-    age: parseAge(text),
+    age,
     areas,
+    gender,
+    age_from: ageFrom,
+    areas_from: areasFrom,
+    gender_from: genderFrom,
     areas_far: areas.length > 0 && !areas.some((a) => NEAR_AREAS.includes(a)),
   };
+}
+
+// リンク先のページの文字から、保存する結果だけを作る(finder/link_step.py が node で呼ぶ)
+export function readLinkText(text) {
+  return { age: parseAge(text), areas: parseAreas(text), gender: parseGender(text) };
 }
