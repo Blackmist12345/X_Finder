@@ -2,8 +2,8 @@
 
 都道府県が分かった案件は、地名の減点語を使わない(同じ場所で二重に減点しないため)。
 都道府県が分からない案件だけ、本文に出てきた地名の減点語で代わりに減点する。
-そのあと、依頼主の FF率(フォロワー数÷フォロー数)を倍率として掛け(プラスの点のときだけ)、
-フォロワー数の 1/N を足す。倍率と加点の幅は【7】基本設定で決める。
+そのあと、依頼主の FF率(フォロワー数÷フォロー数)を倍率として掛ける(プラスの点のときだけ)。
+倍率の幅は【7】基本設定で決める(初期値 0.5〜1.5 倍)。
 """
 from finder.judge import UNKNOWN_PLACE
 
@@ -31,26 +31,19 @@ def _clamp(x, low, high):
     return x
 
 
-def _follower_points(author, basic, base, detail):
-    """FF率の倍率とフォロワー数の加点で増える点(内訳にも足す)。フォロワー数が分からなければ 0。"""
+def _ff_points(author, basic, base, detail):
+    """FF率の倍率で増える(減る)点を返し、内訳に足す。フォロワー数が分からないか、点がプラスでなければ 0。"""
     followers = (author or {}).get("followers")
-    if followers is None:
+    if followers is None or base <= 0:
         return 0
     following = max((author or {}).get("following") or 0, 1)  # フォロー 0 人は 1 人として割る
-    added = 0
     ff = followers / following
     rate = _clamp(ff, basic.get("FF率の倍率の下限", 0.5), basic.get("FF率の倍率の上限", 1.5))
-    if base > 0 and rate != 1:
-        pts = round(base * rate - base)
-        detail.append({"label": f"FF率 {ff:.1f}(×{rate:g})", "points": pts})
-        added += pts
-    div = basic.get("フォロワー加点の割合(1/何)", 20)
-    if div > 0:
-        pts = round(_clamp(followers / div, 0, basic.get("フォロワー加点の上限", 30)))
-        if pts:
-            detail.append({"label": f"フォロワー {followers:,}人(÷{div})", "points": pts})
-            added += pts
-    return added
+    if rate == 1:
+        return 0
+    pts = round(base * rate - base)
+    detail.append({"label": f"FF率 {ff:.1f}(×{rate:g})", "points": pts})
+    return pts
 
 
 def score(result, penalties, text, config, author=None):
@@ -81,7 +74,7 @@ def score(result, penalties, text, config, author=None):
         detail.append({"label": f"減点語: {p['word']}", "points": p["points"]})
 
     total = sum(d["points"] for d in detail)
-    total += _follower_points(author, config.get("basic") or {}, total, detail)
+    total += _ff_points(author, config.get("basic") or {}, total, detail)
 
     critical = config["critical"]
     reasons = []
