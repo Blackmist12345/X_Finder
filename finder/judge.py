@@ -6,6 +6,7 @@ AI には事実の読み取りだけを頼み、対象外にするかどうか�
 import json
 import re
 import time
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -102,7 +103,10 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
   どれでも分からなければ「不明」。全国のポストが混ざっているので、推測で東京などにしないこと。
 - prefecture_source: prefecture をどこから判断したか(本文 / イベント表 / プロフィール / 不明)。
 - place: 会場名やイベント名・地域(本文に書かれていれば。イベント表から分かった会場でもよい。なければ空文字)。
-- dates: 撮影日や候補日(本文の書き方のまま短く。なければ空文字)。
+- dates: 撮影日や候補日(なければ空文字)。日付は「10/18(土)」のように月/日(曜日)で書き、何日もあれば「、」で並べ、続く日は「10/18(土)〜19(日)」と書く。
+  「明日」「明後日」「今週の土曜」「来週の日曜」「今週末」「来週末」「3日後」のように日付が数字で書かれていないときは、
+  そのポストの「投稿日時」を基準に月/日(曜日)に直し、後ろに元の言い方を添える(例: 「10/18(土)(今週の土曜)」)。
+  「今週末」「来週末」は土日の 2 日。「今月中」「近いうち」「平日」のように日が決まらない言い方は直さず、そのまま短く書く。
 - summary: 何の撮影の募集か、30文字以内の日本語。
 """
 
@@ -164,11 +168,27 @@ def event_hints(text, events):
     return [f"{alias}={event_label(ev)}" for alias, ev in match_events(text, events)]
 
 
+JST = timezone(timedelta(hours=9))
+WEEKDAYS = "月火水木金土日"
+
+
+def posted_label(created_at):
+    """投稿日時を日本時間の「2026/10/15(木) 22:08」にする(「明日」などを日付に直す基準)。読めなければ空文字。"""
+    try:
+        t = datetime.fromisoformat(str(created_at).replace("Z", "+00:00")).astimezone(JST)
+    except ValueError:
+        return ""
+    return f"{t:%Y/%m/%d}({WEEKDAYS[t.weekday()]}) {t:%H:%M}"
+
+
 def build_prompt(items, excluded_works, emojis=None, events=None):
     lines = [RULES, "除外作品: " + ("、".join(excluded_works) if excluded_works else "なし"), ""]
     index = emoji_index(emojis)
     for it in items:
         lines.append(f"### id: {it['id']}")
+        posted = posted_label(it.get("created_at"))
+        if posted:
+            lines.append("投稿日時: " + posted)
         if it.get("author_location") or it.get("author_description"):
             lines.append(f"投稿者プロフィール: 地域={it.get('author_location') or ''} / 自己紹介={(it.get('author_description') or '')[:160]}")
         lines.append("本文: " + (it.get("text") or ""))

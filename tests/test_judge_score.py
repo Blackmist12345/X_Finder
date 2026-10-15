@@ -288,3 +288,21 @@ def test_event_hints_in_prompt():
 
 def test_normalize_unknown_place_source():
     assert judge.normalize(ai_result("1", prefecture="千葉県", prefecture_source="画面"))["prefecture_source"] == "本文"
+
+
+def test_post_time_in_prompt_for_relative_dates():
+    # 「今週の土曜」などを日付に直せるよう、投稿日時を日本時間と曜日で渡す
+    assert judge.posted_label("2026-10-15T13:08:00+00:00") == "2026/10/15(木) 22:08"
+    assert judge.posted_label("2026-10-15T16:00:00+00:00") == "2026/10/16(金) 01:00"  # 日本時間では次の日
+    assert judge.posted_label(None) == "" and judge.posted_label("bad") == ""
+    prompt = judge.build_prompt([{"id": "1", "text": "今週の土曜に撮影してくれる人いませんか", "created_at": "2026-10-15T13:08:00+00:00"},
+                                 {"id": "2", "text": "募集"}], [])
+    assert "### id: 1\n投稿日時: 2026/10/15(木) 22:08\n本文:" in prompt
+    assert "### id: 2\n本文:" in prompt
+    assert "今週の土曜" in judge.RULES and "投稿日時" in judge.RULES
+
+
+def test_items_carry_post_time(make_tweet):
+    tw = make_tweet("1")
+    items = judge_step.items_from_tweets([tw], {})
+    assert items[0]["created_at"]
