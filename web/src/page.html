@@ -872,7 +872,7 @@ const HELP=[
   <p>場所(都道府県)は、本文 → Notion の「イベントの一覧」→ 添付画像 → 依頼主のプロフィール の順に判断し、本文以外から判断したときはカードに小さく出ます。添付画像(メンバー表など)から読んだ X のアカウントは「関係するアカウント」に「画像から」と出ます。</p>
   <p>依頼主の年齢・活動地域・性別は、プロフィールに書いてある書き方(18↓、30↑、成人済み、関西、♀ など)から読みます。プロフィールに書いてないときは、プロフィールのリンク先(Litlink など)からも読み、「リンク先から」と出ます。</p>`],
  ["スワイプ",`<p>カードを左右にスワイプすると、設定で選んだ状態を付けられます(初期値は右=保留、左=削除予定)。その状態のカードをもう一度同じ向きにスワイプすると外れて、新着に戻ります。</p>`],
- ["まとめて状態を変える",`<p>ホームの「まとめて」から、今のタブ(と絞り込み)の案件を、条件や言葉で絞ってまとめて状態を変えられます。選んだカードをどうするか(削除予定・保留・受注中)のボタンは上に並んでいて、スクロールしても残ります。変えたあとに出る「元に戻す」で戻せます。</p>
+ ["まとめて状態を変える",`<p>ホームの「まとめて」から、今のタブ(と絞り込み)の案件を、条件や言葉で絞ってまとめて状態を変えられます。選んだカードをどうするか(受注中・保留・削除予定)のボタンは上に並んでいて、スクロールしても残ります。変えたあとに出る「元に戻す」で戻せます。</p>
   <ul><li><b>首都圏以外</b>: 東京・神奈川・埼玉・千葉以外の都道府県の案件(場所不明は入りません)。</li>
   <li><b>活動地域が首都圏以外</b>: 依頼主のプロフィールに書かれた活動地域が首都圏・関東以外の案件(書かれていない人は入りません)。</li>
   <li><b>予定あり</b>: カレンダーで撮影日に予定がある案件(休みの予定は数えません)。</li>
@@ -902,8 +902,8 @@ const BULK_CONDS=[
   {k:"afar",t:"活動地域が首都圏以外",f:c=>!!c.areas_far},
   {k:"busy",t:"予定あり",f:c=>!!calCheck(c)?.busy,show:()=>cal.configured&&!cal.error},
 ];
-// b はボタンの短い名前(3つを1行に並べる)
-const BULK_ACTIONS=[{k:"delete",t:"削除予定にする",b:"削除予定",cls:"del"},{k:"hold",t:"保留にする",b:"保留",cls:"hold"},{k:"accepted",t:"受注中にする",b:"受注中",cls:"ok"},{k:"new",t:"新着に戻す",b:"新着に戻す",cls:"uread"}];
+// b はボタンの短い名前(3つを1行に、ホームのタブと同じ順で並べる)
+const BULK_ACTIONS=[{k:"new",t:"新着に戻す",b:"新着に戻す",cls:"uread"},{k:"accepted",t:"受注中にする",b:"受注中",cls:"ok"},{k:"hold",t:"保留にする",b:"保留",cls:"hold"},{k:"delete",t:"削除予定にする",b:"削除予定",cls:"del"}];
 const bulkText=c=>[c.summary,c.works,c.place,c.dates,c.text].filter(Boolean).join(" ").toLowerCase();
 function bulkMatches(){
   const terms=bulk.q.toLowerCase().split(/[\s　]+/).filter(Boolean);
@@ -911,12 +911,6 @@ function bulkMatches(){
   const tests=[...conds.map(x=>x.f),...terms.map(w=>c=>bulkText(c).includes(w))];
   if(!tests.length)return bulk.base.slice();
   return bulk.base.filter(c=>bulk.mode==="or"?tests.some(f=>f(c)):tests.every(f=>f(c)));
-}
-// よく出る作品名・場所を候補として出す
-function bulkSuggest(){
-  const n=new Map();
-  for(const c of bulk.base)for(const w of [...String(c.works||"").split(/[、,／/・]+/),c.place||""].map(x=>x.trim()).filter(x=>x&&x.length<=20))n.set(w,(n.get(w)||0)+1);
-  return [...n].sort((a,b)=>b[1]-a[1]).slice(0,10).map(([w])=>w);
 }
 // ---- カレンダーから日付を選ぶ ----
 // Google カレンダーそのものを埋め込むと、タップした日をこの画面で受け取れないので、同じ予定(iCal)でこの画面に月の表を描く。
@@ -962,7 +956,6 @@ function openBulk(){
    <p class="sub">「${esc(tab.t)}」の ${bulk.base.length}件から選びます</p>
    <div class="bulk-top" id="bulkActs"></div>
    <div id="bulkHead"></div>
-   <div class="bulk-chips" id="bulkChips">${bulkSuggest().map(w=>`<button type="button" class="chip" data-bulk-chip="${esc(w)}">${esc(w)}</button>`).join("")}</div>
    <div id="bulkBody"></div>`,"まとめて状態を変える");
   renderBulkHead();renderBulk();
 }
@@ -1140,7 +1133,6 @@ document.addEventListener("click",ev=>{
     $("blackBox").scrollIntoView({behavior:"smooth",block:"nearest"});return}
   if(ev.target.closest("[data-black-cancel]")){$("blackBox").innerHTML="";return}
   const ub=ev.target.closest("[data-unblack]");if(ub){unblack(ub);return}
-  const bc=ev.target.closest("[data-bulk-chip]");if(bc){const q=$("bulkQ");q.value=bc.dataset.bulkChip;bulk.q=q.value;bulkPickAll(true);renderBulk();return}
   const pr=ev.target.closest("[data-preset]");if(pr&&bulk){presetApply(Number(pr.dataset.preset));return}
   const pd=ev.target.closest("[data-preset-del]");if(pd&&bulk){presetDelete(Number(pd.dataset.presetDel));return}
   if(ev.target.closest("[data-preset-save]")&&bulk){presetSave();return}
