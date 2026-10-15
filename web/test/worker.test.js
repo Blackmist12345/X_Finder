@@ -167,9 +167,14 @@ test("データベースの中身: 表ごとの件数と、新しい順の行・
 });
 
 test("スワイプの設定は初期値があり、変えると保存される", async () => {
-  assert.deepEqual(await getSettings(db), { swipe_right: "hold", swipe_left: "delete", bulk_presets: [] });
-  assert.deepEqual(await saveSettings(db, { swipe_left: "accepted" }), { swipe_right: "hold", swipe_left: "accepted", bulk_presets: [] });
-  assert.deepEqual(await getSettings(db), { swipe_right: "hold", swipe_left: "accepted", bulk_presets: [] });
+  const first = await getSettings(db);
+  assert.deepEqual([first.swipe_right, first.swipe_left], ["hold", "delete"]);
+  assert.deepEqual(first.bulk_presets.map((p) => p.name), ["予定かぶり", "首都圏以外", "遠方(場所か活動地域)", "予定かぶりか首都圏以外"]); // 最初から入っている
+  const saved = await saveSettings(db, { swipe_left: "accepted" });
+  assert.equal(saved.swipe_left, "accepted");
+  assert.equal(saved.bulk_presets.length, 4);
+  assert.deepEqual((await saveSettings(db, { bulk_presets: [] })).bulk_presets, []); // 全部消せば空のまま
+  assert.deepEqual((await getSettings(db)).bulk_presets, []);
   await assert.rejects(saveSettings(db, { swipe_right: "seen" }), RangeError);
 });
 
@@ -182,6 +187,15 @@ test("「まとめて」のプリセットを保存でき、おかしな中身�
   await assert.rejects(saveSettings(db, { bulk_presets: [{ name: "", conds: ["far"] }] }), RangeError);
   await assert.rejects(saveSettings(db, { bulk_presets: [{ name: "空", conds: [], q: "" }] }), RangeError);
   await assert.rejects(saveSettings(db, { bulk_presets: "x" }), RangeError);
+});
+
+test("前からプリセットを持っている人にも、最初のプリセットを一度だけ足す", async () => {
+  await db.prepare("INSERT OR REPLACE INTO meta (key, value, updated_at) VALUES ('finder_settings', ?, '2026-10-01')")
+    .bind(JSON.stringify({ swipe_right: "hold", swipe_left: "delete", bulk_presets: [{ name: "首都圏以外", conds: ["far"], q: "", mode: "and" }, { name: "ブルアカ", conds: [], q: "ブルアカ", mode: "and" }] })).run();
+  const names = (await getSettings(db)).bulk_presets.map((p) => p.name);
+  assert.deepEqual(names, ["予定かぶり", "遠方(場所か活動地域)", "予定かぶりか首都圏以外", "首都圏以外", "ブルアカ"]); // 同じ名前は足さない
+  await saveSettings(db, { bulk_presets: [{ name: "ブルアカ", conds: [], q: "ブルアカ" }] });
+  assert.deepEqual((await getSettings(db)).bulk_presets.map((p) => p.name), ["ブルアカ"]); // 一度保存したら、消したものは戻らない
 });
 
 test("一覧にも添付画像の URL が入る(詳細を開いた瞬間から画像の場所を取るため)", async () => {
