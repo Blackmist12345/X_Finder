@@ -88,20 +88,28 @@ test("プロフィールのリンク先から読んだ年齢・活動地域・�
   assert.equal(d.link_found, undefined);
 });
 
-test("確認の状態: 開くと確認済み、保留・削除予定に変えられ、保留は古くても一覧に残る", async () => {
+test("カードの状態: 開いても新着のまま(青い点だけ消える)、受注中・保留は古くても一覧に残る", async () => {
   let cases = await listCases(db, new URLSearchParams());
-  assert.deepEqual(cases.map((c) => c.review), ["unread", "unread"]);
-  assert.equal(await setReview(db, "1", { opened: true }), "seen");
+  assert.deepEqual(cases.map((c) => [c.review, c.opened]), [["new", false], ["new", false]]);
+  assert.equal(await setReview(db, "1", { opened: true }), "new");
   assert.equal(await setReview(db, "2", { state: "delete" }), "delete");
   assert.equal(await setReview(db, "2", { opened: true }), "delete"); // 開いても削除予定のまま
-  assert.equal(await setReview(db, "4", { state: "hold" }), "hold"); // 30 日前の案件
+  assert.equal(await setReview(db, "4", { state: "accepted" }), "accepted"); // 30 日前の案件
   cases = await listCases(db, new URLSearchParams());
-  assert.deepEqual(cases.map((c) => [c.id, c.review]), [["4", "hold"], ["2", "delete"], ["1", "seen"]]);
+  assert.deepEqual(cases.map((c) => [c.id, c.review, c.opened]), [["4", "accepted", true], ["2", "delete", true], ["1", "new", true]]);
+  assert.equal(await setReview(db, "4", { state: "hold" }), "hold");
   assert.equal((await getCase(db, "4")).review, "hold");
   assert.equal(await setReview(db, "999", { state: "hold" }), null);
-  assert.equal(await setReview(db, "1", { state: "unread" }), "unread"); // 元に戻す
-  assert.equal((await getCase(db, "1")).review, "unread");
+  assert.equal(await setReview(db, "2", { state: "new" }), "new"); // 外すと新着に戻り、開いた記録は残る
+  assert.equal((await getCase(db, "2")).opened, true);
+  assert.equal(await setReview(db, "4", { state: "seen" }), "new"); // 前の名前で届いても新着
   await assert.rejects(setReview(db, "1", { state: "bad" }), RangeError);
+});
+
+test("前の「確認済み」の行は新着(開いた)として出る", async () => {
+  db.raw.prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES ('1', 'seen', 'x', 'x')`).run();
+  const c = (await listCases(db, new URLSearchParams())).find((x) => x.id === "1");
+  assert.deepEqual([c.review, c.opened], ["new", true]);
 });
 
 test("サマリー: 日ごとの数・累計・今月と先月の比べ・種類の内訳", async () => {
@@ -160,9 +168,9 @@ test("データベースの中身: 表ごとの件数と、新しい順の行・
 
 test("スワイプの設定は初期値があり、変えると保存される", async () => {
   assert.deepEqual(await getSettings(db), { swipe_right: "hold", swipe_left: "delete" });
-  assert.deepEqual(await saveSettings(db, { swipe_left: "seen" }), { swipe_right: "hold", swipe_left: "seen" });
-  assert.deepEqual(await getSettings(db), { swipe_right: "hold", swipe_left: "seen" });
-  await assert.rejects(saveSettings(db, { swipe_right: "unread" }), RangeError);
+  assert.deepEqual(await saveSettings(db, { swipe_left: "accepted" }), { swipe_right: "hold", swipe_left: "accepted" });
+  assert.deepEqual(await getSettings(db), { swipe_right: "hold", swipe_left: "accepted" });
+  await assert.rejects(saveSettings(db, { swipe_right: "seen" }), RangeError);
 });
 
 test("一覧にも添付画像の URL が入る(詳細を開いた瞬間から画像の場所を取るため)", async () => {
@@ -171,13 +179,15 @@ test("一覧にも添付画像の URL が入る(詳細を開いた瞬間から�
   assert.equal("media_json" in cases[0], false);
 });
 
-test("まとめて状態を変えられる(見つからない ID は飛ばし、未確認に戻すこともできる)", async () => {
+test("まとめて状態を変えられる(見つからない ID は飛ばし、新着に戻すこともできる)", async () => {
   const r = await setReviews(db, { ids: ["1", "2", "999"], state: "delete" });
   assert.deepEqual(r, { updated: ["1", "2"], state: "delete" });
   const states = async () => Object.fromEntries((await listCases(db, new URLSearchParams())).map((c) => [c.id, c.review]));
   assert.deepEqual(await states(), { "1": "delete", "2": "delete" });
-  await setReviews(db, { ids: ["1"], state: "unread" });
-  assert.equal((await states())["1"], "unread");
+  await setReviews(db, { ids: ["1"], state: "new" });
+  assert.equal((await states())["1"], "new");
+  await setReviews(db, { ids: ["2"], state: "accepted" });
+  assert.equal((await states())["2"], "accepted");
   await assert.rejects(setReviews(db, { ids: [], state: "delete" }), RangeError);
   await assert.rejects(setReviews(db, { ids: ["1"], state: "nope" }), RangeError);
   await assert.rejects(setReviews(db, { ids: ["1; DROP"], state: "seen" }), RangeError);
@@ -276,8 +286,8 @@ test("Access を通れば画面と API が返る", async () => {
     }), env);
     assert.deepEqual(await (await post({ state: "hold" })).json(), { review: "hold" });
     assert.equal((await post({ state: "bad" })).status, 400);
-    assert.equal((await post({ state: "seen" }, { "x-finder": "" })).status, 403);
-    assert.equal((await post({ state: "seen" }, { origin: "https://evil.example" })).status, 403);
+    assert.equal((await post({ state: "accepted" }, { "x-finder": "" })).status, 403);
+    assert.equal((await post({ state: "accepted" }, { origin: "https://evil.example" })).status, 403);
     assert.equal((await worker.fetch(req("/api/cases/1/review", token), env)).status, 405);
     const setting = await worker.fetch(new Request("https://x-finder.example.workers.dev/api/settings", {
       method: "POST", body: JSON.stringify({ swipe_right: "none" }),

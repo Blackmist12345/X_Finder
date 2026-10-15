@@ -180,18 +180,21 @@ header.top.slim .tab .c{font-size:17px}
 .tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:10px;background:var(--surface-2);border-radius:12px;padding:3px}
 .tab{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12.5px;border-radius:9px;padding:6px 2px;cursor:pointer;white-space:nowrap}
 .tab .c{display:block;font-family:var(--font-num);font-size:16px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
-/* 状態ごとの色: 未確認=青 確認済み=緑 保留=オレンジ 削除予定=赤 */
-.tab[data-tab="unread"]{--tc:var(--accent);--tc-soft:var(--accent-soft)} .tab[data-tab="seen"]{--tc:var(--ok);--tc-soft:var(--ok-soft)}
+/* 状態ごとの色: 新着=青 受注中=緑 保留=オレンジ 削除予定=赤 */
+.tab[data-tab="new"]{--tc:var(--accent);--tc-soft:var(--accent-soft)} .tab[data-tab="accepted"]{--tc:var(--ok);--tc-soft:var(--ok-soft)}
 .tab[data-tab="hold"]{--tc:var(--warn);--tc-soft:var(--warn-soft)} .tab[data-tab="delete"]{--tc:var(--rec);--tc-soft:var(--rec-soft)}
 .tab .c{color:var(--tc)}
 .tab[aria-pressed="true"]{background:var(--tc-soft);color:var(--tc);box-shadow:inset 0 0 0 1.5px var(--tc)}
 .tab:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .pill.hold{background:var(--warn-soft);color:var(--warn);font-weight:500}
 .pill.del{background:var(--rec-soft);color:var(--rec)}
+.pill.acc{background:var(--ok-soft);color:var(--ok);font-weight:500}
 .card.unread .title::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:2px}
 .detail-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:20px}
 .detail-actions .btn{padding:13px 4px;font-size:14px;white-space:nowrap}
 /* 保留・削除予定はタブと同じ色、ブラックリストは黒と赤 */
+.btn.acc{grid-column:1/-1;border-color:var(--ok);color:var(--ok);background:var(--ok-soft)}
+.btn.acc.on{background:var(--ok);color:#fff}
 .btn.hold{border-color:var(--warn);color:var(--warn);background:var(--warn-soft)}
 .btn.hold.on{background:var(--warn);color:#fff}
 .btn.del{border-color:var(--rec);color:var(--rec);background:var(--rec-soft)}
@@ -206,7 +209,7 @@ header.top.slim .tab .c{font-size:17px}
 .swipe{position:relative;border-radius:var(--r);overflow:hidden}
 /* 裏の色はスワイプしている間だけ出す(スクロール中に裏が透けてチカチカしないように) */
 .swipe-bg{visibility:hidden;position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-weight:700;font-size:14px;color:#fff;background:var(--muted);border-radius:var(--r)}
-.swipe-bg.hold{background:var(--warn)} .swipe-bg.delete{background:var(--rec)} .swipe-bg.seen{background:var(--ok)}
+.swipe-bg.hold{background:var(--warn)} .swipe-bg.delete{background:var(--rec)} .swipe-bg.accepted{background:var(--ok)} .swipe-bg.new{background:var(--accent)}
 .swipe-bg.toR,.swipe-bg.toL{visibility:visible}
 .swipe-bg{opacity:.55;transition:opacity .12s} .swipe-bg.ready{opacity:1}
 .swipe-bg .l,.swipe-bg .r{opacity:0} .swipe-bg.toR .l,.swipe-bg.toL .r{opacity:1}
@@ -348,15 +351,16 @@ header.top.slim .tab .c{font-size:17px}
 const PRESETS=[{k:"all",t:"すべて"},{k:"crit",t:"クリティカル"},{k:"near",t:"首都圏"},{k:"rejected",t:"対象外(確認用)",cls:"warn"}];
 const TYPES=["コスプレ撮影","コスパフォ","踊ってみた","ポートレート","イベント","その他"];
 const ROLE={mention:"メンション",quoted:"引用元の投稿者",reply_to:"リプライ先",image:"画像から"};
-// 確認の状態。未確認=一度も開いていない / 確認済み=開いた / 保留=ピン留め / 削除予定=投稿日から14日で消える
-const TABS=[{k:"unread",t:"未確認"},{k:"seen",t:"確認済み"},{k:"hold",t:"保留"},{k:"delete",t:"削除予定"}];
+// カードの状態。新着=集めた案件が最初に入る(開いても変わらない。まだ開いていないカードには青い点) / 受注中=引き受けた案件(2週間を過ぎても残る)
+// 保留=ピン留め(2週間を過ぎても残る) / 削除予定=投稿日から14日で消える
+const TABS=[{k:"new",t:"新着"},{k:"accepted",t:"受注中"},{k:"hold",t:"保留"},{k:"delete",t:"削除予定"}];
 const DELETE_DAYS=14;
 // 左右のスワイプで付ける状態(左上の「X Finder」から開く設定で変えられる。保存先は D1 なので、どの端末でも同じ)
-const SWIPE_LABEL={hold:"📌 保留",delete:"削除予定",seen:"確認済み",none:"何もしない"};
+const SWIPE_LABEL={hold:"📌 保留",delete:"削除予定",accepted:"受注中",none:"何もしない"};
 let settings={swipe_right:"hold",swipe_left:"delete"};
-let state={preset:"all",types:new Set(),sort:"score",tab:"unread",day:null}; // day はカレンダーで選んだ撮影日(保存しない)
+let state={preset:"all",types:new Set(),sort:"score",tab:"new",day:null}; // day はカレンダーで選んだ撮影日(保存しない)
 let cases=[],loadedView=null;
-try{const s=JSON.parse(localStorage.getItem("finder-ui")||"null");if(s){state.preset=s.preset||"all";state.sort=s.sort||"score";state.types=new Set(s.types||[]);state.tab=TABS.some(t=>t.k===s.tab)?s.tab:"unread"}}catch(e){}
+try{const s=JSON.parse(localStorage.getItem("finder-ui")||"null");if(s){state.preset=s.preset||"all";state.sort=s.sort||"score";state.types=new Set(s.types||[]);state.tab=TABS.some(t=>t.k===s.tab)?s.tab:"new"}}catch(e){}
 const save=()=>{try{localStorage.setItem("finder-ui",JSON.stringify({preset:state.preset,sort:state.sort,types:[...state.types],tab:state.tab}))}catch(e){}};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -444,6 +448,7 @@ async function postReview(id,body){
 function setLocalReview(id,review){const c=cases.find(x=>x.id===id);if(c)c.review=review}
 function daysLeft(c){if(!c.created_at)return null;return Math.max(0,Math.ceil((new Date(c.created_at).getTime()+DELETE_DAYS*864e5-Date.now())/864e5))}
 function reviewPill(c){
+  if(c.review==="accepted"){const d=caseDates(c);return `<span class="pill acc">受注中${d.length&&d[d.length-1]<jstDay(0)?"・撮影日を過ぎました":""}</span>`}
   if(c.review==="hold")return '<span class="pill hold">📌 保留</span>';
   if(c.review==="delete"){const d=daysLeft(c);return `<span class="pill del">削除予定${d==null?"":d?`・あと${d}日`:"・まもなく"}</span>`}
   return "";
@@ -492,7 +497,7 @@ function render(){
   const a=filtered();
   const crit=cases.filter(c=>c.critical).length;
   $("count").textContent=state.preset==="rejected"?`対象外 ${cases.length}件(直近2週間)`:`直近2週間 ${cases.length}件 ・ クリティカル ${crit}件`;
-  const emptyMsg={unread:"未確認の案件はありません。",seen:"確認済みの案件はありません。",hold:"保留の案件はありません。<br>あとで見直したい案件は、詳細の「保留にする」でここに残せます。",
+  const emptyMsg={new:"新着の案件はありません。",accepted:"受注中の案件はありません。<br>引き受けた案件は、詳細の「受注中にする」でここに移せます。",hold:"保留の案件はありません。<br>あとで見直したい案件は、詳細の「保留にする」でここに残せます。",
     delete:`削除予定の案件はありません。<br>削除予定にした案件は、投稿日から${DELETE_DAYS}日で消えます。`}[state.tab];
   const db=$("dayBar");db.hidden=!state.day;
   db.innerHTML=state.day?`<span><b>${dayLabel(state.day)}</b> が撮影日の案件だけ表示中</span><button type="button" class="chip" data-day-clear="1">解除</button>`:"";
@@ -518,7 +523,7 @@ function clientTags(c){
 }
 function card(c){
   const rejected=state.preset==="rejected";
-  return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card ${c.critical?"crit":""} ${c.review==="unread"?"unread":""}" data-id="${esc(c.id)}">
+  return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card ${c.critical?"crit":""} ${c.review==="new"&&!c.opened?"unread":""}" data-id="${esc(c.id)}">
    <div class="meta">${reviewPill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(placeShort(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
    <div class="score">${rejected?"":`<span class="n">${c.score==null?"—":Math.round(c.score)}</span><span class="l">点</span>`}</div>
    <div class="title">${esc(c.summary||"(要約なし)")}</div>
@@ -636,10 +641,11 @@ async function openSheet(id,cardEl){
 async function openSheetNow(id,cardEl){
   const base=cases.find(x=>x.id===id);
   const p=fetchDetail(id);p.catch(()=>{});
-  if(base&&base.review==="unread"){base.review="seen";setLocalReview(id,"seen");postReview(id,{opened:true}).catch(()=>setLocalReview(id,"unread"))}
-  const fresh=d=>{const c={...d};const now=cases.find(x=>x.id===id);
-    if(now)c.review=now.review; // 確認の状態は一覧の最新を使う(開いたら確認済みになる・ボタンで変えた分)
-    else if(c.review==="unread"&&!base){c.review="seen";postReview(id,{opened:true}).catch(()=>{})}
+  // 開いても状態は変えず、「開いた」だけ記録する(新着の青い点が消える)
+  if(base&&!base.opened){base.opened=true;postReview(id,{opened:true}).catch(()=>{base.opened=false})}
+  const fresh=d=>{const c={...d,opened:true};const now=cases.find(x=>x.id===id);
+    if(now)c.review=now.review; // 状態は一覧の最新を使う(ボタンで変えた分)
+    else if(!d.opened&&!base)postReview(id,{opened:true}).catch(()=>{});
     return c};
   // 中身が全部そろってから開く(開いたあとに引用元・画像・点数の内訳などが足されて表示がずれないように)。
   // 待っている間は押したカードを薄くし、少しかかるときはカードに読み込み中の印を出す
@@ -672,14 +678,17 @@ function postBox(text,url,id,from){
   const body=`${from?`<span class="from">${esc(from)}</span>`:""}${esc(text)}`;
   return url&&/^\d+$/.test(String(id||""))?`<a class="post link" href="${esc(url)}" data-xpost="${esc(id)}" target="_blank" rel="noopener noreferrer">${body}<span class="open-x">X で開く ›</span></a>`:`<div class="post">${body}</div>`;
 }
-// 詳細のいちばん下のボタンは「とじる」「保留にする」「ブラックリストにいれる」「削除予定にする」の4つ
+// 詳細のいちばん下のボタンは「受注中にする」(横いっぱい)と「とじる」「保留にする」「ブラックリストにいれる」「削除予定にする」。
+// その状態のときにもう一度押すと外れて、新着に戻る
 function reviewButtons(review,c){
   const black=c&&c.blacklist?'<button type="button" class="btn blk" disabled>ブラックリスト登録済み</button>'
     :`<button type="button" class="btn blk" data-black-open="1" ${c&&c.author_id?"":"disabled"}>ブラックリストにいれる</button>`;
-  return `<button type="button" class="btn" data-close="1">とじる</button>
-   <button type="button" class="btn hold ${review==="hold"?"on":""}" data-review="${review==="hold"?"seen":"hold"}">${review==="hold"?"保留を外す":"保留にする"}</button>
+  const toggle=(k,on,off,cls)=>`<button type="button" class="btn ${cls} ${review===k?"on":""}" data-review="${review===k?"new":k}">${review===k?off:on}</button>`;
+  return `${toggle("accepted","受注中にする","受注中を外す","acc")}
+   <button type="button" class="btn" data-close="1">とじる</button>
+   ${toggle("hold","保留にする","保留を外す","hold")}
    ${black}
-   <button type="button" class="btn del ${review==="delete"?"on":""}" data-review="${review==="delete"?"seen":"delete"}">${review==="delete"?"削除予定を外す":"削除予定にする"}</button>`;
+   ${toggle("delete","削除予定にする","削除予定を外す","del")}`;
 }
 let currentCase=null;
 async function changeReview(btn){
@@ -690,15 +699,15 @@ async function changeReview(btn){
     setLocalReview(id,review);
     box.innerHTML=reviewButtons(review,c0);
     const c=cases.find(x=>x.id===id);const meta=$("sheetMeta");
-    if(meta){meta.querySelectorAll(".pill.hold,.pill.del").forEach(e=>e.remove());if(c)meta.insertAdjacentHTML("afterbegin",reviewPill(c))}
+    if(meta){meta.querySelectorAll(".pill.hold,.pill.del,.pill.acc").forEach(e=>e.remove());if(c)meta.insertAdjacentHTML("afterbegin",reviewPill(c))}
   }catch(e){box.querySelectorAll("button").forEach(b=>b.disabled=false);alert(`保存できませんでした(${e.message})`)}
 }
 // ---- スワイプ ----
-// 設定の状態をすでに付けているカードをスワイプしたら、その状態を外して確認済みに戻す
+// 設定の状態をすでに付けているカードをスワイプしたら、その状態を外して新着に戻す
 function swipeTarget(c,dir){
   const want=settings[dir>0?"swipe_right":"swipe_left"];
   if(!want||want==="none")return null;
-  if(c.review===want)return want==="seen"?null:{state:"seen",label:`${SWIPE_LABEL[want]}を外す`,cls:"seen"};
+  if(c.review===want)return {state:"new",label:`${SWIPE_LABEL[want]}を外す`,cls:"new"};
   return {state:want,label:SWIPE_LABEL[want],cls:want};
 }
 // カードの横スワイプ。指の動き始めで縦か横かを1回だけ決め、そのジェスチャーの間は変えない。
@@ -775,11 +784,11 @@ function pickTheme(t){
   document.querySelectorAll("[data-theme-pick]").forEach(b=>{const on=b.dataset.themePick===t;b.classList.toggle("on",on);b.setAttribute("aria-pressed",on)});
 }
 function openSettings(){
-  const opt=v=>["hold","delete","seen","none"].map(k=>`<option value="${k}" ${v===k?"selected":""}>${SWIPE_LABEL[k]}</option>`).join("");
+  const opt=v=>["hold","delete","accepted","none"].map(k=>`<option value="${k}" ${v===k?"selected":""}>${SWIPE_LABEL[k]}</option>`).join("");
   presentSheet(`<div class="grab"></div>
    <h2>設定</h2>
    <div class="sec" style="margin-top:8px"><h3>画面の色</h3><div class="theme-seg" id="themeSeg" role="group" aria-label="画面の色">${THEMES.map(([k,l])=>`<button type="button" data-theme-pick="${k}" class="${curTheme()===k?"on":""}" aria-pressed="${curTheme()===k}">${l}</button>`).join("")}</div></div>
-   <div class="sec"><h3>スワイプ</h3><p class="sub" style="margin-top:0">カードを左右にスワイプしたときに付ける状態です。その状態のカードをもう一度同じ向きにスワイプすると外れて、確認済みに戻ります。</p>
+   <div class="sec"><h3>スワイプ</h3><p class="sub" style="margin-top:0">カードを左右にスワイプしたときに付ける状態です。その状態のカードをもう一度同じ向きにスワイプすると外れて、新着に戻ります。</p>
    <label class="setting"><span>右にスワイプ →</span><select id="swR">${opt(settings.swipe_right)}</select></label>
    <label class="setting"><span>← 左にスワイプ</span><select id="swL">${opt(settings.swipe_left)}</select></label>
    <p class="sub" id="setMsg"></p></div>
@@ -808,7 +817,7 @@ const BULK_CONDS=[
   {k:"afar",t:"活動地域が首都圏以外",f:c=>!!c.areas_far},
   {k:"busy",t:"予定あり",f:c=>!!calCheck(c)?.busy,show:()=>cal.configured&&!cal.error},
 ];
-const BULK_ACTIONS=[{k:"delete",t:"削除予定にする",cls:"del"},{k:"hold",t:"保留にする",cls:"hold"},{k:"seen",t:"確認済みにする",cls:"ok"},{k:"unread",t:"未確認に戻す",cls:"uread"}];
+const BULK_ACTIONS=[{k:"delete",t:"削除予定にする",cls:"del"},{k:"hold",t:"保留にする",cls:"hold"},{k:"accepted",t:"受注中にする",cls:"ok"},{k:"new",t:"新着に戻す",cls:"uread"}];
 const bulkText=c=>[c.summary,c.works,c.place,c.dates,c.text].filter(Boolean).join(" ").toLowerCase();
 function bulkMatches(){
   const terms=bulk.q.toLowerCase().split(/[\s　]+/).filter(Boolean);
@@ -884,7 +893,7 @@ function renderBulk(){
 }
 async function bulkApply(stateTo){
   const ids=[...bulk.picked];if(!ids.length)return;
-  const before=new Map(ids.map(id=>[id,(cases.find(c=>c.id===id)||{}).review||"unread"]));
+  const before=new Map(ids.map(id=>[id,(cases.find(c=>c.id===id)||{}).review||"new"]));
   document.querySelectorAll("[data-bulk-act]").forEach(b=>b.disabled=true);
   try{await postJson("/api/reviews",{ids,state:stateTo})}
   catch(e){alert(`変えられませんでした(${e.message})`);renderBulk();return}
@@ -986,8 +995,8 @@ async function renderStats(){
    <div class="sec"><h3>対象の案件の種類(${statsDays}日)</h3>${hbars(st.types)}</div>
    <div class="sec"><h3>対象の案件の都道府県(${statsDays}日)</h3>${hbars(st.prefectures)}</div>
    <div class="sec"><h3>対象外の理由(${statsDays}日)</h3>${hbars(st.reject_reasons)}</div>
-   <div class="sec"><h3>確認の状態</h3><div class="kpis" style="grid-template-columns:repeat(3,1fr);margin-top:0">
-    <div class="kpi"><div class="k">確認済み</div><div class="v">${fmt(rv.seen||0)}</div></div><div class="kpi"><div class="k">保留</div><div class="v">${fmt(rv.hold||0)}</div></div><div class="kpi"><div class="k">削除予定</div><div class="v">${fmt(rv.delete||0)}</div></div></div></div>
+   <div class="sec"><h3>カードの状態</h3><div class="kpis" style="grid-template-columns:repeat(3,1fr);margin-top:0">
+    <div class="kpi"><div class="k">受注中</div><div class="v">${fmt(rv.accepted||0)}</div></div><div class="kpi"><div class="k">保留</div><div class="v">${fmt(rv.hold||0)}</div></div><div class="kpi"><div class="k">削除予定</div><div class="v">${fmt(rv.delete||0)}</div></div></div></div>
    <p class="sub">金額は設定の為替レート(1ドル ${st.rate}円)で円にしています。日付は日本時間です。</p>
    <div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;
 }
