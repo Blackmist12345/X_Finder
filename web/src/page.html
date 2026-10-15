@@ -123,6 +123,25 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .calday+.calday{margin-top:4px}
 .calday .ev{color:var(--warn)}
 .calday .none{color:var(--ok)}
+/* カレンダーから日付を選ぶ */
+.daybar[hidden]{display:none}
+.daybar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:12px 0 0;padding:8px 10px;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-size:13px}
+.calhead{display:flex;align-items:center;justify-content:space-between;margin:4px 0}
+.calhead h2{margin:0;font-size:17px}
+.calhead .icon-btn{font-size:18px;padding:2px 14px}
+.calgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;margin-top:8px}
+.cw{text-align:center;font-size:11px;color:var(--muted);padding:2px 0}
+.cw.sun,.cd.sun .dn{color:var(--rec)} .cw.sat,.cd.sat .dn{color:var(--accent)}
+.cd{position:relative;min-height:64px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg);font:inherit;padding:3px 2px 2px;display:flex;flex-direction:column;align-items:stretch;gap:1px;text-align:left;cursor:pointer;overflow:hidden;min-width:0}
+.cd.empty{border:0;background:none;cursor:default}
+.cd.past{opacity:.45}
+.cd.today{border-color:var(--fg)}
+.cd.sel{outline:2px solid var(--accent);outline-offset:-1px}
+.cd .dn{font-size:12px;font-family:var(--font-num);padding-left:2px}
+.cd .cn{position:absolute;top:2px;right:2px;min-width:18px;height:18px;border-radius:9px;background:var(--accent);color:#fff;font-size:11px;font-weight:600;line-height:18px;text-align:center;padding:0 4px}
+.cd .ce{font-size:9.5px;line-height:1.3;border-radius:3px;padding:0 2px;background:var(--warn-soft);color:var(--warn);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cd .ce.off{background:var(--ok-soft);color:var(--ok)}
+.cd .cm{font-size:9.5px;color:var(--muted);padding-left:2px}
 /* まとめて状態を変える */
 .bulk-chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
 .bulk-list{margin-top:8px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
@@ -308,12 +327,14 @@ header.top.slim .tab .c{font-size:17px}
         <option value="ff">FF率順</option>
         <option value="followers">フォロワー数順</option>
       </select>
+      <button class="icon-btn" id="openCal" aria-label="カレンダーから日付を選ぶ" title="カレンダーから日付を選ぶ">日付</button>
       <button class="icon-btn" id="openBulk" aria-label="まとめて状態を変える" title="まとめて状態を変える">まとめて</button>
     </div>
     </div></div>
   </header>
   <div class="ptr" id="ptr" aria-live="polite"><span id="ptrText"></span></div>
   <p class="note" id="status" hidden></p>
+  <div class="daybar" id="dayBar" hidden></div>
   <div class="list" id="list"></div>
 </div>
 <div id="sheetRoot" hidden></div>
@@ -333,7 +354,7 @@ const DELETE_DAYS=14;
 // 左右のスワイプで付ける状態(左上の「X Finder」から開く設定で変えられる。保存先は D1 なので、どの端末でも同じ)
 const SWIPE_LABEL={hold:"📌 保留",delete:"削除予定",seen:"確認済み",none:"何もしない"};
 let settings={swipe_right:"hold",swipe_left:"delete"};
-let state={preset:"all",types:new Set(),sort:"score",tab:"unread"};
+let state={preset:"all",types:new Set(),sort:"score",tab:"unread",day:null}; // day はカレンダーで選んだ撮影日(保存しない)
 let cases=[],loadedView=null;
 try{const s=JSON.parse(localStorage.getItem("finder-ui")||"null");if(s){state.preset=s.preset||"all";state.sort=s.sort||"score";state.types=new Set(s.types||[]);state.tab=TABS.some(t=>t.k===s.tab)?s.tab:"unread"}}catch(e){}
 const save=()=>{try{localStorage.setItem("finder-ui",JSON.stringify({preset:state.preset,sort:state.sort,types:[...state.types],tab:state.tab}))}catch(e){}};
@@ -457,6 +478,7 @@ function matching(){
     if(state.preset==="crit"&&!c.critical)return false;
     if(state.preset==="near"&&!c.near)return false;
     if(state.types.size&&!state.types.has(c.case_type))return false;
+    if(state.day&&!caseDates(c).includes(state.day))return false;
     return true});
 }
 function filtered(){
@@ -472,7 +494,9 @@ function render(){
   $("count").textContent=state.preset==="rejected"?`対象外 ${cases.length}件(直近2週間)`:`直近2週間 ${cases.length}件 ・ クリティカル ${crit}件`;
   const emptyMsg={unread:"未確認の案件はありません。",seen:"確認済みの案件はありません。",hold:"保留の案件はありません。<br>あとで見直したい案件は、詳細の「保留にする」でここに残せます。",
     delete:`削除予定の案件はありません。<br>削除予定にした案件は、投稿日から${DELETE_DAYS}日で消えます。`}[state.tab];
-  $("list").innerHTML=a.length?a.map(card).join(""):`<div class="empty">${emptyMsg}</div>`;
+  const db=$("dayBar");db.hidden=!state.day;
+  db.innerHTML=state.day?`<span><b>${dayLabel(state.day)}</b> が撮影日の案件だけ表示中</span><button type="button" class="chip" data-day-clear="1">解除</button>`:"";
+  $("list").innerHTML=a.length?a.map(card).join(""):`<div class="empty">${state.day?`${dayLabel(state.day)} が撮影日の案件は、このタブにはありません。`:emptyMsg}</div>`;
   prefetchTop(a);
 }
 function place(c){return c.prefecture&&c.prefecture!=="不明"?c.prefecture:"場所不明"}
@@ -797,6 +821,43 @@ function bulkSuggest(){
   for(const c of bulk.base)for(const w of [...String(c.works||"").split(/[、,／/・]+/),c.place||""].map(x=>x.trim()).filter(x=>x&&x.length<=20))n.set(w,(n.get(w)||0)+1);
   return [...n].sort((a,b)=>b[1]-a[1]).slice(0,10).map(([w])=>w);
 }
+// ---- カレンダーから日付を選ぶ ----
+// Google カレンダーそのものを埋め込むと、タップした日をこの画面で受け取れないので、同じ予定(iCal)でこの画面に月の表を描く。
+// 日ごとに「その日が撮影日の案件の数」と予定を出し、日をタップするとその日の案件だけの一覧にする。
+let calView=null; // {y, m}(m は 0〜11)
+function dayCounts(){
+  const saved=state.day;state.day=null;
+  const n={};for(const c of matching().filter(c=>c.review===state.tab))for(const d of caseDates(c))n[d]=(n[d]||0)+1;
+  state.day=saved;return n;
+}
+function openCalendar(){
+  const base=state.day||jstDay(0);calView={y:+base.slice(0,4),m:+base.slice(5,7)-1};
+  presentSheet(`<div class="grab"></div><div id="calBody"></div>`,"カレンダーから日付を選ぶ");renderCalendar();
+}
+function renderCalendar(){
+  const {y,m}=calView,counts=dayCounts(),today=jstDay(0),tab=TABS.find(t=>t.k===state.tab);
+  const first=new Date(Date.UTC(y,m,1)).getUTCDay(),days=new Date(Date.UTC(y,m+1,0)).getUTCDate();
+  const iso=d=>`${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  const evs=d=>(cal.days&&cal.days[d]||[]).filter(e=>!e.free);
+  let cells="";
+  for(let i=0;i<first;i++)cells+='<span class="cd empty"></span>';
+  for(let d=1;d<=days;d++){
+    const k=iso(d),n=counts[k]||0,e=evs(k),busy=e.filter(x=>!x.off),off=e.filter(x=>x.off);
+    const dow=(first+d-1)%7;
+    cells+=`<button type="button" class="cd${k<today?" past":""}${k===today?" today":""}${k===state.day?" sel":""}${dow===0?" sun":dow===6?" sat":""}" data-cal-day="${k}" aria-label="${dayLabel(k)} 案件${n}件${busy.length?" 予定あり":off.length?" 休み":""}">
+      <span class="dn">${d}</span>${n?`<span class="cn">${n}</span>`:""}
+      ${busy.slice(0,2).map(x=>`<span class="ce">${esc(x.title)}</span>`).join("")}${busy.length>2?`<span class="cm">+${busy.length-2}</span>`:""}
+      ${!busy.length&&off.length?`<span class="ce off">${esc(off[0].title)}</span>`:""}</button>`;
+  }
+  const prev=m?{y,m:m-1}:{y:y-1,m:11},next=m<11?{y,m:m+1}:{y:y+1,m:0};
+  const note=!cal.configured?"Google カレンダーがつながっていないので、案件の数だけ出しています。":cal.error?`予定を読めませんでした(${esc(cal.error)})。案件の数だけ出しています。`:"予定は今日から120日先まで出ます。";
+  $("calBody").innerHTML=`<div class="calhead"><button type="button" class="icon-btn" data-cal-move="${prev.y}-${prev.m}" aria-label="前の月">‹</button>
+     <h2>${y}年${m+1}月</h2><button type="button" class="icon-btn" data-cal-move="${next.y}-${next.m}" aria-label="次の月">›</button></div>
+   <p class="sub">青い数字は「${esc(tab.t)}」のうち、その日が撮影日の案件の数です。日をタップすると、その日の案件だけを一覧に出します。${note}</p>
+   <div class="calgrid">${[..."日月火水木金土"].map((w,i)=>`<span class="cw${i===0?" sun":i===6?" sat":""}">${w}</span>`).join("")}${cells}</div>
+   <div class="actions">${state.day?'<button type="button" class="btn" data-day-clear="1">日付の絞り込みを解除</button>':""}<button class="btn" data-close="1">閉じる</button></div>`;
+}
+
 function openBulk(){
   bulk={base:filtered(),q:"",conds:new Set(),picked:new Set()};
   const tab=TABS.find(t=>t.k===state.tab);
@@ -940,6 +1001,9 @@ document.addEventListener("click",ev=>{
   const xp=ev.target.closest("[data-xpost]");if(xp&&/^\d+$/.test(xp.dataset.xpost)){ev.preventDefault();openInX(`twitter://status?id=${xp.dataset.xpost}`,xp.href);return}
   const im=ev.target.closest("[data-img]");if(im){openViewer(Number(im.dataset.img));return}
   const dy=ev.target.closest("[data-days]");if(dy){statsDays=Number(dy.dataset.days);renderStats();return}
+  const cd=ev.target.closest("[data-cal-day]");if(cd){state.day=cd.dataset.calDay;closeSheet();window.scrollTo({top:0});return}
+  const cm=ev.target.closest("[data-cal-move]");if(cm){const [yy,mm]=cm.dataset.calMove.split("-").map(Number);calView={y:yy,m:mm};renderCalendar();return}
+  if(ev.target.closest("[data-day-clear]")){state.day=null;if(!$("sheetRoot").hidden)closeSheet();else render();return}
   const tb=ev.target.closest("[data-tab]");if(tb){state.tab=tb.dataset.tab;save();render();window.scrollTo({top:0});return}
   const rv=ev.target.closest("[data-review]");if(rv){changeReview(rv);return}
   if(ev.target.closest("[data-black-open]")){$("blackBox").innerHTML=blackForm();$("blackForm").onsubmit=e=>{e.preventDefault();saveBlack(e.target)};
@@ -1101,6 +1165,7 @@ document.addEventListener("touchend",ptrEnd);
 document.addEventListener("touchcancel",()=>{ptr=null;ptrShow(0)});
 $("openSettings").addEventListener("click",openSettings);
 $("openBulk").addEventListener("click",openBulk);
+$("openCal").addEventListener("click",openCalendar);
 document.addEventListener("change",ev=>{const b=ev.target.closest("[data-bulk-id]");if(!b||!bulk)return;
   if(b.checked)bulk.picked.add(b.dataset.bulkId);else bulk.picked.delete(b.dataset.bulkId);renderBulk()});
 $("cost").addEventListener("click",openStats);
