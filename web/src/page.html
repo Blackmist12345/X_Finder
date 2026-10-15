@@ -26,14 +26,20 @@ function applyTheme(t){
 }
 document.querySelectorAll('meta[name="theme-color"]').forEach((m,i)=>{m.dataset.dark=i?"1":"0"});
 try{applyTheme(localStorage.getItem("finder-theme")||"system")}catch(e){}
-// 文字のフォント(ゴシック/丸ゴシック/端末の文字)もこの端末に保存。丸ゴシックは選んだときだけ読み込む
-const FONT_CSS={round:"https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap"};
+// 文字のフォントもこの端末に保存。ゴシック(最初から読み込む)と端末の文字以外は、選んだときだけ読み込む
+const FONT_CSS={
+  round:"M+PLUS+Rounded+1c:wght@400;500;700",
+  mincho:"Shippori+Mincho:wght@400;500;700",
+  hand:"Klee+One:wght@400;600",
+};
+function loadFont(f){
+  if(!FONT_CSS[f]||document.getElementById("font-"+f))return;
+  const l=document.createElement("link");l.id="font-"+f;l.rel="stylesheet";l.href=`https://fonts.googleapis.com/css2?family=${FONT_CSS[f]}&display=swap`;document.head.appendChild(l);
+}
 function applyFont(f){
   const r=document.documentElement;
-  if(f==="round"||f==="system")r.dataset.font=f;else delete r.dataset.font;
-  if(FONT_CSS[f]&&!document.getElementById("font-"+f)){
-    const l=document.createElement("link");l.id="font-"+f;l.rel="stylesheet";l.href=FONT_CSS[f];document.head.appendChild(l);
-  }
+  if(f in FONT_CSS||f==="system")r.dataset.font=f;else delete r.dataset.font;
+  loadFont(f);
 }
 try{applyFont(localStorage.getItem("finder-font")||"gothic")}catch(e){}
 </script>
@@ -49,7 +55,9 @@ try{applyFont(localStorage.getItem("finder-font")||"gothic")}catch(e){}
   --font-body:"Zen Kaku Gothic New",system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
   --font-num:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
 }
-:root[data-font="round"]{--font-body:"Zen Maru Gothic",system-ui,-apple-system,"Hiragino Maru Gothic ProN","Hiragino Sans",sans-serif}
+:root[data-font="round"]{--font-body:"M PLUS Rounded 1c","Hiragino Maru Gothic ProN",system-ui,sans-serif}
+:root[data-font="mincho"]{--font-body:"Shippori Mincho","Hiragino Mincho ProN","Yu Mincho",serif}
+:root[data-font="hand"]{--font-body:"Klee One","Hiragino Maru Gothic ProN",system-ui,sans-serif}
 :root[data-font="system"]{--font-body:system-ui,-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
 :root{
   --r:14px; --shadow:0 1px 2px rgba(20,26,36,.06),0 4px 14px rgba(20,26,36,.05);
@@ -158,6 +166,11 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .cd .cm{font-size:9.5px;color:var(--muted);padding-left:2px}
 /* まとめて状態を変える */
 .bulk-chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.preset{display:inline-flex;align-items:center;border-radius:999px;background:var(--accent-soft)}
+.preset .chip{border-color:transparent;background:transparent;color:var(--accent);font-weight:600;padding-right:4px}
+.preset .pdel{border:0;background:transparent;color:var(--accent);font:inherit;font-size:15px;padding:4px 10px 4px 4px;cursor:pointer}
+.chip.add{border-style:dashed;color:var(--muted)}
+.theme-seg.two{grid-template-columns:1fr 1fr;margin:8px 0}
 .bulk-list{margin-top:8px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .bulk-list label{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-top:1px solid var(--line);font-size:14px}
 .bulk-list label:first-child{border-top:0}
@@ -240,6 +253,16 @@ header.top.slim .tab .c{font-size:17px}
 .brand{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:4px;font-family:var(--font-num);font-size:24px;font-weight:700;letter-spacing:.06em;line-height:1.1;color:var(--fg);-webkit-tap-highlight-color:transparent}
 .brand .chev{font-size:15px;color:var(--muted);transform:translateY(1px)}
 .brand:active{opacity:.6}
+.help-btn{width:100%;margin-top:8px}
+.help details{border-top:1px solid var(--line)}
+.help details:last-child{border-bottom:1px solid var(--line)}
+.help summary{padding:13px 2px;font-weight:700;cursor:pointer;list-style:none;display:flex;justify-content:space-between}
+.help summary::-webkit-details-marker{display:none}
+.help summary::after{content:"›";color:var(--muted);transition:transform .15s}
+.help details[open] summary::after{transform:rotate(90deg)}
+.help .hb{padding:0 2px 12px;font-size:14px}
+.help .hb p{margin:0 0 8px} .help .hb ul{margin:0 0 8px;padding-left:1.2em} .help .hb li{margin:4px 0}
+.font-sample{margin:4px 0 0;padding:10px 12px;border-radius:10px;background:var(--surface-2);font-size:16px}
 .theme-seg{display:grid;grid-template-columns:1fr 1fr 2fr;gap:4px;background:var(--surface-2);border-radius:12px;padding:4px}
 .theme-seg button{white-space:nowrap;border:0;background:transparent;color:var(--muted);font:inherit;font-size:14px;padding:9px 4px;border-radius:9px;cursor:pointer}
 .theme-seg button.on{background:var(--surface);color:var(--fg);font-weight:700;box-shadow:var(--shadow)}
@@ -371,7 +394,7 @@ const TABS=[{k:"new",t:"新着"},{k:"accepted",t:"受注中"},{k:"hold",t:"保�
 const DELETE_DAYS=14;
 // 左右のスワイプで付ける状態(左上の「X Finder」から開く設定で変えられる。保存先は D1 なので、どの端末でも同じ)
 const SWIPE_LABEL={hold:"📌 保留",delete:"削除予定",accepted:"受注中",none:"何もしない"};
-let settings={swipe_right:"hold",swipe_left:"delete"};
+let settings={swipe_right:"hold",swipe_left:"delete",bulk_presets:[]};
 let state={preset:"all",types:new Set(),sort:"score",tab:"new",day:null}; // day はカレンダーで選んだ撮影日(保存しない)
 let cases=[],loadedView=null;
 try{const s=JSON.parse(localStorage.getItem("finder-ui")||"null");if(s){state.preset=s.preset||"all";state.sort=s.sort||"score";state.types=new Set(s.types||[]);state.tab=TABS.some(t=>t.k===s.tab)?s.tab:"new"}}catch(e){}
@@ -797,32 +820,28 @@ function pickTheme(t){
   applyTheme(t);
   document.querySelectorAll("[data-theme-pick]").forEach(b=>{const on=b.dataset.themePick===t;b.classList.toggle("on",on);b.setAttribute("aria-pressed",on)});
 }
-const FONTS=[["gothic","ゴシック"],["round","丸ゴシック"],["system","端末の文字"]];
+const FONTS=[["gothic","ゴシック(標準)"],["round","丸ゴシック"],["mincho","明朝"],["hand","手書き風"],["system","端末の文字"]];
 const curFont=()=>{try{return localStorage.getItem("finder-font")||"gothic"}catch(e){return "gothic"}};
 function pickFont(f){
   try{localStorage.setItem("finder-font",f)}catch(e){}
   applyFont(f);
-  document.querySelectorAll("[data-font-pick]").forEach(b=>{const on=b.dataset.fontPick===f;b.classList.toggle("on",on);b.setAttribute("aria-pressed",on)});
 }
 function openSettings(){
-  // 丸ゴシックのボタンをその書体で見せるため、設定を開いたときだけ読み込んでおく
-  if(!document.getElementById("font-round")){const l=document.createElement("link");l.id="font-round";l.rel="stylesheet";l.href=FONT_CSS.round;document.head.appendChild(l)}
   const opt=v=>["hold","delete","accepted","none"].map(k=>`<option value="${k}" ${v===k?"selected":""}>${SWIPE_LABEL[k]}</option>`).join("");
   presentSheet(`<div class="grab"></div>
    <h2>設定</h2>
+   <button type="button" class="btn help-btn" data-help="1">つかいかた ›</button>
    <div class="sec" style="margin-top:8px"><h3>画面の色</h3><div class="theme-seg" id="themeSeg" role="group" aria-label="画面の色">${THEMES.map(([k,l])=>`<button type="button" data-theme-pick="${k}" class="${curTheme()===k?"on":""}" aria-pressed="${curTheme()===k}">${l}</button>`).join("")}</div></div>
-   <div class="sec"><h3>文字のフォント</h3><div class="theme-seg" role="group" aria-label="文字のフォント">${FONTS.map(([k,l])=>`<button type="button" data-font-pick="${k}" class="${curFont()===k?"on":""}" aria-pressed="${curFont()===k}" style="font-family:${k==="round"?'"Zen Maru Gothic",':k==="system"?"system-ui,-apple-system,":'"Zen Kaku Gothic New",'}sans-serif">${l}</button>`).join("")}</div>
-    <p class="sub" style="margin:6px 0 0">数字の書体は変わりません。この端末に保存します。</p></div>
-   <div class="sec"><h3>スワイプ</h3><p class="sub" style="margin-top:0">カードを左右にスワイプしたときに付ける状態です。その状態のカードをもう一度同じ向きにスワイプすると外れて、新着に戻ります。</p>
+   <div class="sec"><h3>文字のフォント</h3><label class="setting" style="border:0;padding-top:0"><span>フォント</span><select id="fontSel" aria-label="文字のフォント">${FONTS.map(([k,l])=>`<option value="${k}" ${curFont()===k?"selected":""}>${l}</option>`).join("")}</select></label>
+    <p class="font-sample">カメラマン募集 10/25(土) 渋谷スタジオ</p></div>
+   <div class="sec"><h3>スワイプ</h3>
    <label class="setting"><span>右にスワイプ →</span><select id="swR">${opt(settings.swipe_right)}</select></label>
    <label class="setting"><span>← 左にスワイプ</span><select id="swL">${opt(settings.swipe_left)}</select></label>
    <p class="sub" id="setMsg"></p></div>
-   <div class="sec"><h3>Google カレンダー</h3><p class="sub" style="margin:0">${!cal.configured?"まだつながっていません。Google カレンダーの「設定」→ 予定表を選ぶ →「iCal 形式の非公開 URL」をコピーし、GitHub のリポジトリの Settings → Secrets and variables → Actions に、名前 GCAL_ICS_URL で登録してください(チャットには貼らないでください)。次に X Finder を公開し直すと使えるようになります。複数の予定表は改行で区切って入れられます。"
-     :cal.error?esc(cal.error):"つながっています。案件の撮影日に予定があるかをカードに出します(予定は X Finder の中で見るだけで、保存しません)。"}</p></div>
+   <div class="sec"><h3>Google カレンダー</h3><p class="sub" style="margin:0">${!cal.configured?"まだつながっていません(つなぎ方は「つかいかた」にあります)":cal.error?esc(cal.error):"つながっています"}</p></div>
    <div class="sec"><h3>ブラックリスト</h3><div class="blist" id="blist"><p class="sub" style="margin:0">読み込み中…</p></div></div>
-   <div class="sec"><h3>データベース</h3><p class="sub" style="margin:0 0 8px">集めたポスト、AI の判定、ユーザー台帳、費用などの中身を見られます(見るだけで、変更はしません)。</p>
+   <div class="sec"><h3>データベース</h3>
     <button type="button" class="btn" data-db="1" style="width:100%">中身を見る ›</button></div>
-   <div class="sec"><h3>アプリのように使う</h3><p class="sub" style="margin:0">iPhone の Safari でこのページを開き、下の共有ボタン(□↑)→「ホーム画面に追加」を押すと、アイコンから全画面で開けます。最初の 1 回だけ、アプリの中でもう一度ログインが要ります。</p></div>
    <div class="actions"><button class="btn" data-close="1">閉じる</button></div>`,"設定");
   const onChange=async()=>{
     const body={swipe_right:$("swR").value,swipe_left:$("swL").value};
@@ -831,12 +850,51 @@ function openSettings(){
     catch(e){$("setMsg").textContent=`保存できませんでした(${e.message})`}
   };
   $("swR").onchange=onChange;$("swL").onchange=onChange;
+  $("fontSel").onchange=e=>pickFont(e.target.value);
   blacklistChanged=false;loadBlacklist();
 }
+// ---- つかいかた(詳しい仕様と使い方はここに集める) ----
+const HELP=[
+ ["ホームの見かた",`<p>カードは点数の高い順に並びます(並び順は変えられます)。上の4つのタブで、カードの状態ごとに分けて見られます。</p>
+  <ul><li><b>新着</b>: 集めた案件が最初に入ります。開いても変わりません。まだ開いていないカードには青い点が付きます。投稿から2週間で一覧から消えます。</li>
+  <li><b>受注中</b>: 引き受けた案件です。2週間を過ぎても残り、撮影日が過ぎると「撮影日を過ぎました」と出ます。</li>
+  <li><b>保留</b>: あとで見直したい案件です。2週間を過ぎても残ります。</li>
+  <li><b>削除予定</b>: 投稿日から14日で消えます。</li></ul>
+  <p><b>REC</b> はクリティカル(合計点が基準以上か、Notion の「クリティカル条件」に当たった案件)の印で、カードの枠も赤くなります。日程の横の「予定あり / 空き / 休み」は Google カレンダーとの照合です。依頼主の名前の横には、プロフィールから読んだ性別・年齢・活動地域が出ます(未成年は赤)。</p>
+  <p>一番上で下に引っぱると再読み込みします。下へスクロールすると上部がたたまれます。</p>`],
+ ["絞り込み・並び順・日付",`<ul><li><b>すべて / クリティカル / 首都圏 / 対象外</b>: 「首都圏」は東京・神奈川・埼玉・千葉の案件、「対象外」は AI が募集ではないと判断したポストです。</li>
+  <li><b>種類</b>(コスプレ撮影など)は複数選べます。</li>
+  <li><b>日付</b>: 月のカレンダーが開き、日ごとに「その日が撮影日の案件の数」(青い数字、今のタブ・絞り込みで数える)と Google カレンダーの予定(休みは緑)が出ます。日をタップすると、その日が撮影日の案件だけを一覧に出します。上の「解除」で戻ります。予定は今日から120日先まで出ます。</li></ul>`],
+ ["案件の詳細",`<p>カードをタップすると詳細が開きます。本文をタップすると X アプリでそのポストが開きます。一番上で下に引っぱると閉じます。</p>
+  <p>下のボタンで「受注中」「保留」「削除予定」にできます。その状態のときにもう一度押すと外れて新着に戻ります。スパム・虚偽の申告・カメラマンだった人などは「ブラックリストにいれる」で、これまでとこれからのポストを出さず、AI の判定にもかけません(設定から解除できます)。</p>
+  <p>場所(都道府県)は、本文 → Notion の「イベントの一覧」→ 添付画像 → 依頼主のプロフィール の順に判断し、本文以外から判断したときはカードに小さく出ます。添付画像(メンバー表など)から読んだ X のアカウントは「関係するアカウント」に「画像から」と出ます。</p>
+  <p>依頼主の年齢・活動地域・性別は、プロフィールに書いてある書き方(18↓、30↑、成人済み、関西、♀ など)から読みます。プロフィールに書いてないときは、プロフィールのリンク先(Litlink など)からも読み、「リンク先から」と出ます。</p>`],
+ ["スワイプ",`<p>カードを左右にスワイプすると、設定で選んだ状態を付けられます(初期値は右=保留、左=削除予定)。その状態のカードをもう一度同じ向きにスワイプすると外れて、新着に戻ります。</p>`],
+ ["まとめて状態を変える",`<p>ホームの「まとめて」から、今のタブ(と絞り込み)の案件を、条件や言葉で絞ってまとめて状態を変えられます。変えたあとに出る「元に戻す」で戻せます。</p>
+  <ul><li><b>首都圏以外</b>: 東京・神奈川・埼玉・千葉以外の都道府県の案件(場所不明は入りません)。</li>
+  <li><b>活動地域が首都圏以外</b>: 依頼主のプロフィールに書かれた活動地域が首都圏・関東以外の案件(書かれていない人は入りません)。</li>
+  <li><b>予定あり</b>: カレンダーで撮影日に予定がある案件(休みの予定は数えません)。</li>
+  <li><b>言葉</b>: 作品名・イベント名・場所・本文のどれかに入っていれば当たります。空白で区切ると、それぞれを1つの条件として数えます。</li>
+  <li><b>すべてに当たる(AND)</b>: 選んだ条件と言葉の全部に当たる案件。<b>どれかに当たる(OR)</b>: どれか1つにでも当たる案件。</li>
+  <li><b>プリセット</b>: 「＋ 今の条件を保存」で、今の条件・言葉・AND/OR に名前を付けて保存し、次からタップ1回で呼び出せます。× で消せます。プリセットはどの端末でも同じです。</li></ul>`],
+ ["Google カレンダーのつなぎ方",`<p>Google カレンダーの「設定」→ 予定表を選ぶ →「iCal 形式の非公開 URL」をコピーし、GitHub のリポジトリの Settings → Secrets and variables → Actions に、名前 GCAL_ICS_URL で登録します(チャットには貼らないでください)。次に X Finder を公開し直すと使えます。複数の予定表は改行で区切って入れられます。</p>
+  <p>予定は X Finder の中で見るだけで、保存しません。予定名に「休み」「有給」などの言葉(Notion の基本設定「休みとみなす予定の言葉」)が入っている予定は、予定ありに数えず「休み」と出します。</p>`],
+ ["設定",`<ul><li><b>画面の色・文字のフォント</b>: この端末に保存します。数字(点数・件数)の書体は変わりません。</li>
+  <li><b>スワイプ・プリセット</b>: データベースに保存するので、どの端末でも同じです。</li>
+  <li><b>データベース</b>: 集めたポスト、AI の判定、ユーザー台帳、費用などの中身を新しい順に見られます(検索可、見るだけで変更はしません)。</li>
+  <li>右上の今月の費用をタップすると、取得ポスト数や費用、案件の種類・都道府県の内訳などのサマリーが見られます。</li></ul>`],
+ ["アプリのように使う",`<p>iPhone の Safari でこのページを開き、下の共有ボタン(□↑)→「ホーム画面に追加」を押すと、アイコンから全画面で開けます。最初の 1 回だけ、アプリの中でもう一度ログインが要ります。</p>`],
+];
+function openHelp(){
+  presentSheet(`<div class="grab"></div><button type="button" class="btn" data-help-back="1" style="flex:none;padding:6px 12px">‹ 設定</button><h2>つかいかた</h2>
+   <div class="help">${HELP.map(([t,b])=>`<details><summary>${t}</summary><div class="hb">${b}</div></details>`).join("")}</div>
+   <div class="actions"><button class="btn" data-close="1">閉じる</button></div>`,"つかいかた");
+}
+
 // ---- まとめて状態を変える ----
 // いま見ているタブ(と絞り込み)の案件から、言葉(作品名・イベント名・場所など)で選んで、まとめて状態を変える
-let bulk=null; // { base: 対象の案件, q: 言葉, conds: Set(条件の k), picked: Set(id) }
-// 言葉と一緒に使える決まった条件。どれも「かつ」で絞る
+let bulk=null; // { base: 対象の案件, q: 言葉, conds: Set(条件の k), mode: and / or, picked: Set(id) }
+// 言葉と一緒に使える決まった条件。mode=and は全部に当たるもの、or はどれかに当たるもの
 const BULK_CONDS=[
   {k:"far",t:"首都圏以外",f:c=>!!c.prefecture&&c.prefecture!=="不明"&&!c.near},
   {k:"afar",t:"活動地域が首都圏以外",f:c=>!!c.areas_far},
@@ -847,7 +905,9 @@ const bulkText=c=>[c.summary,c.works,c.place,c.dates,c.text].filter(Boolean).joi
 function bulkMatches(){
   const terms=bulk.q.toLowerCase().split(/[\s　]+/).filter(Boolean);
   const conds=BULK_CONDS.filter(x=>bulk.conds.has(x.k));
-  return bulk.base.filter(c=>conds.every(x=>x.f(c))&&(!terms.length||terms.every(w=>bulkText(c).includes(w))));
+  const tests=[...conds.map(x=>x.f),...terms.map(w=>c=>bulkText(c).includes(w))];
+  if(!tests.length)return bulk.base.slice();
+  return bulk.base.filter(c=>bulk.mode==="or"?tests.some(f=>f(c)):tests.every(f=>f(c)));
 }
 // よく出る作品名・場所を候補として出す
 function bulkSuggest(){
@@ -884,25 +944,55 @@ function renderCalendar(){
       ${!busy.length&&off.length?`<span class="ce off">${esc(off[0].title)}</span>`:""}</button>`;
   }
   const prev=m?{y,m:m-1}:{y:y-1,m:11},next=m<11?{y,m:m+1}:{y:y+1,m:0};
-  const note=!cal.configured?"Google カレンダーがつながっていないので、案件の数だけ出しています。":cal.error?`予定を読めませんでした(${esc(cal.error)})。案件の数だけ出しています。`:"予定は今日から120日先まで出ます。";
+  const note=!cal.configured?"Google カレンダーがつながっていないので、案件の数だけ出しています。":`予定を読めませんでした(${esc(cal.error||"")})。案件の数だけ出しています。`;
   $("calBody").innerHTML=`<div class="calhead"><button type="button" class="icon-btn" data-cal-move="${prev.y}-${prev.m}" aria-label="前の月">‹</button>
      <h2>${y}年${m+1}月</h2><button type="button" class="icon-btn" data-cal-move="${next.y}-${next.m}" aria-label="次の月">›</button></div>
-   <p class="sub">青い数字は「${esc(tab.t)}」のうち、その日が撮影日の案件の数です。日をタップすると、その日の案件だけを一覧に出します。${note}</p>
+   ${cal.configured&&!cal.error?"":`<p class="sub">${note}</p>`}
    <div class="calgrid">${[..."日月火水木金土"].map((w,i)=>`<span class="cw${i===0?" sun":i===6?" sat":""}">${w}</span>`).join("")}${cells}</div>
    <div class="actions">${state.day?'<button type="button" class="btn" data-day-clear="1">日付の絞り込みを解除</button>':""}<button class="btn" data-close="1">閉じる</button></div>`;
 }
 
 function openBulk(){
-  bulk={base:filtered(),q:"",conds:new Set(),picked:new Set()};
+  bulk={base:filtered(),q:"",conds:new Set(),mode:"and",picked:new Set()};
   const tab=TABS.find(t=>t.k===state.tab);
   presentSheet(`<div class="grab"></div><h2>まとめて状態を変える</h2>
-   <p class="sub">「${esc(tab.t)}」の ${bulk.base.length}件から、条件や言葉で絞って選びます。「首都圏以外」は東京・神奈川・埼玉・千葉以外の都道府県の案件(場所不明は入りません)、「活動地域が首都圏以外」は依頼主のプロフィールに書かれた活動地域が首都圏・関東以外の案件(書かれていない人は入りません)、「予定あり」はカレンダーで撮影日に予定がある案件です。言葉は、作品名・イベント名・場所・本文のどれかに入っていれば当たります(空白で区切ると全部を含むもの)。</p>
-   <input class="bulk-input" id="bulkQ" type="search" placeholder="例: ブルアカ コミケ" enterkeyhint="search" autocomplete="off">
-   <div class="bulk-chips">${BULK_CONDS.filter(x=>!x.show||x.show()).map(x=>`<button type="button" class="chip" data-bulk-cond="${x.k}" aria-pressed="false">${x.t}</button>`).join("")}</div>
+   <p class="sub">「${esc(tab.t)}」の ${bulk.base.length}件から選びます</p>
+   <div id="bulkHead"></div>
    <div class="bulk-chips" id="bulkChips">${bulkSuggest().map(w=>`<button type="button" class="chip" data-bulk-chip="${esc(w)}">${esc(w)}</button>`).join("")}</div>
    <div id="bulkBody"></div>`,"まとめて状態を変える");
-  $("bulkQ").addEventListener("input",e=>{bulk.q=e.target.value;bulkPickAll(!!bulk.q.trim());renderBulk()});
-  renderBulk();
+  renderBulkHead();renderBulk();
+}
+// プリセット・言葉・AND/OR・条件(言葉を打っている間は描き直さないので、ここは別に描く)
+const presets=()=>(settings.bulk_presets||[]);
+function renderBulkHead(){
+  const conds=BULK_CONDS.filter(x=>!x.show||x.show());
+  $("bulkHead").innerHTML=`<div class="bulk-chips presets">${presets().map((p,i)=>`<span class="preset"><button type="button" class="chip" data-preset="${i}">${esc(p.name)}</button><button type="button" class="pdel" data-preset-del="${i}" aria-label="${esc(p.name)}を消す">×</button></span>`).join("")}
+     <button type="button" class="chip add" data-preset-save="1">＋ 今の条件を保存</button></div>
+   <input class="bulk-input" id="bulkQ" type="search" placeholder="例: ブルアカ コミケ" enterkeyhint="search" autocomplete="off" value="${esc(bulk.q)}">
+   <div class="theme-seg two" role="group" aria-label="条件の合わせ方">${[["and","すべてに当たる(AND)"],["or","どれかに当たる(OR)"]].map(([k,l])=>`<button type="button" data-bulk-mode="${k}" class="${bulk.mode===k?"on":""}" aria-pressed="${bulk.mode===k}">${l}</button>`).join("")}</div>
+   <div class="bulk-chips">${conds.map(x=>`<button type="button" class="chip" data-bulk-cond="${x.k}" aria-pressed="${bulk.conds.has(x.k)}">${x.t}</button>`).join("")}</div>`;
+  $("bulkQ").addEventListener("input",e=>{bulk.q=e.target.value;bulkPickAll(!!(bulk.q.trim()||bulk.conds.size));renderBulk()});
+}
+async function savePresets(list){
+  try{settings=await postJson("/api/settings",{bulk_presets:list});return true}
+  catch(e){alert(`保存できませんでした(${e.message})`);return false}
+}
+async function presetSave(){
+  if(!bulk.q.trim()&&!bulk.conds.size){alert("条件か言葉を選んでから保存してください");return}
+  const def=[...BULK_CONDS.filter(x=>bulk.conds.has(x.k)).map(x=>x.t),bulk.q.trim()].filter(Boolean).join(bulk.mode==="or"?"か":"・");
+  const name=(prompt("プリセットの名前",def.slice(0,20))||"").trim().slice(0,20);
+  if(!name)return;
+  const p={name,conds:[...bulk.conds],q:bulk.q.trim(),mode:bulk.mode};
+  if(await savePresets([...presets().filter(x=>x.name!==name),p].slice(-20)))renderBulkHead();
+}
+function presetApply(i){
+  const p=presets()[i];if(!p)return;
+  bulk.conds=new Set(p.conds);bulk.q=p.q||"";bulk.mode=p.mode==="or"?"or":"and";
+  bulkPickAll(true);renderBulkHead();renderBulk();
+}
+async function presetDelete(i){
+  const p=presets()[i];if(!p||!confirm(`プリセット「${p.name}」を消しますか`))return;
+  if(await savePresets(presets().filter((_,j)=>j!==i)))renderBulkHead();
 }
 function bulkPickAll(on){bulk.picked=new Set(on?bulkMatches().map(c=>c.id):[])}
 function renderBulk(){
@@ -1045,13 +1135,18 @@ document.addEventListener("click",ev=>{
   if(ev.target.closest("[data-black-cancel]")){$("blackBox").innerHTML="";return}
   const ub=ev.target.closest("[data-unblack]");if(ub){unblack(ub);return}
   const bc=ev.target.closest("[data-bulk-chip]");if(bc){const q=$("bulkQ");q.value=bc.dataset.bulkChip;bulk.q=q.value;bulkPickAll(true);renderBulk();return}
+  const pr=ev.target.closest("[data-preset]");if(pr&&bulk){presetApply(Number(pr.dataset.preset));return}
+  const pd=ev.target.closest("[data-preset-del]");if(pd&&bulk){presetDelete(Number(pd.dataset.presetDel));return}
+  if(ev.target.closest("[data-preset-save]")&&bulk){presetSave();return}
+  const bm=ev.target.closest("[data-bulk-mode]");if(bm&&bulk){bulk.mode=bm.dataset.bulkMode;bulkPickAll(!!(bulk.q.trim()||bulk.conds.size));renderBulkHead();renderBulk();return}
   const bk=ev.target.closest("[data-bulk-cond]");if(bk&&bulk){const k=bk.dataset.bulkCond,on=!bulk.conds.has(k);
     if(on)bulk.conds.add(k);else bulk.conds.delete(k);bk.setAttribute("aria-pressed",String(on));bulkPickAll(!!(bulk.q.trim()||bulk.conds.size));renderBulk();return}
   const ba=ev.target.closest("[data-bulk-all]");if(ba){bulkPickAll(ba.dataset.bulkAll==="1");renderBulk();return}
   const bx=ev.target.closest("[data-bulk-act]");if(bx){bulkApply(bx.dataset.bulkAct);return}
   const tp=ev.target.closest("[data-theme-pick]");if(tp){pickTheme(tp.dataset.themePick);return}
-  const fp=ev.target.closest("[data-font-pick]");if(fp){pickFont(fp.dataset.fontPick);return}
   if(ev.target.closest("[data-db]")||ev.target.closest("[data-dbback]")){openDb();return}
+  if(ev.target.closest("[data-help]")){openHelp();return}
+  if(ev.target.closest("[data-help-back]")){openSettings();return}
   const dbt=ev.target.closest("[data-dbt]");if(dbt){openTable(dbt.dataset.dbt);return}
   const dbm=ev.target.closest("[data-dbmore]");if(dbm){dbm.disabled=true;openTable(dbState.name,dbState.q,Number(dbm.dataset.dbmore));return}
   const t=ev.target.closest("[data-t]");if(t){const v=t.dataset.t;state.types.has(v)?state.types.delete(v):state.types.add(v);save();render();return}
