@@ -11,10 +11,17 @@ import icon512 from "./icons/icon-512.png";
 
 const NEAR = ["東京都", "神奈川県", "埼玉県", "千葉県"];
 const MAX_LIST = 300;
-const REVIEW_STATES = ["seen", "hold", "delete", "unread"]; // 行がなければ未確認(unread)。unread は「元に戻す」用
+// カードの状態。new=新着 / accepted=受注中 / hold=保留 / delete=削除予定。行がなければ新着(まだ開いていない)。
+// 開いたかどうかは状態とは別に opened_at で持つ(新着のうち、まだ開いていないカードに青い点を付ける)
+const REVIEW_STATES = ["new", "accepted", "hold", "delete"];
+// 前の名前(確認済み・未確認)で届いたら新着として扱う
+const STATE_ALIASES = { seen: "new", unread: "new" };
+const normState = (s) => STATE_ALIASES[s] || s;
+// 2週間を過ぎても一覧に残す状態
+const KEEP_STATES = "('accepted', 'hold')";
 // 画面の設定(D1 の meta に保存するので、スマホでも PC でも同じになる)。スワイプで付ける状態。none は何もしない
 const SETTINGS_KEY = "finder_settings";
-const SWIPE_CHOICES = ["hold", "delete", "seen", "none"];
+const SWIPE_CHOICES = ["hold", "delete", "accepted", "none"];
 const DEFAULT_SETTINGS = { swipe_right: "hold", swipe_left: "delete" };
 
 // ブラックリストの理由。spam=スパム / false=虚偽の申告 / photographer=被写体ではなくカメラマンだった / other=その他
@@ -27,6 +34,8 @@ const NOT_BLACKLISTED = "NOT EXISTS (SELECT 1 FROM blacklist b WHERE b.user_id =
 const TABLES_DDL = [
   `CREATE TABLE IF NOT EXISTS reviews (
     post_id TEXT PRIMARY KEY, state TEXT NOT NULL, opened_at TEXT, updated_at TEXT NOT NULL)`,
+  // 「確認済み」はなくなったので、新着に戻す(何度流しても同じ)
+  `UPDATE reviews SET state = 'new' WHERE state = 'seen'`,
   `CREATE TABLE IF NOT EXISTS blacklist (
     user_id TEXT PRIMARY KEY, username TEXT, reason TEXT NOT NULL, note TEXT, added_at TEXT NOT NULL)`,
   // 画像から読んだアカウント(書くのは収集の方。表がまだなくても詳細が開けるように作っておく)
@@ -94,7 +103,7 @@ function daysAgoIso(days) {
 const CASE_COLUMNS = `
   p.id, p.text, p.url, p.created_at, p.collected_at, p.status, p.skip_reason, p.quoted_id,
   j.case_type, j.works, j.prefecture, j.prefecture_source, j.place, j.dates, j.summary, j.score, j.critical, j.critical_reason, j.reject_reason,
-  p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, COALESCE(r.state, 'unread') AS review,
+  p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, CASE WHEN r.state IN ('accepted', 'hold', 'delete') THEN r.state ELSE 'new' END AS review, (r.opened_at IS NOT NULL) AS opened,
   u.description, u.location, (SELECT ul.found_json FROM user_links ul WHERE ul.user_id = p.author_id) AS link_found`;
 
 export async function listCases(db, params) {
@@ -106,7 +115,7 @@ export async function listCases(db, params) {
         (SELECT COUNT(*) FROM post_users pu WHERE pu.post_id = p.id AND pu.role IN ('mention', 'quoted')) AS others
        FROM posts p JOIN judgments j ON j.post_id = p.id LEFT JOIN users u ON u.id = p.author_id
        LEFT JOIN reviews r ON r.post_id = p.id
-       WHERE p.status = ? AND (p.collected_at >= ? OR r.state = 'hold') AND ${NOT_BLACKLISTED}
+       WHERE p.status = ? AND (p.collected_at >= ? OR r.state IN ${KEEP_STATES}) AND ${NOT_BLACKLISTED}
        ORDER BY j.score DESC, p.created_at DESC LIMIT ?`,
     )
     .bind(view, daysAgoIso(days), MAX_LIST)
@@ -117,6 +126,7 @@ export async function listCases(db, params) {
     ...r,
     ...profileInfo({ name: r.name, description, location, link: parseJson(link_found, null) }),
     critical: !!r.critical,
+    opened: !!r.opened,
     near: NEAR.includes(r.prefecture),
     media: parseJson(media_json, []),
   }));
@@ -190,6 +200,7 @@ export async function getCase(db, id) {
     ...rest,
     ...profileInfo({ ...row, link: parseJson(link_found, null) }),
     critical: !!row.critical,
+    opened: !!row.opened,
     near: NEAR.includes(row.prefecture),
     media: parseJson(media_json, []),
     score_detail: parseJson(score_json, []),
@@ -279,31 +290,33 @@ function nowIso() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
 }
 
-// 確認の状態を変える。opened=true は「開いた」の記録で、未確認のときだけ確認済みにする。
+// カードの状態を変える。opened=true は「開いた」の記録で、状態は変えない(新着のまま青い点だけ消える)。
+// 新着に戻すときは行を消さずに状態だけ戻す(開いた記録は残す)。
+function reviewWrite(db, id, state, now) {
+  if (state === "new") return db.prepare("UPDATE reviews SET state = 'new', updated_at = ? WHERE post_id = ?").bind(now, id);
+  return db
+    .prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES (?, ?, ?, ?)
+              ON CONFLICT(post_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`)
+    .bind(id, state, now, now);
+}
+
 export async function setReview(db, id, { state, opened }) {
   const exists = await db.prepare("SELECT 1 AS ok FROM judgments WHERE post_id = ?").bind(id).first();
   if (!exists) return null;
   const now = nowIso();
   if (opened) {
     await db
-      .prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES (?, 'seen', ?, ?)
-                ON CONFLICT(post_id) DO NOTHING`)
+      .prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES (?, 'new', ?, ?)
+                ON CONFLICT(post_id) DO UPDATE SET opened_at = COALESCE(reviews.opened_at, excluded.opened_at)`)
       .bind(id, now, now)
       .run();
   } else {
+    state = normState(state);
     if (!REVIEW_STATES.includes(state)) throw new RangeError("state");
-    if (state === "unread") {
-      await db.prepare("DELETE FROM reviews WHERE post_id = ?").bind(id).run();
-      return "unread";
-    }
-    await db
-      .prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES (?, ?, ?, ?)
-                ON CONFLICT(post_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`)
-      .bind(id, state, now, now)
-      .run();
+    await reviewWrite(db, id, state, now).run();
   }
   const row = await db.prepare("SELECT state FROM reviews WHERE post_id = ?").bind(id).first();
-  return row?.state || "unread";
+  return REVIEW_STATES.includes(row?.state) ? row.state : "new";
 }
 
 // まとめて状態を変える(ホームの「まとめて」から)。ids は 300 件まで。見つからない ID は飛ばす。
@@ -311,7 +324,7 @@ const BULK_MAX = 300;
 export async function setReviews(db, body) {
   const ids = [...new Set(Array.isArray(body.ids) ? body.ids.map(String) : [])];
   if (!ids.length || ids.length > BULK_MAX || ids.some((id) => !/^\d{1,25}$/.test(id))) throw new RangeError("ids");
-  const state = body.state;
+  const state = normState(body.state);
   if (!REVIEW_STATES.includes(state)) throw new RangeError("state");
   const known = new Set();
   for (let i = 0; i < ids.length; i += 90) {
@@ -325,16 +338,7 @@ export async function setReviews(db, body) {
   const hit = ids.filter((id) => known.has(id));
   if (!hit.length) return { updated: [] };
   const now = nowIso();
-  await db.batch(
-    hit.map((id) =>
-      state === "unread"
-        ? db.prepare("DELETE FROM reviews WHERE post_id = ?").bind(id)
-        : db
-            .prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES (?, ?, ?, ?)
-                      ON CONFLICT(post_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`)
-            .bind(id, state, now, now),
-    ),
-  );
+  await db.batch(hit.map((id) => reviewWrite(db, id, state, now)));
   return { updated: hit, state };
 }
 
