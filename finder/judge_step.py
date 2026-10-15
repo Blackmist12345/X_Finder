@@ -24,14 +24,16 @@ def items_from_tweets(tweets, decisions):
         author = tw.get("author") or {}
         out.append({"id": tid, "text": tw.get("text"), "url": tw.get("url"), "penalties": penalties or [],
                     "quoted_text": (tw.get("quoted_tweet") or {}).get("text"),
-                    "author_location": author.get("location"), "author_description": author.get("description")})
+                    "author_location": author.get("location"), "author_description": author.get("description"),
+                    "author_followers": author.get("followers"), "author_following": author.get("following")})
     return out[:MAX_PER_RUN]
 
 
 def items_from_db(d1):
     rows = d1.query(
         "SELECT p.id, p.text, p.url, p.penalty_json, p.collected_at, q.text AS quoted_text, "
-        "u.location AS author_location, u.description AS author_description "
+        "u.location AS author_location, u.description AS author_description, "
+        "u.followers AS author_followers, u.following AS author_following "
         "FROM posts p LEFT JOIN posts q ON q.id = p.quoted_id LEFT JOIN users u ON u.id = p.author_id "
         "WHERE p.status = 'new' ORDER BY p.collected_at, p.id LIMIT ?", [MAX_PER_RUN])
     for r in rows:
@@ -58,7 +60,9 @@ def evaluate(items, results, config):
         if r is None:
             continue
         reject = judge.reject_reason(r, cosplay_only)
-        total, detail, critical, why = (None, [], False, "") if reject else score(r, it["penalties"], it.get("text"), config)
+        total, detail, critical, why = (None, [], False, "") if reject else score(
+            r, it["penalties"], it.get("text"), config,
+            {"followers": it.get("author_followers"), "following": it.get("author_following")})
         out.append((it, r, reject, total, detail, critical, why))
     return out
 

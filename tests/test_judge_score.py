@@ -118,6 +118,20 @@ def test_region_penalty_only_when_prefecture_unknown():
     assert "場所: 場所不明" in [d["label"] for d in detail]
 
 
+def test_ff_rate_multiplies_positive_score_within_range():
+    def total(followers, following, **kw):
+        return score(ai_result("1", **kw), [], "", config(), {"followers": followers, "following": following})[0]
+    assert total(3000, 500) == 75   # FF率 6 → 上限の 1.5 倍
+    assert total(200, 1000) == 25   # FF率 0.2 → 下限の 0.5 倍
+    assert total(800, 0) == 75      # フォロー 0 人は 1 人として割る
+    assert total(300, 300) == 50    # FF率 1 → そのまま
+    assert total(None, None) == 50  # フォロワー数が分からなければ掛けない
+    assert total(3000, 500, case_type="その他", prefecture="大阪府") == -30  # マイナスの点には掛けない
+    cfg = config()
+    cfg["basic"].update({"FF率の倍率の下限": 0, "FF率の倍率の上限": 0})
+    assert score(ai_result("1"), [], "", cfg, {"followers": 300, "following": 100})[0] == 150  # 0 は制限なし
+
+
 def test_critical_condition_matches_text():
     _, _, critical, why = score(ai_result("1", case_type="ポートレート", prefecture="神奈川県"), [], "ブルアカ併せ", config())
     assert critical and why == "条件: 推し作品"
@@ -152,7 +166,7 @@ def test_production_judges_and_scores(wired, monkeypatch, make_tweet):
     status = {r["id"]: (r["status"], r["skip_reason"]) for r in d1.query("SELECT id, status, skip_reason FROM posts")}
     assert status == {"1": ("judged", None), "2": ("rejected", "カメラマン募集ではない"), "3": ("judged", None)}
     j = {r["post_id"]: r for r in d1.query("SELECT * FROM judgments")}
-    assert j["1"]["score"] == 50 and j["3"]["score"] == 20 and j["2"]["score"] is None
+    assert j["1"]["score"] == 75 and j["3"]["score"] == 30 and j["2"]["score"] is None  # FF率 5 なので ×1.5
     assert d1.query("SELECT COUNT(*) AS n FROM costs WHERE service = 'claude'")[0]["n"] == 1
     text = summary.read_text()
     assert "対象 2件 / 対象外 1件" in text and "今月の費用" in text
@@ -182,7 +196,7 @@ def test_dry_run_judges_without_saving(wired, monkeypatch, make_tweet):
     monkeypatch.setenv("MODE", "dry_run")
     run_collect.main()
     assert d1.query("SELECT COUNT(*) AS n FROM judgments")[0]["n"] == 0
-    assert "50点" in summary.read_text()
+    assert "75点" in summary.read_text() and "FF率 5.0(×1.5) +25" in summary.read_text()
 
 
 def test_claude_call_reads_tool_result():
