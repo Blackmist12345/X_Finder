@@ -128,6 +128,8 @@ def parse_events(rows):
 def _check(value, kind):
     if kind == "int":
         return int(str(value).replace(",", "").strip())
+    if kind == "float":
+        return float(str(value).replace(",", "").strip())
     if kind.startswith("choice:"):
         options = kind.split(":", 1)[1].split("/")
         if value not in options:
