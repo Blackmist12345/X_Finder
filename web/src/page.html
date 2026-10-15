@@ -26,6 +26,16 @@ function applyTheme(t){
 }
 document.querySelectorAll('meta[name="theme-color"]').forEach((m,i)=>{m.dataset.dark=i?"1":"0"});
 try{applyTheme(localStorage.getItem("finder-theme")||"system")}catch(e){}
+// 文字のフォント(ゴシック/丸ゴシック/端末の文字)もこの端末に保存。丸ゴシックは選んだときだけ読み込む
+const FONT_CSS={round:"https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap"};
+function applyFont(f){
+  const r=document.documentElement;
+  if(f==="round"||f==="system")r.dataset.font=f;else delete r.dataset.font;
+  if(FONT_CSS[f]&&!document.getElementById("font-"+f)){
+    const l=document.createElement("link");l.id="font-"+f;l.rel="stylesheet";l.href=FONT_CSS[f];document.head.appendChild(l);
+  }
+}
+try{applyFont(localStorage.getItem("finder-font")||"gothic")}catch(e){}
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -38,6 +48,10 @@ try{applyTheme(localStorage.getItem("finder-theme")||"system")}catch(e){}
   --rec:#e2372b; --rec-soft:#fde6e3; --ok:#1d8a55; --ok-soft:#e0f3e9; --warn:#b26a00; --warn-soft:#fbefd9;
   --font-body:"Zen Kaku Gothic New",system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
   --font-num:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+}
+:root[data-font="round"]{--font-body:"Zen Maru Gothic",system-ui,-apple-system,"Hiragino Maru Gothic ProN","Hiragino Sans",sans-serif}
+:root[data-font="system"]{--font-body:system-ui,-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+:root{
   --r:14px; --shadow:0 1px 2px rgba(20,26,36,.06),0 4px 14px rgba(20,26,36,.05);
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
@@ -783,11 +797,22 @@ function pickTheme(t){
   applyTheme(t);
   document.querySelectorAll("[data-theme-pick]").forEach(b=>{const on=b.dataset.themePick===t;b.classList.toggle("on",on);b.setAttribute("aria-pressed",on)});
 }
+const FONTS=[["gothic","ゴシック"],["round","丸ゴシック"],["system","端末の文字"]];
+const curFont=()=>{try{return localStorage.getItem("finder-font")||"gothic"}catch(e){return "gothic"}};
+function pickFont(f){
+  try{localStorage.setItem("finder-font",f)}catch(e){}
+  applyFont(f);
+  document.querySelectorAll("[data-font-pick]").forEach(b=>{const on=b.dataset.fontPick===f;b.classList.toggle("on",on);b.setAttribute("aria-pressed",on)});
+}
 function openSettings(){
+  // 丸ゴシックのボタンをその書体で見せるため、設定を開いたときだけ読み込んでおく
+  if(!document.getElementById("font-round")){const l=document.createElement("link");l.id="font-round";l.rel="stylesheet";l.href=FONT_CSS.round;document.head.appendChild(l)}
   const opt=v=>["hold","delete","accepted","none"].map(k=>`<option value="${k}" ${v===k?"selected":""}>${SWIPE_LABEL[k]}</option>`).join("");
   presentSheet(`<div class="grab"></div>
    <h2>設定</h2>
    <div class="sec" style="margin-top:8px"><h3>画面の色</h3><div class="theme-seg" id="themeSeg" role="group" aria-label="画面の色">${THEMES.map(([k,l])=>`<button type="button" data-theme-pick="${k}" class="${curTheme()===k?"on":""}" aria-pressed="${curTheme()===k}">${l}</button>`).join("")}</div></div>
+   <div class="sec"><h3>文字のフォント</h3><div class="theme-seg" role="group" aria-label="文字のフォント">${FONTS.map(([k,l])=>`<button type="button" data-font-pick="${k}" class="${curFont()===k?"on":""}" aria-pressed="${curFont()===k}" style="font-family:${k==="round"?'"Zen Maru Gothic",':k==="system"?"system-ui,-apple-system,":'"Zen Kaku Gothic New",'}sans-serif">${l}</button>`).join("")}</div>
+    <p class="sub" style="margin:6px 0 0">数字の書体は変わりません。この端末に保存します。</p></div>
    <div class="sec"><h3>スワイプ</h3><p class="sub" style="margin-top:0">カードを左右にスワイプしたときに付ける状態です。その状態のカードをもう一度同じ向きにスワイプすると外れて、新着に戻ります。</p>
    <label class="setting"><span>右にスワイプ →</span><select id="swR">${opt(settings.swipe_right)}</select></label>
    <label class="setting"><span>← 左にスワイプ</span><select id="swL">${opt(settings.swipe_left)}</select></label>
@@ -1025,6 +1050,7 @@ document.addEventListener("click",ev=>{
   const ba=ev.target.closest("[data-bulk-all]");if(ba){bulkPickAll(ba.dataset.bulkAll==="1");renderBulk();return}
   const bx=ev.target.closest("[data-bulk-act]");if(bx){bulkApply(bx.dataset.bulkAct);return}
   const tp=ev.target.closest("[data-theme-pick]");if(tp){pickTheme(tp.dataset.themePick);return}
+  const fp=ev.target.closest("[data-font-pick]");if(fp){pickFont(fp.dataset.fontPick);return}
   if(ev.target.closest("[data-db]")||ev.target.closest("[data-dbback]")){openDb();return}
   const dbt=ev.target.closest("[data-dbt]");if(dbt){openTable(dbt.dataset.dbt);return}
   const dbm=ev.target.closest("[data-dbmore]");if(dbm){dbm.disabled=true;openTable(dbState.name,dbState.q,Number(dbm.dataset.dbmore));return}
