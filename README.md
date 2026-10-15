@@ -14,7 +14,7 @@
 | N3 | 一次フィルタ(一部) | `finder/filters.py`(リポスト・フォロワー数・入りきらなかった除外語。減点語は記録だけ) |
 | N12 | データ保存 | `finder/store.py`, `schema.sql`(Cloudflare D1) |
 | N15 | ユーザー台帳 | `finder/store.py`(投稿者・引用元・メンション先・リプライ先を登録) |
-| N4 | AI 判定 | `finder/judge.py`(文字だけを Claude Haiku 5.5 でまとめて判定。Gemini にも切り替え可。対象外にするかはルールで決める) |
+| N4 | AI 判定 | `finder/judge.py`(文字だけを Claude Haiku 5.5 でまとめて判定。Gemini にも切り替え可。対象外にするかはルールで決める。「明日」「今週の土曜」のような撮影日は投稿日時を基準に「10/17(土)」の形に直させる) |
 | N13 | X Finder | `web/`(Cloudflare Workers。D1 は読むだけで、書くのは案件カードの確認の状態だけ。Cloudflare Access を通った人だけ見られる) |
 | N10 | 採点 | `finder/score.py`(【5】点数表と【6】クリティカル条件。都道府県が分かれば地名の減点語は使わない。プラスの点には依頼主の FF率を倍率として掛ける。幅は【7】基本設定の「FF率の倍率の下限/上限」、初期値 0.5〜1.5 倍) |
 
