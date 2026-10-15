@@ -344,6 +344,14 @@ export async function setReviews(db, body) {
 
 // 「まとめて」のプリセット(よく使う絞り込み)。{ name, conds: 条件の k, q: 言葉, mode: and / or }
 const PRESET_MAX = 20;
+// 最初から入っているプリセット(よく使う絞り込み)。消したり足したりできる。
+// 前から自分のプリセットがある人にも一度だけ足す(presets_seeded で覚える)
+const DEFAULT_PRESETS = [
+  { name: "予定かぶり", conds: ["busy"], q: "", mode: "and" },
+  { name: "首都圏以外", conds: ["far"], q: "", mode: "and" },
+  { name: "遠方(場所か活動地域)", conds: ["far", "afar"], q: "", mode: "or" },
+  { name: "予定かぶりか首都圏以外", conds: ["busy", "far"], q: "", mode: "or" },
+];
 const PRESET_CONDS = ["far", "afar", "busy"];
 function cleanPresets(list) {
   if (!Array.isArray(list)) return null;
@@ -365,7 +373,9 @@ export async function getSettings(db) {
   const saved = parseJson(row?.value, {});
   const out = { ...DEFAULT_SETTINGS };
   for (const k of Object.keys(DEFAULT_SETTINGS)) if (SWIPE_CHOICES.includes(saved[k])) out[k] = saved[k];
-  out.bulk_presets = cleanPresets(saved.bulk_presets) || [];
+  const own = saved.bulk_presets === undefined ? [] : cleanPresets(saved.bulk_presets) || [];
+  const add = saved.presets_seeded ? [] : DEFAULT_PRESETS.filter((d) => !own.some((p) => p.name === d.name));
+  out.bulk_presets = [...add.map((p) => ({ ...p })), ...own].slice(0, PRESET_MAX);
   return out;
 }
 
@@ -384,7 +394,7 @@ export async function saveSettings(db, body) {
   await db
     .prepare(`INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?)
               ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
-    .bind(SETTINGS_KEY, JSON.stringify(next), nowIso())
+    .bind(SETTINGS_KEY, JSON.stringify({ ...next, presets_seeded: true }), nowIso())
     .run();
   return next;
 }

@@ -177,8 +177,10 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .bulk-list input{margin-top:3px;width:18px;height:18px;flex:none;accent-color:var(--accent)}
 .bulk-list .sub{display:block;font-size:12px}
 .bulk-bar{display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:13px;color:var(--muted)}
-.bulk-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
-.bulk-actions .btn{padding:12px 4px;font-size:14px;white-space:nowrap}
+.bulk-top{position:sticky;top:-8px;z-index:2;background:var(--surface);margin:0 -16px;padding:8px 16px;border-bottom:1px solid var(--line)}
+.bulk-top .sub{font-size:12px;margin-bottom:6px}
+.bulk-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.bulk-actions .btn{padding:11px 2px;font-size:14px;white-space:nowrap}
 .btn.ok{border-color:var(--ok);color:var(--ok);background:var(--ok-soft)}
 .btn.uread{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 .bulk-input{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--fg)}
@@ -870,13 +872,13 @@ const HELP=[
   <p>場所(都道府県)は、本文 → Notion の「イベントの一覧」→ 添付画像 → 依頼主のプロフィール の順に判断し、本文以外から判断したときはカードに小さく出ます。添付画像(メンバー表など)から読んだ X のアカウントは「関係するアカウント」に「画像から」と出ます。</p>
   <p>依頼主の年齢・活動地域・性別は、プロフィールに書いてある書き方(18↓、30↑、成人済み、関西、♀ など)から読みます。プロフィールに書いてないときは、プロフィールのリンク先(Litlink など)からも読み、「リンク先から」と出ます。</p>`],
  ["スワイプ",`<p>カードを左右にスワイプすると、設定で選んだ状態を付けられます(初期値は右=保留、左=削除予定)。その状態のカードをもう一度同じ向きにスワイプすると外れて、新着に戻ります。</p>`],
- ["まとめて状態を変える",`<p>ホームの「まとめて」から、今のタブ(と絞り込み)の案件を、条件や言葉で絞ってまとめて状態を変えられます。変えたあとに出る「元に戻す」で戻せます。</p>
+ ["まとめて状態を変える",`<p>ホームの「まとめて」から、今のタブ(と絞り込み)の案件を、条件や言葉で絞ってまとめて状態を変えられます。選んだカードをどうするか(削除予定・保留・受注中)のボタンは上に並んでいて、スクロールしても残ります。変えたあとに出る「元に戻す」で戻せます。</p>
   <ul><li><b>首都圏以外</b>: 東京・神奈川・埼玉・千葉以外の都道府県の案件(場所不明は入りません)。</li>
   <li><b>活動地域が首都圏以外</b>: 依頼主のプロフィールに書かれた活動地域が首都圏・関東以外の案件(書かれていない人は入りません)。</li>
   <li><b>予定あり</b>: カレンダーで撮影日に予定がある案件(休みの予定は数えません)。</li>
   <li><b>言葉</b>: 作品名・イベント名・場所・本文のどれかに入っていれば当たります。空白で区切ると、それぞれを1つの条件として数えます。</li>
   <li><b>すべてに当たる(AND)</b>: 選んだ条件と言葉の全部に当たる案件。<b>どれかに当たる(OR)</b>: どれか1つにでも当たる案件。</li>
-  <li><b>プリセット</b>: 「＋ 今の条件を保存」で、今の条件・言葉・AND/OR に名前を付けて保存し、次からタップ1回で呼び出せます。× で消せます。プリセットはどの端末でも同じです。</li></ul>`],
+  <li><b>プリセット</b>: 「＋ 今の条件を保存」で、今の条件・言葉・AND/OR に名前を付けて保存し、次からタップ1回で呼び出せます。× で消せます。プリセットはどの端末でも同じです。最初から「予定かぶり」「首都圏以外」「遠方(場所か活動地域)」「予定かぶりか首都圏以外」が入っています(いらなければ消せます)。</li></ul>`],
  ["Google カレンダーのつなぎ方",`<p>Google カレンダーの「設定」→ 予定表を選ぶ →「iCal 形式の非公開 URL」をコピーし、GitHub のリポジトリの Settings → Secrets and variables → Actions に、名前 GCAL_ICS_URL で登録します(チャットには貼らないでください)。次に X Finder を公開し直すと使えます。複数の予定表は改行で区切って入れられます。</p>
   <p>予定は X Finder の中で見るだけで、保存しません。予定名に「休み」「有給」などの言葉(Notion の基本設定「休みとみなす予定の言葉」)が入っている予定は、予定ありに数えず「休み」と出します。</p>`],
  ["設定",`<ul><li><b>画面の色・文字のフォント</b>: この端末に保存します。数字(点数・件数)の書体は変わりません。</li>
@@ -900,7 +902,8 @@ const BULK_CONDS=[
   {k:"afar",t:"活動地域が首都圏以外",f:c=>!!c.areas_far},
   {k:"busy",t:"予定あり",f:c=>!!calCheck(c)?.busy,show:()=>cal.configured&&!cal.error},
 ];
-const BULK_ACTIONS=[{k:"delete",t:"削除予定にする",cls:"del"},{k:"hold",t:"保留にする",cls:"hold"},{k:"accepted",t:"受注中にする",cls:"ok"},{k:"new",t:"新着に戻す",cls:"uread"}];
+// b はボタンの短い名前(3つを1行に並べる)
+const BULK_ACTIONS=[{k:"delete",t:"削除予定にする",b:"削除予定",cls:"del"},{k:"hold",t:"保留にする",b:"保留",cls:"hold"},{k:"accepted",t:"受注中にする",b:"受注中",cls:"ok"},{k:"new",t:"新着に戻す",b:"新着に戻す",cls:"uread"}];
 const bulkText=c=>[c.summary,c.works,c.place,c.dates,c.text].filter(Boolean).join(" ").toLowerCase();
 function bulkMatches(){
   const terms=bulk.q.toLowerCase().split(/[\s　]+/).filter(Boolean);
@@ -957,6 +960,7 @@ function openBulk(){
   const tab=TABS.find(t=>t.k===state.tab);
   presentSheet(`<div class="grab"></div><h2>まとめて状態を変える</h2>
    <p class="sub">「${esc(tab.t)}」の ${bulk.base.length}件から選びます</p>
+   <div class="bulk-top" id="bulkActs"></div>
    <div id="bulkHead"></div>
    <div class="bulk-chips" id="bulkChips">${bulkSuggest().map(w=>`<button type="button" class="chip" data-bulk-chip="${esc(w)}">${esc(w)}</button>`).join("")}</div>
    <div id="bulkBody"></div>`,"まとめて状態を変える");
@@ -1003,8 +1007,10 @@ function renderBulk(){
   $("bulkBody").innerHTML=`<div class="bulk-bar"><span>${narrowed?`当たったもの ${list.length}件`:`全部で ${list.length}件`} ・ 選んだもの <b>${picked}件</b></span>
      ${list.length?`<button type="button" class="chip" data-bulk-all="${picked===list.length?0:1}">${picked===list.length?"全部外す":"全部選ぶ"}</button>`:""}</div>
    ${list.length?`<div class="bulk-list">${list.slice(0,300).map(c=>`<label><input type="checkbox" data-bulk-id="${esc(c.id)}" ${bulk.picked.has(c.id)?"checked":""}><span>${esc(c.summary||"(要約なし)")}<span class="sub">${esc([c.works,c.place,c.dates].filter(Boolean).join(" ・ "))}</span></span></label>`).join("")}</div>`:'<p class="sub">当たる案件はありません。</p>'}
-   <div class="bulk-actions">${acts.map(a=>`<button type="button" class="btn ${a.cls}" data-bulk-act="${a.k}" ${picked?"":"disabled"}>${a.t}</button>`).join("")}</div>
    <div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;
+  // 処置のボタンは上に1行で(スクロールしても上に残る)
+  $("bulkActs").innerHTML=`<div class="sub">選んだ <b>${picked}件</b> を</div>
+   <div class="bulk-actions">${acts.map(a=>`<button type="button" class="btn ${a.cls}" data-bulk-act="${a.k}" ${picked?"":"disabled"}>${a.b}</button>`).join("")}</div>`;
 }
 async function bulkApply(stateTo){
   const ids=[...bulk.picked];if(!ids.length)return;
