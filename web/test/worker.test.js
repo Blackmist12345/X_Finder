@@ -167,10 +167,21 @@ test("データベースの中身: 表ごとの件数と、新しい順の行・
 });
 
 test("スワイプの設定は初期値があり、変えると保存される", async () => {
-  assert.deepEqual(await getSettings(db), { swipe_right: "hold", swipe_left: "delete" });
-  assert.deepEqual(await saveSettings(db, { swipe_left: "accepted" }), { swipe_right: "hold", swipe_left: "accepted" });
-  assert.deepEqual(await getSettings(db), { swipe_right: "hold", swipe_left: "accepted" });
+  assert.deepEqual(await getSettings(db), { swipe_right: "hold", swipe_left: "delete", bulk_presets: [] });
+  assert.deepEqual(await saveSettings(db, { swipe_left: "accepted" }), { swipe_right: "hold", swipe_left: "accepted", bulk_presets: [] });
+  assert.deepEqual(await getSettings(db), { swipe_right: "hold", swipe_left: "accepted", bulk_presets: [] });
   await assert.rejects(saveSettings(db, { swipe_right: "seen" }), RangeError);
+});
+
+test("「まとめて」のプリセットを保存でき、おかしな中身は受け付けない", async () => {
+  const p = [{ name: "予定かぶり・遠方", conds: ["busy", "far", "zzz"], q: "", mode: "or" }, { name: "ブルアカ", conds: [], q: "ブルアカ" }];
+  const saved = await saveSettings(db, { bulk_presets: p });
+  assert.deepEqual(saved.bulk_presets, [{ name: "予定かぶり・遠方", conds: ["busy", "far"], q: "", mode: "or" }, { name: "ブルアカ", conds: [], q: "ブルアカ", mode: "and" }]);
+  assert.equal(saved.swipe_right, "hold");
+  assert.deepEqual((await getSettings(db)).bulk_presets, saved.bulk_presets);
+  await assert.rejects(saveSettings(db, { bulk_presets: [{ name: "", conds: ["far"] }] }), RangeError);
+  await assert.rejects(saveSettings(db, { bulk_presets: [{ name: "空", conds: [], q: "" }] }), RangeError);
+  await assert.rejects(saveSettings(db, { bulk_presets: "x" }), RangeError);
 });
 
 test("一覧にも添付画像の URL が入る(詳細を開いた瞬間から画像の場所を取るため)", async () => {

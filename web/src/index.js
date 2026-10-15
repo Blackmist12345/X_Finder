@@ -342,11 +342,30 @@ export async function setReviews(db, body) {
   return { updated: hit, state };
 }
 
+// 「まとめて」のプリセット(よく使う絞り込み)。{ name, conds: 条件の k, q: 言葉, mode: and / or }
+const PRESET_MAX = 20;
+const PRESET_CONDS = ["far", "afar", "busy"];
+function cleanPresets(list) {
+  if (!Array.isArray(list)) return null;
+  const out = [];
+  for (const p of list.slice(0, PRESET_MAX)) {
+    if (!p || typeof p !== "object") return null;
+    const name = String(p.name || "").trim().slice(0, 20);
+    const conds = Array.isArray(p.conds) ? [...new Set(p.conds.filter((c) => PRESET_CONDS.includes(c)))] : [];
+    const q = String(p.q || "").trim().slice(0, 100);
+    const mode = p.mode === "or" ? "or" : "and";
+    if (!name || (!conds.length && !q)) return null;
+    out.push({ name, conds, q, mode });
+  }
+  return out;
+}
+
 export async function getSettings(db) {
   const row = await db.prepare("SELECT value FROM meta WHERE key = ?").bind(SETTINGS_KEY).first();
   const saved = parseJson(row?.value, {});
   const out = { ...DEFAULT_SETTINGS };
   for (const k of Object.keys(DEFAULT_SETTINGS)) if (SWIPE_CHOICES.includes(saved[k])) out[k] = saved[k];
+  out.bulk_presets = cleanPresets(saved.bulk_presets) || [];
   return out;
 }
 
@@ -356,6 +375,11 @@ export async function saveSettings(db, body) {
     if (body[k] === undefined) continue;
     if (!SWIPE_CHOICES.includes(body[k])) throw new RangeError(k);
     next[k] = body[k];
+  }
+  if (body.bulk_presets !== undefined) {
+    const presets = cleanPresets(body.bulk_presets);
+    if (!presets) throw new RangeError("bulk_presets");
+    next.bulk_presets = presets;
   }
   await db
     .prepare(`INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?)
