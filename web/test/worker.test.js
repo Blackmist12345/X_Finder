@@ -69,9 +69,16 @@ test("一覧は対象の案件を点数順に、直近の分だけ返す", async
   const cases = await listCases(db, new URLSearchParams());
   assert.deepEqual(cases.map((c) => c.id), ["2", "1"]);
   assert.equal(cases[0].critical, true);
-  assert.equal(cases[1].near, true);
+  assert.equal(cases[1].shoot_kanto, true);
   assert.equal(cases[1].others, 1);
   assert.equal(cases[1].username, "client");
+});
+
+test("撮影場所は依頼主のプロフィールから推定した都道府県を数えない(活動地域とは別)", async () => {
+  db.raw.prepare("UPDATE judgments SET prefecture_source = 'プロフィール' WHERE post_id = '1'").run();
+  const c = (await listCases(db, new URLSearchParams())).find((x) => x.id === "1");
+  assert.equal(c.shoot_kanto, false);
+  assert.equal(c.shoot_far, false);
 });
 
 test("プロフィールのリンク先から読んだ年齢・活動地域・性別を出す", async () => {
@@ -169,7 +176,7 @@ test("データベースの中身: 表ごとの件数と、新しい順の行・
 test("スワイプの設定は初期値があり、変えると保存される", async () => {
   const first = await getSettings(db);
   assert.deepEqual([first.swipe_right, first.swipe_left], ["hold", "delete"]);
-  assert.deepEqual(first.bulk_presets.map((p) => p.name), ["予定かぶり", "首都圏以外", "遠方(場所か活動地域)", "予定かぶりか首都圏以外"]); // 最初から入っている
+  assert.deepEqual(first.bulk_presets.map((p) => p.name), ["予定かぶり", "撮影場所が関東以外", "遠方(撮影場所か活動地域)", "予定かぶりか撮影場所が関東以外"]); // 最初から入っている
   const saved = await saveSettings(db, { swipe_left: "accepted" });
   assert.equal(saved.swipe_left, "accepted");
   assert.equal(saved.bulk_presets.length, 4);
@@ -193,7 +200,7 @@ test("前からプリセットを持っている人にも、最初のプリセ�
   await db.prepare("INSERT OR REPLACE INTO meta (key, value, updated_at) VALUES ('finder_settings', ?, '2026-10-01')")
     .bind(JSON.stringify({ swipe_right: "hold", swipe_left: "delete", bulk_presets: [{ name: "首都圏以外", conds: ["far"], q: "", mode: "and" }, { name: "ブルアカ", conds: [], q: "ブルアカ", mode: "and" }] })).run();
   const names = (await getSettings(db)).bulk_presets.map((p) => p.name);
-  assert.deepEqual(names, ["予定かぶり", "遠方(場所か活動地域)", "予定かぶりか首都圏以外", "首都圏以外", "ブルアカ"]); // 同じ名前は足さない
+  assert.deepEqual(names, ["予定かぶり", "遠方(撮影場所か活動地域)", "予定かぶりか撮影場所が関東以外", "撮影場所が関東以外", "ブルアカ"]); // 前の名前は新しい名前にし、同じ名前は足さない
   await saveSettings(db, { bulk_presets: [{ name: "ブルアカ", conds: [], q: "ブルアカ" }] });
   assert.deepEqual((await getSettings(db)).bulk_presets.map((p) => p.name), ["ブルアカ"]); // 一度保存したら、消したものは戻らない
 });

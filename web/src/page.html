@@ -387,7 +387,8 @@ header.top.slim .tab .c{font-size:17px}
 </div>
 
 <script>
-const PRESETS=[{k:"all",t:"すべて"},{k:"crit",t:"クリティカル"},{k:"near",t:"首都圏"},{k:"rejected",t:"対象外(確認用)",cls:"warn"}];
+// 場所は2つに分けて持つ: 撮影場所(スタジオ・会場の都道府県)と、依頼主の活動地域(プロフィールから)
+const PRESETS=[{k:"all",t:"すべて"},{k:"crit",t:"クリティカル"},{k:"shoot",t:"撮影場所が関東"},{k:"area",t:"活動地域が関東"},{k:"rejected",t:"対象外(確認用)",cls:"warn"}];
 const TYPES=["コスプレ撮影","コスパフォ","踊ってみた","ポートレート","イベント","その他"];
 const ROLE={mention:"メンション",quoted:"引用元の投稿者",reply_to:"リプライ先",image:"画像から"};
 // カードの状態。新着=集めた案件が最初に入る(開いても変わらない。まだ開いていないカードには青い点) / 受注中=引き受けた案件(2週間を過ぎても残る)
@@ -399,7 +400,7 @@ const SWIPE_LABEL={hold:"📌 保留",delete:"削除予定",accepted:"受注中"
 let settings={swipe_right:"hold",swipe_left:"delete",bulk_presets:[]};
 let state={preset:"all",types:new Set(),sort:"score",tab:"new",day:null}; // day はカレンダーで選んだ撮影日(保存しない)
 let cases=[],loadedView=null;
-try{const s=JSON.parse(localStorage.getItem("finder-ui")||"null");if(s){state.preset=s.preset||"all";state.sort=s.sort||"score";state.types=new Set(s.types||[]);state.tab=TABS.some(t=>t.k===s.tab)?s.tab:"new"}}catch(e){}
+try{const s=JSON.parse(localStorage.getItem("finder-ui")||"null");if(s){state.preset=s.preset==="near"?"shoot":PRESETS.some(p=>p.k===s.preset)?s.preset:"all";state.sort=s.sort||"score";state.types=new Set(s.types||[]);state.tab=TABS.some(t=>t.k===s.tab)?s.tab:"new"}}catch(e){}
 const save=()=>{try{localStorage.setItem("finder-ui",JSON.stringify({preset:state.preset,sort:state.sort,types:[...state.types],tab:state.tab}))}catch(e){}};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -520,7 +521,8 @@ function renderControls(){
 function matching(){
   return cases.filter(c=>{
     if(state.preset==="crit"&&!c.critical)return false;
-    if(state.preset==="near"&&!c.near)return false;
+    if(state.preset==="shoot"&&!c.shoot_kanto)return false;
+    if(state.preset==="area"&&!c.areas_kanto)return false;
     if(state.types.size&&!state.types.has(c.case_type))return false;
     if(state.day&&!caseDates(c).includes(state.day))return false;
     return true});
@@ -543,11 +545,13 @@ function render(){
   $("list").innerHTML=a.length?a.map(card).join(""):`<div class="empty">${state.day?`${dayLabel(state.day)} が撮影日の案件は、このタブにはありません。`:emptyMsg}</div>`;
   prefetchTop(a);
 }
-function place(c){return c.prefecture&&c.prefecture!=="不明"?c.prefecture:"場所不明"}
+// 撮影場所。前の判定で依頼主のプロフィールから推定した都道府県は、撮影場所としては「場所不明」にする
+const shootKnown=c=>!!c.prefecture&&c.prefecture!=="不明"&&c.prefecture_source!=="プロフィール";
+function place(c){return shootKnown(c)?c.prefecture:"場所不明"}
 // 都道府県をどこから判断したか。本文以外は、カードでも分かるように短く付ける
-const PLACE_FROM={"本文":"本文から","イベント表":"イベント表から","画像":"画像から","プロフィール":"プロフィールから推定"};
-function placeShort(c){const k=c.prefecture&&c.prefecture!=="不明"?c.prefecture_source:"";return k&&k!=="本文"&&PLACE_FROM[k]?`${place(c)}・${k==="プロフィール"?"推定":k==="イベント表"?"イベント":k}`:place(c)}
-function placeFrom(c){const k=c.prefecture&&c.prefecture!=="不明"?c.prefecture_source:"";return PLACE_FROM[k]?`(${PLACE_FROM[k]})`:""}
+const PLACE_FROM={"本文":"本文から","イベント表":"イベント表から","画像":"画像から"};
+function placeShort(c){const k=shootKnown(c)?c.prefecture_source:"";return k&&k!=="本文"&&PLACE_FROM[k]?`${place(c)}・${k==="イベント表"?"イベント":k}`:place(c)}
+function placeFrom(c){const k=shootKnown(c)?c.prefecture_source:"";return PLACE_FROM[k]?`(${PLACE_FROM[k]})`:""}
 // プロフィールから読み取った年齢と活動地域(依頼主の名前の横に小さく出す)
 const areaText=c=>(c.areas||[]).slice(0,2).join("・")+((c.areas||[]).length>2?" ほか":"");
 // どこから読んだか。プロフィールに書いてない項目だけリンク先(Litlink など)から読む
@@ -865,7 +869,7 @@ const HELP=[
   <p>点数は Notion の「点数表」(種類・都道府県)と減点語で決まり、プラスの点のときは依頼主の FF率(フォロワー数÷フォロー数)を倍率として掛けます(0.5〜1.5倍。幅は【7】基本設定で変えられる)。内訳は詳細で見られます。</p>
   <p><b>REC</b> はクリティカル(合計点が基準以上か、Notion の「クリティカル条件」に当たった案件)の印で、カードの枠も赤くなります。日程の横の「予定あり / 空き / 休み」は Google カレンダーとの照合です。依頼主の名前の横には、プロフィールから読んだ性別・年齢・活動地域が出ます(未成年は赤)。</p>
   <p>一番上で下に引っぱると再読み込みします。下へスクロールすると上部がたたまれます。</p>`],
- ["絞り込み・並び順・日付",`<ul><li><b>すべて / クリティカル / 首都圏 / 対象外</b>: 「首都圏」は東京・神奈川・埼玉・千葉の案件、「対象外」は AI が募集ではないと判断したポストです。</li>
+ ["絞り込み・並び順・日付",`<ul><li><b>すべて / クリティカル / 撮影場所が関東 / 活動地域が関東 / 対象外</b>: 場所は2つに分けて持っています。「撮影場所」はスタジオやイベント会場の都道府県(本文・イベント表・画像から)、「活動地域」は依頼主のプロフィールやリンク先に書かれた地域です。関東は東京・神奈川・埼玉・千葉・茨城・栃木・群馬です。「対象外」は AI が募集ではないと判断したポストです。</li>
   <li><b>種類</b>(コスプレ撮影など)は複数選べます。</li>
   <li><b>日付</b>: 月のカレンダーが開き、日ごとに「その日が撮影日の案件の数」(青い数字、今のタブ・絞り込みで数える)と Google カレンダーの予定(休みは緑)が出ます。日をタップすると、その日が撮影日の案件だけを一覧に出します。上の「解除」で戻ります。予定は今日から120日先まで出ます。</li></ul>`],
  ["案件の詳細",`<p>カードをタップすると詳細が開きます。本文をタップすると X アプリでそのポストが開きます。一番上で下に引っぱると閉じます。</p>
@@ -874,12 +878,12 @@ const HELP=[
   <p>依頼主の年齢・活動地域・性別は、プロフィールに書いてある書き方(18↓、30↑、成人済み、関西、♀ など)から読みます。プロフィールに書いてないときは、プロフィールのリンク先(Litlink など)からも読み、「リンク先から」と出ます。</p>`],
  ["スワイプ",`<p>カードを左右にスワイプすると、設定で選んだ状態を付けられます(初期値は右=保留、左=削除予定)。その状態のカードをもう一度同じ向きにスワイプすると外れて、新着に戻ります。</p>`],
  ["まとめて状態を変える",`<p>ホームの「まとめて」から、今のタブ(と絞り込み)の案件を、条件や言葉で絞ってまとめて状態を変えられます。選んだカードをどうするか(受注中・保留・削除予定)のボタンは上に並んでいて、スクロールしても残ります。変えたあとに出る「元に戻す」で戻せます。</p>
-  <ul><li><b>首都圏以外</b>: 東京・神奈川・埼玉・千葉以外の都道府県の案件(場所不明は入りません)。</li>
-  <li><b>活動地域が首都圏以外</b>: 依頼主のプロフィールに書かれた活動地域が首都圏・関東以外の案件(書かれていない人は入りません)。</li>
+  <ul><li><b>撮影場所が関東以外</b>: スタジオや会場が関東以外の都道府県の案件(場所不明は入りません)。</li>
+  <li><b>活動地域が関東以外</b>: 依頼主のプロフィールに書かれた活動地域が関東以外の案件(書かれていない人は入りません)。</li>
   <li><b>予定あり</b>: カレンダーで撮影日に予定がある案件(休みの予定は数えません)。</li>
   <li><b>言葉</b>: 作品名・イベント名・場所・本文のどれかに入っていれば当たります。空白で区切ると、それぞれを1つの条件として数えます。</li>
   <li><b>すべてに当たる(AND)</b>: 選んだ条件と言葉の全部に当たる案件。<b>どれかに当たる(OR)</b>: どれか1つにでも当たる案件。</li>
-  <li><b>プリセット</b>: 「＋ 今の条件を保存」で、今の条件・言葉・AND/OR に名前を付けて保存し、次からタップ1回で呼び出せます。× で消せます。プリセットはどの端末でも同じです。最初から「予定かぶり」「首都圏以外」「遠方(場所か活動地域)」「予定かぶりか首都圏以外」が入っています(いらなければ消せます)。</li></ul>`],
+  <li><b>プリセット</b>: 「＋ 今の条件を保存」で、今の条件・言葉・AND/OR に名前を付けて保存し、次からタップ1回で呼び出せます。× で消せます。プリセットはどの端末でも同じです。最初から「予定かぶり」「撮影場所が関東以外」「遠方(撮影場所か活動地域)」「予定かぶりか撮影場所が関東以外」が入っています(いらなければ消せます)。</li></ul>`],
  ["Google カレンダーのつなぎ方",`<p>Google カレンダーの「設定」→ 予定表を選ぶ →「iCal 形式の非公開 URL」をコピーし、GitHub のリポジトリの Settings → Secrets and variables → Actions に、名前 GCAL_ICS_URL で登録します(チャットには貼らないでください)。次に X Finder を公開し直すと使えます。複数の予定表は改行で区切って入れられます。</p>
   <p>予定は X Finder の中で見るだけで、保存しません。予定名に「休み」「有給」などの言葉(Notion の基本設定「休みとみなす予定の言葉」)が入っている予定は、予定ありに数えず「休み」と出します。</p>`],
  ["設定",`<ul><li><b>画面の色・文字のフォント</b>: この端末に保存します。数字(点数・件数)の書体は変わりません。</li>
@@ -899,8 +903,8 @@ function openHelp(){
 let bulk=null; // { base: 対象の案件, q: 言葉, conds: Set(条件の k), mode: and / or, picked: Set(id) }
 // 言葉と一緒に使える決まった条件。mode=and は全部に当たるもの、or はどれかに当たるもの
 const BULK_CONDS=[
-  {k:"far",t:"首都圏以外",f:c=>!!c.prefecture&&c.prefecture!=="不明"&&!c.near},
-  {k:"afar",t:"活動地域が首都圏以外",f:c=>!!c.areas_far},
+  {k:"far",t:"撮影場所が関東以外",f:c=>!!c.shoot_far},
+  {k:"afar",t:"活動地域が関東以外",f:c=>!!c.areas_far},
   {k:"busy",t:"予定あり",f:c=>!!calCheck(c)?.busy,show:()=>cal.configured&&!cal.error},
 ];
 // b はボタンの短い名前(3つを1行に、ホームのタブと同じ順で並べる)

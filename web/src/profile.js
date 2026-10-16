@@ -119,8 +119,10 @@ export function parseAreas(text) {
   return found.sort((a, b) => a.at - b.at).map((f) => f.name);
 }
 
-// 首都圏(東京・神奈川・埼玉・千葉)に関係する地域。関東は首都圏を含むので、こちらに入れる
-const NEAR_AREAS = ["東京都", "神奈川県", "埼玉県", "千葉県", "首都圏", "関東"];
+// 関東(1都6県)。撮影場所と活動地域のどちらも、関東かどうかで分ける
+export const KANTO = ["東京都", "神奈川県", "埼玉県", "千葉県", "茨城県", "栃木県", "群馬県"];
+// 活動地域として関東に入るもの(首都圏は関東の中なので、こちらに入れる)
+const KANTO_AREAS = [...KANTO, "首都圏", "関東"];
 
 // プロフィールに書いてない項目だけ、リンク先のページ(Litlink など)から読み取った結果を使う。
 // link は収集のとき finder/link_step.py がリンク先から読んだ結果 { age, areas, gender }(ページの文字は保存しない)。
@@ -145,7 +147,8 @@ export function profileInfo(user) {
     age_from: ageFrom,
     areas_from: areasFrom,
     gender_from: genderFrom,
-    areas_far: areas.length > 0 && !areas.some((a) => NEAR_AREAS.includes(a)),
+    areas_kanto: areas.some((a) => KANTO_AREAS.includes(a)),
+    areas_far: areas.length > 0 && !areas.some((a) => KANTO_AREAS.includes(a)),
   };
 }
 

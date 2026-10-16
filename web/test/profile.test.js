@@ -31,6 +31,9 @@ test("活動地域: 地方・都道府県・市の名前を読む", () => {
 
 test("首都圏以外の判定: 首都圏や関東が入っていれば外す", () => {
   assert.equal(profileInfo({ location: "大阪" }).areas_far, true);
+  assert.equal(profileInfo({ location: "茨城" }).areas_far, false); // 関東(1都6県)は遠方にしない
+  assert.equal(profileInfo({ location: "茨城" }).areas_kanto, true);
+  assert.equal(profileInfo({ location: "大阪" }).areas_kanto, false);
   assert.equal(profileInfo({ location: "関東/関西" }).areas_far, false);
   assert.equal(profileInfo({ description: "撮影大好き" }).areas_far, false);
   assert.deepEqual(profileInfo({ name: "あいう@18↓", description: "", location: "" }).age, { label: "18↓", minor: true });

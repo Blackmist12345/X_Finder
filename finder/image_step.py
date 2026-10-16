@@ -135,7 +135,7 @@ def apply_place(d1, post_id, found, config):
     """判定で場所が分からなかった(プロフィールから推定・不明)案件を、画像の場所に置き換えて採点し直す。置き換えたら True。"""
     rows = d1.query("SELECT j.raw_json, j.prefecture_source, j.place, p.text, p.penalty_json FROM judgments j "
                     "JOIN posts p ON p.id = j.post_id WHERE j.post_id = ? AND j.reject_reason IS NULL", [post_id])
-    if not rows or rows[0]["prefecture_source"] not in ("プロフィール", judge.UNKNOWN_PLACE, None):
+    if not rows or rows[0]["prefecture_source"] not in (judge.PROFILE_SOURCE, judge.UNKNOWN_PLACE, None):
         return False
     row = rows[0]
     result = json.loads(row["raw_json"] or "{}")

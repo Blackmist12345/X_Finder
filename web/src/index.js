@@ -3,13 +3,18 @@
 // Cloudflare Access を通った人だけが見られる(auth.js)。
 import { verifyAccess } from "./auth.js";
 import { getCalendar, offWords } from "./calendar.js";
-import { profileInfo } from "./profile.js";
+import { KANTO, profileInfo } from "./profile.js";
 import page from "./page.html";
 import icon180 from "./icons/icon-180.png";
 import icon192 from "./icons/icon-192.png";
 import icon512 from "./icons/icon-512.png";
 
-const NEAR = ["東京都", "神奈川県", "埼玉県", "千葉県"];
+// 撮影場所の都道府県。依頼主のプロフィールから推定したもの(前の判定の分)は撮影場所に数えない(活動地域は別に持つ)
+const shootPrefecture = (r) => (r.prefecture && r.prefecture !== "不明" && r.prefecture_source !== "プロフィール" ? r.prefecture : null);
+const shootArea = (r) => {
+  const pref = shootPrefecture(r);
+  return { shoot_kanto: !!pref && KANTO.includes(pref), shoot_far: !!pref && !KANTO.includes(pref) };
+};
 const MAX_LIST = 300;
 // カードの状態。new=新着 / accepted=受注中 / hold=保留 / delete=削除予定。行がなければ新着(まだ開いていない)。
 // 開いたかどうかは状態とは別に opened_at で持つ(新着のうち、まだ開いていないカードに青い点を付ける)
@@ -127,7 +132,7 @@ export async function listCases(db, params) {
     ...profileInfo({ name: r.name, description, location, link: parseJson(link_found, null) }),
     critical: !!r.critical,
     opened: !!r.opened,
-    near: NEAR.includes(r.prefecture),
+    ...shootArea(r),
     media: parseJson(media_json, []),
   }));
 }
@@ -201,7 +206,7 @@ export async function getCase(db, id) {
     ...profileInfo({ ...row, link: parseJson(link_found, null) }),
     critical: !!row.critical,
     opened: !!row.opened,
-    near: NEAR.includes(row.prefecture),
+    ...shootArea(row),
     media: parseJson(media_json, []),
     score_detail: parseJson(score_json, []),
     people: [...merged.values()],
@@ -348,10 +353,12 @@ const PRESET_MAX = 20;
 // 前から自分のプリセットがある人にも一度だけ足す(presets_seeded で覚える)
 const DEFAULT_PRESETS = [
   { name: "予定かぶり", conds: ["busy"], q: "", mode: "and" },
-  { name: "首都圏以外", conds: ["far"], q: "", mode: "and" },
-  { name: "遠方(場所か活動地域)", conds: ["far", "afar"], q: "", mode: "or" },
-  { name: "予定かぶりか首都圏以外", conds: ["busy", "far"], q: "", mode: "or" },
+  { name: "撮影場所が関東以外", conds: ["far"], q: "", mode: "and" },
+  { name: "遠方(撮影場所か活動地域)", conds: ["far", "afar"], q: "", mode: "or" },
+  { name: "予定かぶりか撮影場所が関東以外", conds: ["busy", "far"], q: "", mode: "or" },
 ];
+// 「首都圏」から「関東」に分け直したときの、前の初期プリセットの名前
+const OLD_PRESET_NAMES = { "首都圏以外": "撮影場所が関東以外", "遠方(場所か活動地域)": "遠方(撮影場所か活動地域)", "予定かぶりか首都圏以外": "予定かぶりか撮影場所が関東以外" };
 const PRESET_CONDS = ["far", "afar", "busy"];
 function cleanPresets(list) {
   if (!Array.isArray(list)) return null;
@@ -373,7 +380,8 @@ export async function getSettings(db) {
   const saved = parseJson(row?.value, {});
   const out = { ...DEFAULT_SETTINGS };
   for (const k of Object.keys(DEFAULT_SETTINGS)) if (SWIPE_CHOICES.includes(saved[k])) out[k] = saved[k];
-  const own = saved.bulk_presets === undefined ? [] : cleanPresets(saved.bulk_presets) || [];
+  const own = (saved.bulk_presets === undefined ? [] : cleanPresets(saved.bulk_presets) || [])
+    .map((p) => (OLD_PRESET_NAMES[p.name] ? { ...p, name: OLD_PRESET_NAMES[p.name] } : p));
   const add = saved.presets_seeded ? [] : DEFAULT_PRESETS.filter((d) => !own.some((p) => p.name === d.name));
   out.bulk_presets = [...add.map((p) => ({ ...p })), ...own].slice(0, PRESET_MAX);
   return out;

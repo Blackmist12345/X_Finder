@@ -48,7 +48,8 @@ PREFECTURES = [
 UNKNOWN_PLACE = "不明"
 EVENT_SOURCE = "イベント表"
 IMAGE_SOURCE = "画像"  # 判定のあとに image_step.py が画像から読んだとき
-PLACE_SOURCES = ["本文", EVENT_SOURCE, "プロフィール", UNKNOWN_PLACE]
+PROFILE_SOURCE = "プロフィール"  # 前の判定の分だけ。撮影場所はプロフィールから決めない(活動地域は画面で別に読む)
+PLACE_SOURCES = ["本文", EVENT_SOURCE, UNKNOWN_PLACE]
 
 SCHEMA = {
     "type": "ARRAY",
@@ -96,12 +97,12 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
   それを使ってキャラクター名を works に書く(例: 「にじさんじ 〇〇」)。同じ絵文字に候補が何人もあるときは、本文の流れから選ぶ。
   ただの飾りとして使われている絵文字なら無視する。
 - excluded_work: works が下の「除外作品」のどれかに当たれば、その除外作品名(略称・キャラクター名からの判断も含む)。当たらなければ空文字。
-- prefecture: 撮影する場所の都道府県。次の順で判断する。
+- prefecture: 撮影する場所(スタジオ・会場・イベントの開催地)の都道府県。次の順で判断する。
   1. 本文・引用元の本文に書かれた地名・会場名・駅名
   2. ポストに「イベントの意味」が付いていれば、そこに書かれた開催地(「回ごとにちがう」なら本文から判断する)
-  3. 投稿者プロフィールの地域・自己紹介に書かれた活動地域
-  どれでも分からなければ「不明」。全国のポストが混ざっているので、推測で東京などにしないこと。
-- prefecture_source: prefecture をどこから判断したか(本文 / イベント表 / プロフィール / 不明)。
+  どちらでも分からなければ「不明」。投稿者プロフィールの地域・自己紹介は依頼主の活動地域で、撮影場所とは別なので使わない。
+  全国のポストが混ざっているので、推測で東京などにしないこと。
+- prefecture_source: prefecture をどこから判断したか(本文 / イベント表 / 不明)。
 - place: 会場名やイベント名・地域(本文に書かれていれば。イベント表から分かった会場でもよい。なければ空文字)。
 - dates: 撮影日や候補日(なければ空文字)。日付は「10/18(土)」のように月/日(曜日)で書き、何日もあれば「、」で並べ、続く日は「10/18(土)〜19(日)」と書く。
   「明日」「明後日」「今週の土曜」「来週の日曜」「今週末」「来週末」「3日後」のように日付が数字で書かれていないときは、
@@ -311,6 +312,8 @@ def normalize(result):
         if pref and not result.get("place"):
             result["place"] = pref  # 「関東」などは場所の欄に残す
         result["prefecture"], result["prefecture_source"] = UNKNOWN_PLACE, UNKNOWN_PLACE
+    elif result.get("prefecture_source") == PROFILE_SOURCE:
+        result["prefecture"], result["prefecture_source"] = UNKNOWN_PLACE, UNKNOWN_PLACE  # プロフィールからの推定は撮影場所にしない
     elif result.get("prefecture_source") not in PLACE_SOURCES:
         result["prefecture_source"] = "本文" if pref != UNKNOWN_PLACE else UNKNOWN_PLACE
     if result.get("case_type") not in TYPES:
