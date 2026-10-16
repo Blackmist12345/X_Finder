@@ -306,3 +306,11 @@ def test_items_carry_post_time(make_tweet):
     tw = make_tweet("1")
     items = judge_step.items_from_tweets([tw], {})
     assert items[0]["created_at"]
+
+
+def test_profile_is_not_used_for_shoot_place():
+    # 依頼主の活動地域は撮影場所とは別に持つので、AI がプロフィールから決めた都道府県は不明にする
+    r = judge.normalize(ai_result("1", prefecture="大阪府", prefecture_source="プロフィール"))
+    assert (r["prefecture"], r["prefecture_source"]) == ("不明", "不明")
+    assert "プロフィール" not in judge.PLACE_SOURCES
+    assert "使わない" in judge.RULES
