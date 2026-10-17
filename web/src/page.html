@@ -218,7 +218,6 @@ header.top.slim .tab .c{font-size:17px}
 .pill.hold{background:var(--warn-soft);color:var(--warn);font-weight:500}
 .pill.del{background:var(--rec-soft);color:var(--rec)}
 .pill.acc{background:var(--ok-soft);color:var(--ok);font-weight:500}
-.card.unread .title::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:2px}
 .detail-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:20px}
 .detail-actions .btn{padding:13px 4px;font-size:14px;white-space:nowrap}
 /* 保留・削除予定はタブと同じ色、ブラックリストは黒と赤 */
@@ -391,7 +390,7 @@ header.top.slim .tab .c{font-size:17px}
 const PRESETS=[{k:"all",t:"すべて"},{k:"crit",t:"クリティカル"},{k:"shoot",t:"撮影場所が関東"},{k:"area",t:"活動地域が関東"},{k:"female",t:"女性"},{k:"male",t:"男性"},{k:"rejected",t:"対象外(確認用)",cls:"warn"}];
 const TYPES=["コスプレ撮影","コスパフォ","踊ってみた","ポートレート","イベント","その他"];
 const ROLE={mention:"メンション",quoted:"引用元の投稿者",reply_to:"リプライ先",image:"画像から"};
-// カードの状態。新着=集めた案件が最初に入る(開いても変わらない。まだ開いていないカードには青い点) / 受注中=引き受けた案件(2週間を過ぎても残る)
+// カードの状態。新着=集めた案件が最初に入る(開いても変わらない) / 受注中=引き受けた案件(2週間を過ぎても残る)
 // 保留=ピン留め(2週間を過ぎても残る) / 削除予定=投稿日から14日で消える
 const TABS=[{k:"new",t:"新着"},{k:"accepted",t:"受注中"},{k:"hold",t:"保留"},{k:"delete",t:"削除予定"}];
 const DELETE_DAYS=14;
@@ -568,7 +567,7 @@ function clientTags(c){
 }
 function card(c){
   const rejected=state.preset==="rejected";
-  return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card ${c.critical?"crit":""} ${c.review==="new"&&!c.opened?"unread":""}" data-id="${esc(c.id)}">
+  return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card ${c.critical?"crit":""}" data-id="${esc(c.id)}">
    <div class="meta">${reviewPill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(placeShort(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
    <div class="score">${rejected?"":`<span class="n">${c.score==null?"—":Math.round(c.score)}</span><span class="l">点</span>`}</div>
    <div class="title">${esc(c.summary||"(要約なし)")}</div>
@@ -686,11 +685,9 @@ async function openSheet(id,cardEl){
 async function openSheetNow(id,cardEl){
   const base=cases.find(x=>x.id===id);
   const p=fetchDetail(id);p.catch(()=>{});
-  // 開いても状態は変えず、「開いた」だけ記録する(新着の青い点が消える)
-  if(base&&!base.opened){base.opened=true;postReview(id,{opened:true}).catch(()=>{base.opened=false})}
-  const fresh=d=>{const c={...d,opened:true};const now=cases.find(x=>x.id===id);
+  // 開いても状態は変えない
+  const fresh=d=>{const c={...d};const now=cases.find(x=>x.id===id);
     if(now)c.review=now.review; // 状態は一覧の最新を使う(ボタンで変えた分)
-    else if(!d.opened&&!base)postReview(id,{opened:true}).catch(()=>{});
     return c};
   // 中身が全部そろってから開く(開いたあとに引用元・画像・点数の内訳などが足されて表示がずれないように)。
   // 待っている間は押したカードを薄くし、少しかかるときはカードに読み込み中の印を出す
@@ -864,7 +861,7 @@ function openSettings(){
 // ---- つかいかた(詳しい仕様と使い方はここに集める) ----
 const HELP=[
  ["ホームの見かた",`<p>カードは点数の高い順に並びます(並び順は変えられます)。上の4つのタブで、カードの状態ごとに分けて見られます。</p>
-  <ul><li><b>新着</b>: 集めた案件が最初に入ります。開いても変わりません。まだ開いていないカードには青い点が付きます。投稿から2週間で一覧から消えます。</li>
+  <ul><li><b>新着</b>: 集めた案件が最初に入ります。開いても変わりません。投稿から2週間で一覧から消えます。</li>
   <li><b>受注中</b>: 引き受けた案件です。2週間を過ぎても残り、撮影日が過ぎると「撮影日を過ぎました」と出ます。</li>
   <li><b>保留</b>: あとで見直したい案件です。2週間を過ぎても残ります。</li>
   <li><b>削除予定</b>: 投稿日から14日で消えます。</li></ul>
