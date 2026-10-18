@@ -3,7 +3,7 @@
 // Cloudflare Access を通った人だけが見られる(auth.js)。
 import { verifyAccess } from "./auth.js";
 import { getCalendar, offWords } from "./calendar.js";
-import { KANTO, profileInfo } from "./profile.js";
+import { KANTO, METRO, profileInfo } from "./profile.js";
 import page from "./page.html";
 import icon180 from "./icons/icon-180.png";
 import icon192 from "./icons/icon-192.png";
@@ -13,11 +13,11 @@ import icon512 from "./icons/icon-512.png";
 const shootPrefecture = (r) => (r.prefecture && r.prefecture !== "不明" && r.prefecture_source !== "プロフィール" ? r.prefecture : null);
 const shootArea = (r) => {
   const pref = shootPrefecture(r);
-  return { shoot_kanto: !!pref && KANTO.includes(pref), shoot_far: !!pref && !KANTO.includes(pref) };
+  return { shoot_kanto: !!pref && KANTO.includes(pref), shoot_far: !!pref && !KANTO.includes(pref), shoot_metro: !!pref && METRO.includes(pref) };
 };
 const MAX_LIST = 300;
 // カードの状態。new=新着 / accepted=受注中 / hold=保留 / delete=削除予定。行がなければ新着(まだ開いていない)。
-// 開いたかどうかは状態とは別に opened_at で持つ(新着のうち、まだ開いていないカードに青い点を付ける)
+// 開いたかどうかは状態とは別に opened_at で持つ(今の画面では使っていない)
 const REVIEW_STATES = ["new", "accepted", "hold", "delete"];
 // 前の名前(確認済み・未確認)で届いたら新着として扱う
 const STATE_ALIASES = { seen: "new", unread: "new" };

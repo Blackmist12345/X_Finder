@@ -123,6 +123,10 @@ button.cost::after{content:" ›";color:var(--muted)}
 .chip.warn[aria-pressed="true"]{background:var(--warn);border-color:var(--warn);color:#fff}
 .chip:focus-visible,.card:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .row2{display:flex;gap:8px;margin-top:8px;align-items:center}
+.frow{display:flex;align-items:center;gap:8px;margin-top:8px}
+.frow .scroller{margin-top:0;flex:1;min-width:0}
+.flabel{flex:none;width:3.2em;font-size:12px;font-weight:700;color:var(--muted)}
+#q{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--fg);padding:5px 9px;font:inherit;font-size:16px}
 select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:10px;padding:6px 8px}
 #sort{flex:none;width:6.6em;padding:5px 4px;font-size:16px}
 .icon-btn{border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:10px;padding:5px 9px;font:inherit;font-size:13px;cursor:pointer}
@@ -359,9 +363,10 @@ header.top.slim .tab .c{font-size:17px}
     </div>
     <div class="tabs" id="tabs" role="group" aria-label="確認の状態"></div>
     <div class="filters" id="filters"><div>
-    <div class="scroller" id="presets" role="group" aria-label="絞り込み"></div>
+    <div class="frow"><span class="flabel">依頼主</span><div class="scroller" id="fClient" role="group" aria-label="依頼主の絞り込み"></div></div>
+    <div class="frow"><span class="flabel">案件</span><div class="scroller" id="fCase" role="group" aria-label="案件の絞り込み"></div></div>
     <div class="row2">
-      <div class="scroller" id="types" role="group" aria-label="種類" style="margin-top:0;flex:1;min-width:0"></div>
+      <input type="search" id="q" placeholder="作品など" aria-label="作品・イベント名・場所で絞る" enterkeyhint="search">
       <select id="sort" aria-label="並び順">
         <option value="score">点数順</option>
         <option value="new">新着順</option>
@@ -386,8 +391,15 @@ header.top.slim .tab .c{font-size:17px}
 </div>
 
 <script>
-// 場所は2つに分けて持つ: 撮影場所(スタジオ・会場の都道府県)と、依頼主の活動地域(プロフィールから)
-const PRESETS=[{k:"all",t:"すべて"},{k:"crit",t:"クリティカル"},{k:"shoot",t:"撮影場所が関東"},{k:"area",t:"活動地域が関東"},{k:"female",t:"女性"},{k:"male",t:"男性"},{k:"rejected",t:"対象外(確認用)",cls:"warn"}];
+// ホームの絞り込みは「依頼主の情報」と「案件の情報」の2つに分ける。選んだものは全部に当たる案件だけ出す(AND)。
+// 場所は2つに分けて持つ: 撮影場所(スタジオ・会場の都道府県)と、依頼主の活動地域(プロフィールから)。4都県=東京・神奈川・埼玉・千葉
+const CLIENT_FILTERS=[{k:"female",t:"女性",f:c=>c.gender==="女性"},{k:"male",t:"男性",f:c=>c.gender==="男性"},
+  {k:"adult",t:"成人済み",f:c=>!!c.age&&c.age.minor===false},{k:"areaMetro",t:"活動地域が4都県",f:c=>!!c.areas_metro}];
+const CASE_FILTERS=[{k:"crit",t:"クリティカル",f:c=>!!c.critical},{k:"shootMetro",t:"撮影場所が4都県",f:c=>!!c.shoot_metro},
+  {k:"free",t:"予定なし",f:c=>!calCheck(c)?.busy,show:()=>cal.configured&&!cal.error}];
+const FILTERS=[...CLIENT_FILTERS,...CASE_FILTERS];
+// 最初はふだん見たい案件(クリティカル・撮影場所が4都県・成人済み・女性・予定なし)に絞っておく
+const DEFAULT_FILTERS=["crit","shootMetro","adult","female","free"];
 const TYPES=["コスプレ撮影","コスパフォ","踊ってみた","ポートレート","イベント","その他"];
 const ROLE={mention:"メンション",quoted:"引用元の投稿者",reply_to:"リプライ先",image:"画像から"};
 // カードの状態。新着=集めた案件が最初に入る(開いても変わらない) / 受注中=引き受けた案件(2週間を過ぎても残る)
@@ -397,10 +409,11 @@ const DELETE_DAYS=14;
 // 左右のスワイプで付ける状態(左上の「X Finder」から開く設定で変えられる。保存先は D1 なので、どの端末でも同じ)
 const SWIPE_LABEL={hold:"📌 保留",delete:"削除予定",accepted:"受注中",none:"何もしない"};
 let settings={swipe_right:"hold",swipe_left:"delete",bulk_presets:[]};
-let state={preset:"all",types:new Set(),sort:"score",tab:"new",day:null}; // day はカレンダーで選んだ撮影日(保存しない)
+let state={f:new Set(DEFAULT_FILTERS),rejected:false,types:new Set(),sort:"score",tab:"new",day:null,q:""}; // day(カレンダーで選んだ撮影日)と q(言葉)は保存しない
 let cases=[],loadedView=null;
-try{const s=JSON.parse(localStorage.getItem("finder-ui")||"null");if(s){state.preset=s.preset==="near"?"shoot":PRESETS.some(p=>p.k===s.preset)?s.preset:"all";state.sort=s.sort||"score";state.types=new Set(s.types||[]);state.tab=TABS.some(t=>t.k===s.tab)?s.tab:"new"}}catch(e){}
-const save=()=>{try{localStorage.setItem("finder-ui",JSON.stringify({preset:state.preset,sort:state.sort,types:[...state.types],tab:state.tab}))}catch(e){}};
+// 前の形(preset が1つだけ)で保存していた端末は、絞り込みだけ最初の状態から始める
+try{const s=JSON.parse(localStorage.getItem("finder-ui")||"null");if(s){if(s.v===2&&Array.isArray(s.f))state.f=new Set(s.f.filter(k=>FILTERS.some(x=>x.k===k)));state.sort=s.sort||"score";state.types=new Set(s.types||[]);state.tab=TABS.some(t=>t.k===s.tab)?s.tab:"new"}}catch(e){}
+const save=()=>{try{localStorage.setItem("finder-ui",JSON.stringify({v:2,f:[...state.f],sort:state.sort,types:[...state.types],tab:state.tab}))}catch(e){}};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmt=n=>n==null?"—":Number(n).toLocaleString("ja-JP");
@@ -493,7 +506,7 @@ function reviewPill(c){
   return "";
 }
 async function load(){
-  const view=state.preset==="rejected"?"rejected":"judged";
+  const view=state.rejected?"rejected":"judged";
   detailCache.clear();
   $("count").textContent="読み込み中…";
   try{
@@ -513,21 +526,25 @@ async function load(){
 function renderControls(){
   const n=k=>matching().filter(c=>c.review===k).length;
   $("tabs").innerHTML=TABS.map(t=>`<button class="tab" aria-pressed="${state.tab===t.k}" data-tab="${t.k}"><span class="c">${n(t.k)}</span><span class="t">${t.t}</span></button>`).join("");
-  $("presets").innerHTML=PRESETS.map(p=>`<button class="chip ${p.cls||""}" aria-pressed="${state.preset===p.k}" data-p="${p.k}">${p.t}</button>`).join("");
-  $("types").innerHTML=TYPES.map(t=>`<button class="chip" aria-pressed="${state.types.has(t)}" data-t="${t}">${t}</button>`).join("");
+  const chip=x=>`<button class="chip" aria-pressed="${state.f.has(x.k)}" data-f="${x.k}">${x.t}</button>`;
+  $("fClient").innerHTML=CLIENT_FILTERS.map(chip).join("");
+  $("fCase").innerHTML=CASE_FILTERS.filter(x=>!x.show||x.show()).map(chip).join("")
+    +TYPES.map(t=>`<button class="chip" aria-pressed="${state.types.has(t)}" data-t="${t}">${t}</button>`).join("")
+    +`<button class="chip warn" aria-pressed="${state.rejected}" data-rejected="1">対象外(確認用)</button>`;
   $("sort").value=state.sort;
 }
 function matching(){
+  const terms=state.q.toLowerCase().split(/[\s　]+/).filter(Boolean);
   return cases.filter(c=>{
-    if(state.preset==="crit"&&!c.critical)return false;
-    if(state.preset==="shoot"&&!c.shoot_kanto)return false;
-    if(state.preset==="area"&&!c.areas_kanto)return false;
-    if(state.preset==="female"&&c.gender!=="女性")return false;
-    if(state.preset==="male"&&c.gender!=="男性")return false;
+    // 対象外を見ているときは、依頼主と案件の絞り込みは使わない(対象外のポストには点数も依頼主の情報もそろっていない)
+    if(!state.rejected&&FILTERS.some(x=>state.f.has(x.k)&&(!x.show||x.show())&&!x.f(c)))return false;
+    if(terms.length&&!terms.every(w=>bulkText(c).includes(w)))return false;
     if(state.types.size&&!state.types.has(c.case_type))return false;
     if(state.day&&!caseDates(c).includes(state.day))return false;
     return true});
 }
+// 絞り込み(依頼主・案件・種類・言葉)を何か使っているか
+const narrowed=()=>!state.rejected&&state.f.size>0||state.types.size>0||!!state.q.trim();
 function filtered(){
   const a=matching().filter(c=>c.review===state.tab);
   const by={score:(x,y)=>(y.score??-1e9)-(x.score??-1e9),new:(x,y)=>(y.created_at||"").localeCompare(x.created_at||""),
@@ -538,12 +555,12 @@ function render(){
   renderControls();
   const a=filtered();
   const crit=cases.filter(c=>c.critical).length;
-  $("count").textContent=state.preset==="rejected"?`対象外 ${cases.length}件(直近2週間)`:`直近2週間 ${cases.length}件 ・ クリティカル ${crit}件`;
+  $("count").textContent=state.rejected?`対象外 ${cases.length}件(直近2週間)`:`直近2週間 ${cases.length}件 ・ クリティカル ${crit}件`;
   const emptyMsg={new:"新着の案件はありません。",accepted:"受注中の案件はありません。<br>引き受けた案件は、詳細の「受注中にする」でここに移せます。",hold:"保留の案件はありません。<br>あとで見直したい案件は、詳細の「保留にする」でここに残せます。",
     delete:`削除予定の案件はありません。<br>削除予定にした案件は、投稿日から${DELETE_DAYS}日で消えます。`}[state.tab];
   const db=$("dayBar");db.hidden=!state.day;
   db.innerHTML=state.day?`<span><b>${dayLabel(state.day)}</b> が撮影日の案件だけ表示中</span><button type="button" class="chip" data-day-clear="1">解除</button>`:"";
-  $("list").innerHTML=a.length?a.map(card).join(""):`<div class="empty">${state.day?`${dayLabel(state.day)} が撮影日の案件は、このタブにはありません。`:emptyMsg}</div>`;
+  $("list").innerHTML=a.length?a.map(card).join(""):`<div class="empty">${state.day?`${dayLabel(state.day)} が撮影日の案件は、このタブにはありません。`:emptyMsg}${narrowed()?"<br>上の絞り込みを外すと出てくるかもしれません。":""}</div>`;
   prefetchTop(a);
 }
 // 撮影場所。前の判定で依頼主のプロフィールから推定した都道府県は、撮影場所としては「場所不明」にする
@@ -566,7 +583,7 @@ function clientTags(c){
   return `${c.gender?`<span class="ctag">${esc(c.gender)}</span>`:""}${c.age?`<span class="ctag ${c.age.minor?"minor":""}">${esc(c.age.label)}</span>`:""}${(c.areas||[]).length?`<span class="ctag">${esc(areaText(c))}</span>`:""}`;
 }
 function card(c){
-  const rejected=state.preset==="rejected";
+  const rejected=state.rejected;
   return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card ${c.critical?"crit":""}" data-id="${esc(c.id)}">
    <div class="meta">${reviewPill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(placeShort(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
    <div class="score">${rejected?"":`<span class="n">${c.score==null?"—":Math.round(c.score)}</span><span class="l">点</span>`}</div>
@@ -875,12 +892,16 @@ const HELP=[
   <p>点数は Notion の「点数表」(種類・都道府県)と減点語で決まり、プラスの点のときは依頼主の FF率(フォロワー数÷フォロー数)を倍率として掛けます(0.5〜1.5倍。幅は【7】基本設定で変えられる)。内訳は詳細で見られます。</p>
   <p><b>REC</b> はクリティカル(合計点が基準以上か、Notion の「クリティカル条件」に当たった案件)の印で、カードの枠も赤くなります。日程の横の「予定あり / 空き / 休み」は Google カレンダーとの照合です。依頼主の名前の横には、プロフィールから読んだ性別・年齢・活動地域が出ます(未成年は赤)。</p>
   <p>一番上で下に引っぱると再読み込みします。下へスクロールすると上部がたたまれます。</p>`],
- ["絞り込み・並び順・日付",`<ul><li><b>すべて / クリティカル / 撮影場所が関東 / 活動地域が関東 / 女性 / 男性 / 対象外</b>: 場所は2つに分けて持っています。「撮影場所」はスタジオやイベント会場の都道府県(本文・イベント表・画像から)、「活動地域」は依頼主のプロフィールやリンク先に書かれた地域です。関東は東京・神奈川・埼玉・千葉・茨城・栃木・群馬です。「女性」「男性」は依頼主の性別で、プロフィールやリンク先にはっきり書いてある人だけが入ります(書いていない人はどちらにも入りません)。「対象外」は AI が募集ではないと判断したポストです。</li>
-  <li><b>種類</b>(コスプレ撮影など)は複数選べます。</li>
+ ["絞り込み・並び順・日付",`<p>上の絞り込みは「依頼主」と「案件」の2段です。選んだものすべてに当たる案件だけが出ます。もう一度押すと外れます。最初は「クリティカル・撮影場所が4都県・成人済み・女性・予定なし」を選んであります。</p>
+  <ul><li><b>依頼主</b>: 女性 / 男性 / 成人済み / 活動地域が4都県。プロフィールやリンク先にはっきり書いてある人だけが入ります(書いていない人は入りません)。「活動地域」は依頼主のプロフィールやリンク先に書かれた地域で、「首都圏」「関東」とだけ書いている人も入ります。</li>
+  <li><b>案件</b>: クリティカル / 撮影場所が4都県 / 予定なし / 種類(コスプレ撮影など、複数選べる)。「撮影場所」はスタジオやイベント会場の都道府県(本文・イベントの一覧・画像から)で、分からない案件は入りません。「予定なし」は撮影日に Google カレンダーの予定がない案件です(休みの予定は数えず、撮影日が分からない案件も入ります)。</li>
+  <li>4都県は東京・神奈川・埼玉・千葉です。</li>
+  <li><b>対象外(確認用)</b>: AI が募集ではないと判断したポストを見ます。このときは依頼主と案件の絞り込みは使いません。</li>
+  <li><b>作品・イベント名・場所</b>の欄に言葉を入れると、作品名・イベント名・場所・本文のどれかに入っている案件だけに絞ります。空白で区切ると、すべての言葉に当たる案件です。</li>
   <li><b>日付</b>: 月のカレンダーが開き、日ごとに「その日が撮影日の案件の数」(青い数字、今のタブ・絞り込みで数える)と Google カレンダーの予定(休みは緑)が出ます。日をタップすると、その日が撮影日の案件だけを一覧に出します。上の「解除」で戻ります。予定は今日から120日先まで出ます。</li></ul>`],
  ["案件の詳細",`<p>カードをタップすると詳細が開きます。本文をタップすると X アプリでそのポストが開きます。一番上で下に引っぱると閉じます。</p>
   <p>下のボタンで「受注中」「保留」「削除予定」にできます。その状態のときにもう一度押すと外れて新着に戻ります。スパム・虚偽の申告・カメラマンだった人などは「ブラックリストにいれる」で、これまでとこれからのポストを出さず、AI の判定にもかけません(設定の「ブラックリスト」から解除できます)。</p>
-  <p>場所(都道府県)は、本文 → Notion の「イベントの一覧」→ 添付画像 → 依頼主のプロフィール の順に判断し、本文以外から判断したときはカードに小さく出ます。添付画像(メンバー表など)から読んだ X のアカウントは「関係するアカウント」に「画像から」と出ます。</p>
+  <p>場所(都道府県)は、本文 → Notion の「イベントの一覧」→ 添付画像 の順に判断し、本文以外から判断したときはカードに小さく出ます。依頼主のプロフィールからは決めません(分からないときは「場所不明」)。添付画像(メンバー表など)から読んだ X のアカウントは「関係するアカウント」に「画像から」と出ます。</p>
   <p>依頼主の年齢・活動地域・性別は、プロフィールに書いてある書き方(18↓、30↑、成人済み、関西、♀ など)から読みます。プロフィールに書いてないときは、プロフィールのリンク先(Litlink など)からも読み、「リンク先から」と出ます。</p>`],
  ["スワイプ",`<p>カードを左右にスワイプすると、設定で選んだ状態を付けられます(初期値は右=保留、左=削除予定)。その状態のカードをもう一度同じ向きにスワイプすると外れて、新着に戻ります。</p>`],
  ["まとめて状態を変える",`<p>ホームの「まとめて」から、今のタブ(と絞り込み)の案件を、条件や言葉で絞ってまとめて状態を変えられます。選んだカードをどうするか(受注中・保留・削除予定)のボタンは上に並んでいて、スクロールしても残ります。変えたあとに出る「元に戻す」で戻せます。</p>
@@ -1130,8 +1151,10 @@ function closeSheet(){if($("sheetRoot").hidden)return;$("sheetRoot").hidden=true
   // 閉じた画面を先に描いてから一覧を作り直す(閉じた瞬間に引っかからないように)
   requestAnimationFrame(()=>{if(blacklistChanged){blacklistChanged=false;load()}else render()})}
 document.addEventListener("click",ev=>{
-  const p=ev.target.closest("[data-p]");if(p){const before=state.preset;state.preset=p.dataset.p;save();
-    if((before==="rejected")!==(state.preset==="rejected"))load();else render();return}
+  const f=ev.target.closest("[data-f]");if(f){const k=f.dataset.f;
+    if(state.f.has(k))state.f.delete(k);else{state.f.add(k);if(k==="female")state.f.delete("male");if(k==="male")state.f.delete("female")}
+    save();render();return}
+  if(ev.target.closest("[data-rejected]")){state.rejected=!state.rejected;load();return}
   const xu=ev.target.closest("[data-xuser]");if(xu){ev.preventDefault();openInX(`twitter://user?screen_name=${xu.dataset.xuser}`,xu.href);return}
   const xp=ev.target.closest("[data-xpost]");if(xp&&/^\d+$/.test(xp.dataset.xpost)){ev.preventDefault();openInX(`twitter://status?id=${xp.dataset.xpost}`,xp.href);return}
   const im=ev.target.closest("[data-img]");if(im){openViewer(Number(im.dataset.img));return}
@@ -1207,6 +1230,7 @@ $("viewer").addEventListener("touchend",ev=>{
 });
 $("viewer").addEventListener("touchcancel",()=>{vdrag=null;resetViewerDrag()});
 $("sort").addEventListener("change",e=>{state.sort=e.target.value;save();render()});
+$("q").addEventListener("input",e=>{state.q=e.target.value;render()});
 // ---- スクロールの向きで上部をたたむ・広げる ----
 // たたむと上部が低くなってページの位置がずれるので、切り替えたあとの動きが落ち着くまでは向きを見ない(行ったり来たりしないように)
 let lastY=window.scrollY,moved=0,slimHold=0;
