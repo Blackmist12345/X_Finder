@@ -70,6 +70,7 @@ test("一覧は対象の案件を点数順に、直近の分だけ返す", async
   assert.deepEqual(cases.map((c) => c.id), ["2", "1"]);
   assert.equal(cases[0].critical, true);
   assert.equal(cases[1].shoot_kanto, true);
+  assert.equal(cases[1].shoot_metro, true);
   assert.equal(cases[1].others, 1);
   assert.equal(cases[1].username, "client");
 });
