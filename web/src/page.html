@@ -414,7 +414,8 @@ header.top.slim .tab .c{font-size:17px}
 // 値は案件から作る。書いていない・分からないものも「記載なし」「不明」という1つの値として選べる
 const SORT_FACETS=[
   {k:"gender",g:"依頼主",t:"性別",v:c=>c.gender||"記載なし"},
-  {k:"age",g:"依頼主",t:"年齢",v:c=>c.age?.label||"記載なし"},
+  // 年齢は「未成年」と5歳刻み。「20代」「30↑」のように幅がある人は、当てはまる刻みを全部持つ(全部にチェックが付いたときだけ当てはまる)
+  {k:"age",g:"依頼主",t:"年齢",v:c=>ageValues(c),all:true},
   // 活動地域は複数書いてあることがある。全部にチェックが付いたときだけ当てはまる(東京と大阪の人は、大阪のチェックだけでは移さない)
   {k:"area",g:"依頼主",t:"活動地域",v:c=>(c.areas||[]).length?c.areas:["記載なし"],all:true},
   {k:"shoot",g:"案件",t:"撮影場所",v:c=>c.shoot_pref||"不明"},
@@ -423,6 +424,20 @@ const SORT_FACETS=[
   {k:"type",g:"案件",t:"種類",v:c=>c.case_type||"その他"},
 ];
 const NA_VALUES=["記載なし","不明","日付不明"];
+const AGE_RANGES=[[18,19],[20,24],[25,29],[30,34],[35,39],[40,44],[45,49],[50,99]];
+const AGE_BUCKETS=AGE_RANGES.map(([a,b])=>b>=99?`${a}以上`:`${a}〜${b}`);
+const AGE_ADULT="成人(年齢不明)";
+// プロフィールから読んだ年齢({label, minor})を、仕分けの値にする。label は「25歳」「20代」「30↑」「18↓」「成人」「未成年」
+function ageValues(c){
+  const a=c.age;if(!a)return ["記載なし"];
+  if(a.minor===true)return ["未成年"];
+  const m=/^(\d+)(歳|代|↑|↓)$/.exec(a.label||"");
+  if(!m)return [a.minor===false?AGE_ADULT:"記載なし"];
+  const n=+m[1],[lo,hi]={"歳":[n,n],"代":[n,n+9],"↑":[n,99],"↓":[0,n]}[m[2]];
+  const out=lo<18?["未成年"]:[];
+  AGE_RANGES.forEach(([x,y],i)=>{if(lo<=y&&hi>=x)out.push(AGE_BUCKETS[i])});
+  return out;
+}
 const TYPES=["コスプレ撮影","コスパフォ","踊ってみた","ポートレート","イベント","その他"];
 // 値の並び。ここにない値は件数の多い順、記載なし・不明は最後
 const SORT_ORDER={gender:["女性","男性"],plan:["空き","休み","予定あり"],crit:["クリティカル","クリティカルでない"],type:TYPES};
@@ -910,8 +925,9 @@ const HELP=[
   <p>一番上で下に引っぱると再読み込みします。下へスクロールすると上部がたたまれます。</p>`],
  ["仕分け",`<p>ホームの「仕分け」から、要らない案件をまとめて削除予定に移せます。チェックした値に1つでも当てはまる新着が移ります(受注中・保留は動かしません)。ボタンの赤い数字は、チェックしている値の数です。</p>
   <ul><li><b>項目と値</b>: 依頼主(性別・年齢・活動地域)と案件(撮影場所・撮影日の予定・クリティカル・種類)ごとに、今の案件にある値を件数つきで並べます。件数は新着で数えます。書いていない・分からない案件は「記載なし」「不明」「日付不明」という1つの値になっていて、これもチェックできます。</li>
-  <li><b>活動地域</b>: 読み取れる地域を最初から全部並べています。地方(関西・東海など)、都道府県(地方ごとの行)、都市(名古屋・神戸・仙台など)の3つで、市の名前で書いている人はその市の値になります(名古屋の人は「愛知」ではなく「名古屋」)。今の新着にいない地域は薄い字です。「たたむ」で今の新着にある値とチェックした値だけになり、「すべての地域を出す」で戻ります。いくつも書いてある人は、その全部にチェックが付いたときだけ当てはまります(東京と大阪の人は、大阪だけのチェックでは移りません)。</li>
-  <li><b>撮影場所</b>はスタジオや会場の都道府県(本文・イベントの一覧・画像から)です。<b>撮影日の予定</b>は Google カレンダーとの照合で、つながっているときだけ出ます(休みの予定は「休み」)。</li>
+  <li><b>活動地域</b>: 読み取れる地域を最初から全部並べています。地方(関西・東海など)、都道府県(地方ごとの行)、都市(名古屋・神戸・仙台など)の3つで、市の名前で書いている人はその市の値になります(名古屋の人は「愛知」ではなく「名古屋」)。今の新着にいない地域は薄い字です。「たたむ」で今の新着にある値とチェックした値だけになり、「すべて出す」で戻ります。いくつも書いてある人は、その全部にチェックが付いたときだけ当てはまります(東京と大阪の人は、大阪だけのチェックでは移りません)。</li>
+  <li><b>年齢</b>: 未成年と5歳刻み(18〜19、20〜24 … 50以上)、「成人済み」とだけ書いている人の「成人(年齢不明)」、記載なしを並べています。「20代」「30↑」のように幅がある人は、当てはまる刻みの全部にチェックが付いたときだけ当てはまります(20代の人は 20〜24 と 25〜29 の両方)。</li>
+  <li><b>撮影場所</b>はスタジオや会場の都道府県(本文・イベントの一覧・画像から)です。47都道府県を地方ごとの行で最初から全部並べ、分からない案件は「不明」です。「たたむ」で今ある値だけになります。<b>撮影日の予定</b>は Google カレンダーとの照合で、つながっているときだけ出ます(休みの予定は「休み」)。</li>
   <li><b>開いたときに自動で仕分ける</b>: オンにすると、アプリを開くたび(引っぱって再読み込みしたときも)、当てはまる新着を削除予定に移し、件数を下に出します。「元に戻す」で戻した案件や、一度でも状態を変えた案件は、次からは自動では移しません。</li>
   <li><b>今すぐ削除予定にする</b>: 今の新着で当てはまるものを全部移します。あとから「元に戻す」で戻せます。</li>
   <li><b>プリセット</b>: 「＋ 今のチェックを保存」で今のチェックに名前を付けて保存し、タップで切り替えます。× で消せます。チェックとプリセットはどの端末でも同じです。</li></ul>`],
@@ -993,24 +1009,33 @@ function facetValues(f){
   const ord=SORT_ORDER[f.k]||[],rank=v=>NA_VALUES.includes(v)?2:ord.includes(v)?0:1;
   return [...n].sort((a,b)=>rank(a[0])-rank(b[0])||ord.indexOf(a[0])-ord.indexOf(b[0])||b[1]-a[1]||a[0].localeCompare(b[0],"ja"));
 }
-// 活動地域は、読み取れる地域(都道府県・地方・市)を最初から全部並べる。数が多いので小さめにし、地方ごとの行にまとめる。
-// 「たたむ」と、今の新着にある値とチェックした値だけにする(この端末に覚える)
-const areaOpen=()=>{try{return localStorage.getItem("finder-area-open")!=="0"}catch(e){return true}};
+// 活動地域・撮影場所・年齢は、選べる値を最初から全部並べる(活動地域と撮影場所は地方ごとの行)。数が多いので小さめにする。
+// 活動地域と撮影場所は「たたむ」と、今の新着にある値とチェックした値だけにする(この端末に覚える)
+const FOLD_KEYS={area:"finder-area-open",shoot:"finder-shoot-open"};
+const foldOpen=k=>{try{return localStorage.getItem(FOLD_KEYS[k])!=="0"}catch(e){return true}};
 const prefShort=p=>p==="北海道"?p:p.replace(/[都府県]$/,"");
-function areaItem(f){
-  const counts=new Map(facetValues(f)),on=settings.sort_rule.area||[],open=areaOpen()&&areaChoices;
-  const chip=(v,label=v)=>{const n=counts.get(v)||0;
-    return `<button type="button" class="v sm${n?"":" zero"}${NA_VALUES.includes(v)?" na":""}" data-sv="area" data-val="${esc(v)}" aria-pressed="${on.includes(v)}" aria-label="${esc(v)} ${n}件"><i></i>${esc(label)}${n?`<small>${n}</small>`:""}</button>`};
-  const head=`<div class="sort-ihead"><h3>${f.t}</h3>${areaChoices?`<button type="button" class="linkbtn" data-area-fold="1">${open?"たたむ":"すべての地域を出す"}</button>`:""}</div>`;
+// 項目ごとの並べ方: [{見出し, 行: [[行の名前, 値の配列]]}]。最後の値は書いていない・分からない案件
+function fullSections(k){
+  if(k==="age")return {sections:[{title:"",rows:[["",["未成年",...AGE_BUCKETS,AGE_ADULT]]]}],na:"記載なし"};
+  if(!areaChoices)return null;
+  const prefs=areaChoices.blocks;
+  if(k==="area")return {sections:[{title:"地方",rows:[["",areaChoices.regions]]},{title:"都道府県",rows:prefs},{title:"都市",rows:[["",areaChoices.cities]]}],na:"記載なし"};
+  if(k==="shoot")return {sections:[{title:"",rows:prefs}],na:"不明"};
+  return null;
+}
+function fullItem(f,{sections,na}){
+  const counts=new Map(facetValues(f)),on=settings.sort_rule[f.k]||[],fold=!!FOLD_KEYS[f.k],open=!fold||foldOpen(f.k);
+  const prefSet=new Set((areaChoices?.blocks||[]).flatMap(b=>b[1]));
+  const chip=v=>{const n=counts.get(v)||0;
+    return `<button type="button" class="v sm${n?"":" zero"}${NA_VALUES.includes(v)?" na":""}" data-sv="${f.k}" data-val="${esc(v)}" aria-pressed="${on.includes(v)}" aria-label="${esc(v)} ${n}件"><i></i>${esc(prefSet.has(v)?prefShort(v):v)}${n?`<small>${n}</small>`:""}</button>`};
+  const head=`<div class="sort-ihead"><h3>${f.t}</h3>${fold?`<button type="button" class="linkbtn" data-fold="${f.k}">${open?"たたむ":"すべて出す"}</button>`:""}</div>`;
   if(!open)return `<div class="sort-item">${head}<div class="vals">${[...counts].map(([v])=>chip(v)).join("")||'<span class="sub">新着がありません</span>'}</div></div>`;
-  const known=new Set([...areaChoices.regions,...areaChoices.cities,...areaChoices.blocks.flatMap(b=>b[1])]);
-  const row=(label,chips)=>`<div class="arow"><span class="alabel">${label}</span><div class="vals">${chips}</div></div>`;
-  const rest=[...counts.keys()].filter(v=>!known.has(v));
+  const known=new Set(sections.flatMap(s=>s.rows.flatMap(r=>r[1])));
+  const row=(label,vals)=>`<div class="arow"><span class="alabel">${label}</span><div class="vals">${vals.map(chip).join("")}</div></div>`;
+  const rest=[...new Set([...counts.keys(),na])].filter(v=>!known.has(v));
   return `<div class="sort-item">${head}
-    <div class="asub">地方</div>${row("",areaChoices.regions.map(v=>chip(v)).join(""))}
-    <div class="asub">都道府県</div>${areaChoices.blocks.map(([b,ps])=>row(b,ps.map(p=>chip(p,prefShort(p))).join(""))).join("")}
-    <div class="asub">都市</div>${row("",areaChoices.cities.map(v=>chip(v)).join(""))}
-    ${rest.length?`<div class="asub">その他</div>${row("",rest.map(v=>chip(v)).join(""))}`:""}</div>`;
+    ${sections.map(s=>`${s.title?`<div class="asub">${s.title}</div>`:""}${s.rows.map(([l,vals])=>row(l,vals)).join("")}`).join("")}
+    ${rest.length?`${sections.length>1?'<div class="asub">その他</div>':""}${row(sections.length>1?"":"その他",rest)}`:""}</div>`;
 }
 function openSort(){
   presentSheet(`<div class="grab"></div><h2>仕分け</h2><p class="sub" style="margin:0">チェックした値に1つでも当てはまる新着は、削除予定に移ります</p><div id="sortBody"></div>`,"仕分け");
@@ -1024,7 +1049,7 @@ function renderSort(){
     return `<div class="sort-item"><h3>${f.t}</h3><div class="vals">${vals.length?vals.map(([v,n])=>`<button type="button" class="v${NA_VALUES.includes(v)?" na":""}" data-sv="${f.k}" data-val="${esc(v)}" aria-pressed="${on.includes(v)}"><i></i>${esc(v)}<small>${n}</small></button>`).join(""):'<span class="sub">新着がありません</span>'}</div></div>`};
   body.innerHTML=`<div class="sort-presets">${settings.sort_presets.map((p,i)=>`<span class="preset${ruleKey(p.rule)===cur?" on":""}"><button type="button" class="chip" data-preset="${i}">${esc(p.name)}</button><button type="button" class="pdel" data-preset-del="${i}" aria-label="${esc(p.name)}を消す">×</button></span>`).join("")}
      <button type="button" class="chip add" data-preset-save="1">＋ 今のチェックを保存</button></div>
-   ${["依頼主","案件"].map(g=>`<div class="sort-grp">${g}</div>${usedFacets().filter(f=>f.g===g).map(f=>f.k==="area"?areaItem(f):item(f)).join("")}`).join("")}
+   ${["依頼主","案件"].map(g=>`<div class="sort-grp">${g}</div>${usedFacets().filter(f=>f.g===g).map(f=>{const fs=fullSections(f.k);return fs?fullItem(f,fs):item(f)}).join("")}`).join("")}
    <div class="sort-auto" data-sort-auto="1"><span>開いたときに自動で仕分ける</span><button type="button" class="switch" role="switch" aria-checked="${!!settings.sort_auto}" aria-label="開いたときに自動で仕分ける"></button></div>
    <div class="sort-foot"><p class="sum">今の新着 ${news.length}件のうち <b>${hits}件</b> が当てはまります</p>
     <div class="actions"><button class="btn" data-close="1">閉じる</button><button type="button" class="btn del fill" data-sort-run="1" ${hits?"":"disabled"}>今すぐ削除予定にする(${hits}件)</button></div></div>`;
@@ -1173,7 +1198,7 @@ document.addEventListener("click",ev=>{
   const sv=ev.target.closest("[data-sv]");if(sv){toggleSortValue(sv.dataset.sv,sv.dataset.val);return}
   if(ev.target.closest("[data-sort-auto]")){saveSort({sort_auto:!settings.sort_auto});return}
   if(ev.target.closest("[data-sort-run]")){sortRun();return}
-  if(ev.target.closest("[data-area-fold]")){try{localStorage.setItem("finder-area-open",areaOpen()?"0":"1")}catch(e){}renderSort();return}
+  const fd=ev.target.closest("[data-fold]");if(fd){const k=fd.dataset.fold;try{localStorage.setItem(FOLD_KEYS[k],foldOpen(k)?"0":"1")}catch(e){}renderSort();return}
   const xu=ev.target.closest("[data-xuser]");if(xu){ev.preventDefault();openInX(`twitter://user?screen_name=${xu.dataset.xuser}`,xu.href);return}
   const xp=ev.target.closest("[data-xpost]");if(xp&&/^\d+$/.test(xp.dataset.xpost)){ev.preventDefault();openInX(`twitter://status?id=${xp.dataset.xpost}`,xp.href);return}
   const im=ev.target.closest("[data-img]");if(im){openViewer(Number(im.dataset.img));return}
