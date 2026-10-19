@@ -71,6 +71,7 @@ test("一覧は対象の案件を点数順に、直近の分だけ返す", async
   assert.equal(cases[0].critical, true);
   assert.equal(cases[1].shoot_kanto, true);
   assert.equal(cases[1].shoot_metro, true);
+  assert.equal(cases[1].shoot_pref, "東京都");
   assert.equal(cases[1].others, 1);
   assert.equal(cases[1].username, "client");
 });
@@ -104,7 +105,7 @@ test("カードの状態: 開いても新着のまま(青い点だけ消える)�
   assert.equal(await setReview(db, "2", { opened: true }), "delete"); // 開いても削除予定のまま
   assert.equal(await setReview(db, "4", { state: "accepted" }), "accepted"); // 30 日前の案件
   cases = await listCases(db, new URLSearchParams());
-  assert.deepEqual(cases.map((c) => [c.id, c.review, c.opened]), [["4", "accepted", true], ["2", "delete", true], ["1", "new", true]]);
+  assert.deepEqual(cases.map((c) => [c.id, c.review, c.opened]), [["4", "accepted", false], ["2", "delete", true], ["1", "new", true]]);
   assert.equal(await setReview(db, "4", { state: "hold" }), "hold");
   assert.equal((await getCase(db, "4")).review, "hold");
   assert.equal(await setReview(db, "999", { state: "hold" }), null);
@@ -177,33 +178,42 @@ test("データベースの中身: 表ごとの件数と、新しい順の行・
 test("スワイプの設定は初期値があり、変えると保存される", async () => {
   const first = await getSettings(db);
   assert.deepEqual([first.swipe_right, first.swipe_left], ["hold", "delete"]);
-  assert.deepEqual(first.bulk_presets.map((p) => p.name), ["予定かぶり", "撮影場所が関東以外", "遠方(撮影場所か活動地域)", "予定かぶりか撮影場所が関東以外"]); // 最初から入っている
+  assert.deepEqual([first.sort_rule, first.sort_auto, first.sort_presets], [{}, false, []]);
   const saved = await saveSettings(db, { swipe_left: "accepted" });
   assert.equal(saved.swipe_left, "accepted");
-  assert.equal(saved.bulk_presets.length, 4);
-  assert.deepEqual((await saveSettings(db, { bulk_presets: [] })).bulk_presets, []); // 全部消せば空のまま
-  assert.deepEqual((await getSettings(db)).bulk_presets, []);
   await assert.rejects(saveSettings(db, { swipe_right: "seen" }), RangeError);
 });
 
-test("「まとめて」のプリセットを保存でき、おかしな中身は受け付けない", async () => {
-  const p = [{ name: "予定かぶり・遠方", conds: ["busy", "far", "zzz"], q: "", mode: "or" }, { name: "ブルアカ", conds: [], q: "ブルアカ" }];
-  const saved = await saveSettings(db, { bulk_presets: p });
-  assert.deepEqual(saved.bulk_presets, [{ name: "予定かぶり・遠方", conds: ["busy", "far"], q: "", mode: "or" }, { name: "ブルアカ", conds: [], q: "ブルアカ", mode: "and" }]);
+test("仕分けのチェック・自動・プリセットを保存でき、おかしな中身は受け付けない", async () => {
+  const saved = await saveSettings(db, { sort_rule: { gender: ["男性", "男性", " "], area: ["大阪府"], zzz: ["x"] }, sort_auto: true });
+  assert.deepEqual(saved.sort_rule, { gender: ["男性"], area: ["大阪府"] });
+  assert.equal(saved.sort_auto, true);
   assert.equal(saved.swipe_right, "hold");
-  assert.deepEqual((await getSettings(db)).bulk_presets, saved.bulk_presets);
-  await assert.rejects(saveSettings(db, { bulk_presets: [{ name: "", conds: ["far"] }] }), RangeError);
-  await assert.rejects(saveSettings(db, { bulk_presets: [{ name: "空", conds: [], q: "" }] }), RangeError);
-  await assert.rejects(saveSettings(db, { bulk_presets: "x" }), RangeError);
+  const p = await saveSettings(db, { sort_presets: [{ name: "ふだん", rule: { gender: ["男性"] } }, { name: "空", rule: {} }] });
+  assert.deepEqual(p.sort_presets, [{ name: "ふだん", rule: { gender: ["男性"] } }, { name: "空", rule: {} }]);
+  assert.deepEqual(await getSettings(db), p);
+  await assert.rejects(saveSettings(db, { sort_rule: ["男性"] }), RangeError);
+  await assert.rejects(saveSettings(db, { sort_rule: { gender: "男性" } }), RangeError);
+  await assert.rejects(saveSettings(db, { sort_auto: "yes" }), RangeError);
+  await assert.rejects(saveSettings(db, { sort_presets: [{ name: "", rule: {} }] }), RangeError);
 });
 
-test("前からプリセットを持っている人にも、最初のプリセットを一度だけ足す", async () => {
+test("前の「まとめて」のプリセットは読み飛ばす", async () => {
   await db.prepare("INSERT OR REPLACE INTO meta (key, value, updated_at) VALUES ('finder_settings', ?, '2026-10-01')")
-    .bind(JSON.stringify({ swipe_right: "hold", swipe_left: "delete", bulk_presets: [{ name: "首都圏以外", conds: ["far"], q: "", mode: "and" }, { name: "ブルアカ", conds: [], q: "ブルアカ", mode: "and" }] })).run();
-  const names = (await getSettings(db)).bulk_presets.map((p) => p.name);
-  assert.deepEqual(names, ["予定かぶり", "遠方(撮影場所か活動地域)", "予定かぶりか撮影場所が関東以外", "撮影場所が関東以外", "ブルアカ"]); // 前の名前は新しい名前にし、同じ名前は足さない
-  await saveSettings(db, { bulk_presets: [{ name: "ブルアカ", conds: [], q: "ブルアカ" }] });
-  assert.deepEqual((await getSettings(db)).bulk_presets.map((p) => p.name), ["ブルアカ"]); // 一度保存したら、消したものは戻らない
+    .bind(JSON.stringify({ swipe_right: "none", bulk_presets: [{ name: "ブルアカ", conds: [], q: "ブルアカ", mode: "and" }], presets_seeded: true })).run();
+  const s = await getSettings(db);
+  assert.equal(s.swipe_right, "none");
+  assert.equal("bulk_presets" in s, false);
+});
+
+test("自動の仕分けにかけてよいか(touched): 状態を一度でも変えた案件は外す。開いただけの前の行はかける", async () => {
+  const touched = async () => Object.fromEntries((await listCases(db, new URLSearchParams())).map((c) => [c.id, c.touched]));
+  assert.deepEqual(await touched(), { "1": false, "2": false });
+  db.raw.prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES ('1', 'new', 'x', 'x')`).run(); // 前に開いただけ
+  assert.deepEqual(await touched(), { "1": false, "2": false });
+  await setReviews(db, { ids: ["1", "2"], state: "delete" });
+  await setReviews(db, { ids: ["1", "2"], state: "new" }); // 元に戻した
+  assert.deepEqual(await touched(), { "1": true, "2": true });
 });
 
 test("一覧にも添付画像の URL が入る(詳細を開いた瞬間から画像の場所を取るため)", async () => {
