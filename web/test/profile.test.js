@@ -18,12 +18,14 @@ test("年齢: 矢印や言葉のいろいろな書き方を読む", () => {
 
 test("活動地域: 地方・都道府県・市の名前を読む", () => {
   assert.deepEqual(parseAreas("関西で活動中"), ["関西"]);
-  assert.deepEqual(parseAreas("名古屋 / 東海"), ["愛知県", "東海"]);
+  assert.deepEqual(parseAreas("名古屋 / 東海"), ["名古屋", "東海"]); // 市は市のまま(仕分けで市ごとに選べる)
+  assert.deepEqual(parseAreas("福岡/北九州"), ["福岡県", "北九州"]);
+  assert.deepEqual(parseAreas("都内"), ["東京都"]);
   assert.deepEqual(parseAreas("北海道"), ["北海道"]);
   assert.deepEqual(parseAreas("福岡↔東京"), ["福岡県", "東京都"]);
   assert.deepEqual(parseAreas("東京都在住"), ["東京都"]); // 「京都」と取り違えない
   assert.deepEqual(parseAreas("京都府"), ["京都府"]);
-  assert.deepEqual(parseAreas("北九州"), ["福岡県"]); // 九州を二重に取らない
+  assert.deepEqual(parseAreas("北九州"), ["北九州"]); // 九州を二重に取らない
   assert.deepEqual(parseAreas("近畿 都内にも行きます"), ["関西", "東京都"]);
   assert.deepEqual(parseAreas("中国語ができます"), []);
   assert.deepEqual(parseAreas(""), []);

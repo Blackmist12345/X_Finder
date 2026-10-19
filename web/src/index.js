@@ -3,7 +3,7 @@
 // Cloudflare Access を通った人だけが見られる(auth.js)。
 import { verifyAccess } from "./auth.js";
 import { getCalendar, offWords } from "./calendar.js";
-import { KANTO, METRO, profileInfo } from "./profile.js";
+import { AREA_CHOICES, KANTO, METRO, profileInfo } from "./profile.js";
 import page from "./page.html";
 import icon180 from "./icons/icon-180.png";
 import icon192 from "./icons/icon-192.png";
@@ -13,11 +13,11 @@ import icon512 from "./icons/icon-512.png";
 const shootPrefecture = (r) => (r.prefecture && r.prefecture !== "不明" && r.prefecture_source !== "プロフィール" ? r.prefecture : null);
 const shootArea = (r) => {
   const pref = shootPrefecture(r);
-  return { shoot_kanto: !!pref && KANTO.includes(pref), shoot_far: !!pref && !KANTO.includes(pref), shoot_metro: !!pref && METRO.includes(pref) };
+  return { shoot_pref: pref, shoot_kanto: !!pref && KANTO.includes(pref), shoot_far: !!pref && !KANTO.includes(pref), shoot_metro: !!pref && METRO.includes(pref) };
 };
 const MAX_LIST = 300;
 // カードの状態。new=新着 / accepted=受注中 / hold=保留 / delete=削除予定。行がなければ新着(まだ開いていない)。
-// 開いたかどうかは状態とは別に opened_at で持つ(今の画面では使っていない)
+// 開いたかどうかは状態とは別に opened_at で持つ(今の画面では使っていない。前に開いただけの行は opened_at = updated_at の新着になっている)
 const REVIEW_STATES = ["new", "accepted", "hold", "delete"];
 // 前の名前(確認済み・未確認)で届いたら新着として扱う
 const STATE_ALIASES = { seen: "new", unread: "new" };
@@ -109,6 +109,7 @@ const CASE_COLUMNS = `
   p.id, p.text, p.url, p.created_at, p.collected_at, p.status, p.skip_reason, p.quoted_id,
   j.case_type, j.works, j.prefecture, j.prefecture_source, j.place, j.dates, j.summary, j.score, j.critical, j.critical_reason, j.reject_reason,
   p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, CASE WHEN r.state IN ('accepted', 'hold', 'delete') THEN r.state ELSE 'new' END AS review, (r.opened_at IS NOT NULL) AS opened,
+  (r.post_id IS NOT NULL AND NOT (r.state = 'new' AND r.opened_at IS r.updated_at)) AS touched,
   u.description, u.location, (SELECT ul.found_json FROM user_links ul WHERE ul.user_id = p.author_id) AS link_found`;
 
 export async function listCases(db, params) {
@@ -132,6 +133,7 @@ export async function listCases(db, params) {
     ...profileInfo({ name: r.name, description, location, link: parseJson(link_found, null) }),
     critical: !!r.critical,
     opened: !!r.opened,
+    touched: !!r.touched,
     ...shootArea(r),
     media: parseJson(media_json, []),
   }));
@@ -295,14 +297,15 @@ function nowIso() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
 }
 
-// カードの状態を変える。opened=true は「開いた」の記録で、状態は変えない(新着のまま青い点だけ消える)。
-// 新着に戻すときは行を消さずに状態だけ戻す(開いた記録は残す)。
+// カードの状態を変える。opened=true は「開いた」の記録で、状態は変えない。
+// 新着に戻すときは行を消さずに状態だけ戻す(一度でも状態を変えた案件は、開いたときの自動の仕分けにかけない: touched)。
+// 新しく作る行には opened_at を入れない(開いただけの前の行と見分けるため)
 function reviewWrite(db, id, state, now) {
   if (state === "new") return db.prepare("UPDATE reviews SET state = 'new', updated_at = ? WHERE post_id = ?").bind(now, id);
   return db
-    .prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES (?, ?, ?, ?)
+    .prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES (?, ?, NULL, ?)
               ON CONFLICT(post_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at`)
-    .bind(id, state, now, now);
+    .bind(id, state, now);
 }
 
 export async function setReview(db, id, { state, opened }) {
@@ -324,7 +327,7 @@ export async function setReview(db, id, { state, opened }) {
   return REVIEW_STATES.includes(row?.state) ? row.state : "new";
 }
 
-// まとめて状態を変える(ホームの「まとめて」から)。ids は 300 件まで。見つからない ID は飛ばす。
+// まとめて状態を変える(ホームの「仕分け」から)。ids は 300 件まで。見つからない ID は飛ばす。
 const BULK_MAX = 300;
 export async function setReviews(db, body) {
   const ids = [...new Set(Array.isArray(body.ids) ? body.ids.map(String) : [])];
@@ -347,30 +350,30 @@ export async function setReviews(db, body) {
   return { updated: hit, state };
 }
 
-// 「まとめて」のプリセット(よく使う絞り込み)。{ name, conds: 条件の k, q: 言葉, mode: and / or }
+// 「仕分け」: チェックした値に当てはまる新着を削除予定にする。rule は { 項目: [チェックした値] }
+// 値は画面が案件から作る文字(「東京都」「記載なし」など)なので、ここでは形と長さだけ確かめる
+const SORT_FACETS = ["gender", "age", "area", "shoot", "plan", "crit", "type"];
+const SORT_VALUES_MAX = 60;
 const PRESET_MAX = 20;
-// 最初から入っているプリセット(よく使う絞り込み)。消したり足したりできる。
-// 前から自分のプリセットがある人にも一度だけ足す(presets_seeded で覚える)
-const DEFAULT_PRESETS = [
-  { name: "予定かぶり", conds: ["busy"], q: "", mode: "and" },
-  { name: "撮影場所が関東以外", conds: ["far"], q: "", mode: "and" },
-  { name: "遠方(撮影場所か活動地域)", conds: ["far", "afar"], q: "", mode: "or" },
-  { name: "予定かぶりか撮影場所が関東以外", conds: ["busy", "far"], q: "", mode: "or" },
-];
-// 「首都圏」から「関東」に分け直したときの、前の初期プリセットの名前
-const OLD_PRESET_NAMES = { "首都圏以外": "撮影場所が関東以外", "遠方(場所か活動地域)": "遠方(撮影場所か活動地域)", "予定かぶりか首都圏以外": "予定かぶりか撮影場所が関東以外" };
-const PRESET_CONDS = ["far", "afar", "busy"];
-function cleanPresets(list) {
+function cleanRule(rule) {
+  if (!rule || typeof rule !== "object" || Array.isArray(rule)) return null;
+  const out = {};
+  for (const k of SORT_FACETS) {
+    if (rule[k] === undefined) continue;
+    if (!Array.isArray(rule[k])) return null;
+    const vals = [...new Set(rule[k].map((v) => String(v ?? "").trim().slice(0, 30)).filter(Boolean))].slice(0, SORT_VALUES_MAX);
+    if (vals.length) out[k] = vals;
+  }
+  return out;
+}
+function cleanSortPresets(list) {
   if (!Array.isArray(list)) return null;
   const out = [];
   for (const p of list.slice(0, PRESET_MAX)) {
-    if (!p || typeof p !== "object") return null;
-    const name = String(p.name || "").trim().slice(0, 20);
-    const conds = Array.isArray(p.conds) ? [...new Set(p.conds.filter((c) => PRESET_CONDS.includes(c)))] : [];
-    const q = String(p.q || "").trim().slice(0, 100);
-    const mode = p.mode === "or" ? "or" : "and";
-    if (!name || (!conds.length && !q)) return null;
-    out.push({ name, conds, q, mode });
+    const name = String(p?.name || "").trim().slice(0, 20);
+    const rule = cleanRule(p?.rule);
+    if (!name || !rule) return null;
+    out.push({ name, rule });
   }
   return out;
 }
@@ -380,10 +383,9 @@ export async function getSettings(db) {
   const saved = parseJson(row?.value, {});
   const out = { ...DEFAULT_SETTINGS };
   for (const k of Object.keys(DEFAULT_SETTINGS)) if (SWIPE_CHOICES.includes(saved[k])) out[k] = saved[k];
-  const own = (saved.bulk_presets === undefined ? [] : cleanPresets(saved.bulk_presets) || [])
-    .map((p) => (OLD_PRESET_NAMES[p.name] ? { ...p, name: OLD_PRESET_NAMES[p.name] } : p));
-  const add = saved.presets_seeded ? [] : DEFAULT_PRESETS.filter((d) => !own.some((p) => p.name === d.name));
-  out.bulk_presets = [...add.map((p) => ({ ...p })), ...own].slice(0, PRESET_MAX);
+  out.sort_rule = cleanRule(saved.sort_rule) || {};
+  out.sort_auto = saved.sort_auto === true;
+  out.sort_presets = cleanSortPresets(saved.sort_presets) || [];
   return out;
 }
 
@@ -394,15 +396,24 @@ export async function saveSettings(db, body) {
     if (!SWIPE_CHOICES.includes(body[k])) throw new RangeError(k);
     next[k] = body[k];
   }
-  if (body.bulk_presets !== undefined) {
-    const presets = cleanPresets(body.bulk_presets);
-    if (!presets) throw new RangeError("bulk_presets");
-    next.bulk_presets = presets;
+  if (body.sort_rule !== undefined) {
+    const rule = cleanRule(body.sort_rule);
+    if (!rule) throw new RangeError("sort_rule");
+    next.sort_rule = rule;
+  }
+  if (body.sort_auto !== undefined) {
+    if (typeof body.sort_auto !== "boolean") throw new RangeError("sort_auto");
+    next.sort_auto = body.sort_auto;
+  }
+  if (body.sort_presets !== undefined) {
+    const presets = cleanSortPresets(body.sort_presets);
+    if (!presets) throw new RangeError("sort_presets");
+    next.sort_presets = presets;
   }
   await db
     .prepare(`INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?)
               ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
-    .bind(SETTINGS_KEY, JSON.stringify({ ...next, presets_seeded: true }), nowIso())
+    .bind(SETTINGS_KEY, JSON.stringify(next), nowIso())
     .run();
   return next;
 }
@@ -591,7 +602,7 @@ export default {
       if (ICONS[url.pathname]) {
         return new Response(ICONS[url.pathname], { headers: { "content-type": "image/png", ...SECURITY_HEADERS, "cache-control": "private, max-age=86400" } });
       }
-      if (url.pathname === "/api/cases") return json({ cases: await listCases(env.DB, url.searchParams) });
+      if (url.pathname === "/api/cases") return json({ cases: await listCases(env.DB, url.searchParams), area_choices: AREA_CHOICES });
       if (url.pathname === "/api/summary") return json(await getSummary(env.DB));
       if (url.pathname === "/api/settings") return json(await getSettings(env.DB));
       if (url.pathname === "/api/db") return json({ tables: await listTables(env.DB) });
