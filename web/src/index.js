@@ -3,7 +3,7 @@
 // Cloudflare Access を通った人だけが見られる(auth.js)。
 import { verifyAccess } from "./auth.js";
 import { getCalendar, offWords } from "./calendar.js";
-import { KANTO, METRO, profileInfo } from "./profile.js";
+import { AREA_CHOICES, KANTO, METRO, profileInfo } from "./profile.js";
 import page from "./page.html";
 import icon180 from "./icons/icon-180.png";
 import icon192 from "./icons/icon-192.png";
@@ -602,7 +602,7 @@ export default {
       if (ICONS[url.pathname]) {
         return new Response(ICONS[url.pathname], { headers: { "content-type": "image/png", ...SECURITY_HEADERS, "cache-control": "private, max-age=86400" } });
       }
-      if (url.pathname === "/api/cases") return json({ cases: await listCases(env.DB, url.searchParams) });
+      if (url.pathname === "/api/cases") return json({ cases: await listCases(env.DB, url.searchParams), area_choices: AREA_CHOICES });
       if (url.pathname === "/api/summary") return json(await getSummary(env.DB));
       if (url.pathname === "/api/settings") return json(await getSettings(env.DB));
       if (url.pathname === "/api/db") return json({ tables: await listTables(env.DB) });

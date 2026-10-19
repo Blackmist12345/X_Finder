@@ -320,6 +320,7 @@ test("Access を通れば画面と API が返る", async () => {
     assert.equal((await worker.fetch(req("/icon-512.png"), env)).status, 403); // アイコンも Access を通った人だけ
     const list = await (await worker.fetch(req("/api/cases", token), env)).json();
     assert.equal(list.cases.length, 2);
+    assert.equal(list.area_choices.blocks.flatMap((b) => b[1]).length, 47); // 仕分けに最初から並べる活動地域
     assert.equal((await worker.fetch(req("/api/cases/1", token), env)).status, 200);
     assert.equal((await worker.fetch(req("/api/cases/abc", token), env)).status, 404);
 

@@ -63,7 +63,7 @@ export function parseGender(text) {
 
 // ---- 活動地域 ----
 
-const PREFECTURES = [
+export const PREFECTURES = [
   "北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県", "茨城県", "栃木県", "群馬県",
   "埼玉県", "千葉県", "東京都", "神奈川県", "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県",
   "岐阜県", "静岡県", "愛知県", "三重県", "滋賀県", "京都府", "大阪府", "兵庫県", "奈良県", "和歌山県",
@@ -75,18 +75,33 @@ const REGIONS = [
   ["首都圏", /首都圏/], ["関東", /関東/], ["関西", /関西|近畿/], ["東海", /東海(?!オンエア)/], ["北陸", /北陸/],
   ["甲信越", /甲信越/], ["東北", /東北/], ["中国地方", /中国地方|山陽|山陰/], ["四国", /四国/], ["九州", /九州/],
 ];
-// 都道府県名の一部や、よく書かれる市・地域の名前 → 都道府県
+// よく書かれる市の名前と、その都道府県。市はそのまま1つの地域として出す(仕分けで市ごとに選べるように)
+const CITIES = [
+  ["札幌", "北海道"], ["仙台", "宮城県"], ["宇都宮", "栃木県"], ["高崎", "群馬県"], ["横浜", "神奈川県"], ["川崎", "神奈川県"],
+  ["相模原", "神奈川県"], ["金沢", "石川県"], ["浜松", "静岡県"], ["名古屋", "愛知県"], ["堺", "大阪府"], ["神戸", "兵庫県"],
+  ["姫路", "兵庫県"], ["倉敷", "岡山県"], ["北九州", "福岡県"], ["博多", "福岡県"], ["那覇", "沖縄県"],
+];
+const CITY_PREF = Object.fromEntries(CITIES);
+// 都道府県名の一部や、都道府県の言いかえ → 都道府県
 const PLACES = [
   ...PREFECTURES.map((p) => [p, p]),
   ...PREFECTURES.filter((p) => p !== "北海道").map((p) => [p.slice(0, -1), p]),
-  ["都内", "東京都"], ["23区", "東京都"], ["道民", "北海道"], ["道内", "北海道"], ["札幌", "北海道"], ["仙台", "宮城県"],
-  ["横浜", "神奈川県"], ["川崎", "神奈川県"], ["名古屋", "愛知県"], ["神戸", "兵庫県"], ["博多", "福岡県"],
-  ["北九州", "福岡県"], ["浜松", "静岡県"], ["金沢", "石川県"], ["岡山", "岡山県"], ["那覇", "沖縄県"],
+  ["都内", "東京都"], ["23区", "東京都"], ["道民", "北海道"], ["道内", "北海道"],
+  ...CITIES.map(([c]) => [c, c]),
 ];
+// 仕分けの画面に最初から並べる活動地域。都道府県は地方ごとのまとまりで並べる
+export const AREA_CHOICES = {
+  regions: REGIONS.map(([name]) => name),
+  cities: CITIES.map(([c]) => c),
+  blocks: [
+    ["北海道・東北", PREFECTURES.slice(0, 7)], ["関東", PREFECTURES.slice(7, 14)], ["中部", PREFECTURES.slice(14, 23)],
+    ["近畿", PREFECTURES.slice(23, 30)], ["中国・四国", PREFECTURES.slice(30, 39)], ["九州・沖縄", PREFECTURES.slice(39)],
+  ],
+};
 // 先に伏せておく言葉(「東京都」の中の「京都」、「京都府」と「京都」の二重取りなど)
 const MASK = ["東京都", "京都府", "大阪府"];
 
-// 返り値: 書かれていた順の地域の配列(都道府県名か地方名)。例: ["関西"], ["愛知県", "東京都"]
+// 返り値: 書かれていた順の地域の配列(都道府県名・地方名・市の名前)。例: ["関西"], ["愛知県", "東京都"], ["名古屋"]
 export function parseAreas(text) {
   let t = normalize(text);
   if (!t) return [];
@@ -102,7 +117,7 @@ export function parseAreas(text) {
       i = t.indexOf(w);
     }
   }
-  // 長い名前から先に探す(「北九州」を「九州」より先に、など)
+  // 長い名前から先に探す(「北九州」を「九州」より先に、「堺」は「堺市」も含めて、など)
   for (const [word, pref] of [...PLACES].sort((a, b) => b[0].length - a[0].length)) {
     let i = t.indexOf(word);
     while (i >= 0) {
@@ -121,8 +136,9 @@ export function parseAreas(text) {
 
 // 関東(1都6県)。撮影場所と活動地域のどちらも、関東かどうかで分ける
 export const KANTO = ["東京都", "神奈川県", "埼玉県", "千葉県", "茨城県", "栃木県", "群馬県"];
-// 活動地域として関東に入るもの(首都圏は関東の中なので、こちらに入れる)
+// 活動地域として関東に入るもの(首都圏は関東の中なので、こちらに入れる)。市は都道府県で数える
 const KANTO_AREAS = [...KANTO, "首都圏", "関東"];
+const asPref = (a) => CITY_PREF[a] || a;
 // 4都県(東京・神奈川・埼玉・千葉)(今の画面では使っていない。仕分けは都道府県の値そのもので選ぶ)
 export const METRO = ["東京都", "神奈川県", "埼玉県", "千葉県"];
 // 活動地域として4都県に入るもの。「首都圏」「関東」とだけ書いている人も入れる
@@ -151,9 +167,9 @@ export function profileInfo(user) {
     age_from: ageFrom,
     areas_from: areasFrom,
     gender_from: genderFrom,
-    areas_kanto: areas.some((a) => KANTO_AREAS.includes(a)),
-    areas_far: areas.length > 0 && !areas.some((a) => KANTO_AREAS.includes(a)),
-    areas_metro: areas.some((a) => METRO_AREAS.includes(a)),
+    areas_kanto: areas.some((a) => KANTO_AREAS.includes(asPref(a))),
+    areas_far: areas.length > 0 && !areas.some((a) => KANTO_AREAS.includes(asPref(a))),
+    areas_metro: areas.some((a) => METRO_AREAS.includes(asPref(a))),
   };
 }
 
