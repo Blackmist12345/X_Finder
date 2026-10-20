@@ -168,12 +168,13 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .sortbtn[hidden]{display:none}
 .sortbtn{flex:1;min-width:0;display:flex;justify-content:space-between;align-items:center;gap:6px;font-weight:700;font-size:14px}
 .sortbtn .n{background:var(--rec);color:#fff;border-radius:999px;font-family:var(--font-num);font-size:14px;line-height:1.35;padding:0 8px}
-.sort-presets{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
-.preset{display:inline-flex;align-items:center;border-radius:999px;background:var(--accent-soft)}
-.preset .chip{border-color:transparent;background:transparent;color:var(--accent);font-weight:600;padding-right:4px}
-.preset .pdel{border:0;background:transparent;color:var(--accent);font:inherit;font-size:15px;padding:4px 10px 4px 4px;cursor:pointer}
-.preset.on{background:var(--accent)} .preset.on .chip,.preset.on .pdel{color:#fff}
-.chip.add{border-style:dashed;color:var(--muted)}
+/* プリセットは指で押しやすい大きさにする(名前と×を線で分け、×の押し間違いを減らす) */
+.sort-presets{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px}
+.preset{display:inline-flex;align-items:stretch;border-radius:999px;background:var(--accent-soft)}
+.preset .chip{border-color:transparent;background:transparent;color:var(--accent);font-weight:600;font-size:15px;min-height:44px;min-width:72px;padding:0 14px 0 18px}
+.preset .pdel{border:0;border-left:1px solid color-mix(in srgb,var(--accent) 25%,transparent);background:transparent;color:var(--accent);font:inherit;font-size:16px;width:40px;padding:0 4px 0 0;cursor:pointer;opacity:.75}
+.preset.on{background:var(--accent)} .preset.on .chip,.preset.on .pdel{color:#fff} .preset.on .pdel{border-left-color:rgba(255,255,255,.35)}
+.chip.add{border-style:dashed;color:var(--muted);min-height:44px;font-size:14px;padding:0 16px}
 .sort-grp{margin-top:16px;font-size:12px;font-weight:800;color:var(--muted);letter-spacing:.05em;border-bottom:1px solid var(--line);padding-bottom:2px}
 .sort-item{margin-top:10px}
 .sort-item h3{font-size:13px;margin:0 0 6px}
