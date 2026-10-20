@@ -167,7 +167,11 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 /* 仕分け(チェックした値に当てはまる新着を削除予定にする) */
 .sortbtn[hidden]{display:none}
 .sortbtn{flex:1;min-width:0;display:flex;justify-content:space-between;align-items:center;gap:6px;font-weight:700;font-size:14px}
-.sortbtn .n{background:var(--rec);color:#fff;border-radius:999px;font-family:var(--font-num);font-size:14px;line-height:1.35;padding:0 8px}
+.sortbtn .lbl{display:flex;flex-direction:column;align-items:flex-start;min-width:0;line-height:1.25;white-space:nowrap}
+.sortbtn .ps{max-width:100%;font-weight:600;font-size:11px;color:var(--accent);overflow:hidden;text-overflow:ellipsis}
+.sortbtn .ps.none{color:var(--muted)}
+.sortbtn .mode{flex:none;border-radius:999px;font-size:11px;font-weight:700;line-height:1.5;padding:0 8px;border:1px solid var(--line);color:var(--muted)}
+.sortbtn .mode.auto{background:var(--rec);border-color:var(--rec);color:#fff}
 /* プリセットは指で押しやすい大きさにする(名前と×を線で分け、×の押し間違いを減らす) */
 .sort-presets{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px}
 .preset{display:inline-flex;align-items:stretch;border-radius:999px;background:var(--accent-soft)}
@@ -568,7 +572,10 @@ function renderControls(){
   const n=k=>matching().filter(c=>c.review===k).length;
   $("tabs").innerHTML=TABS.map(t=>`<button class="tab" aria-pressed="${state.tab===t.k}" data-tab="${t.k}"><span class="c">${n(t.k)}</span><span class="t">${t.t}</span></button>`).join("");
   const k=checkedCount(),b=$("openSort");b.hidden=state.rejected;
-  b.innerHTML=`仕分け${k?`<span class="n">${k}</span>`:""}`;b.setAttribute("aria-label",k?`仕分け(チェック ${k}個)`:"仕分け");
+  // 使っているプリセットと、開いたときに自動で削除予定へ移すかどうか
+  const act=activePreset(),auto=k&&settings.sort_auto,ps=k?(act?act.name:"プリセットなし"):"";
+  b.innerHTML=`<span class="lbl">仕分け${ps?`<span class="ps${act?"":" none"}">${esc(ps)}</span>`:""}</span>${k?`<span class="mode${auto?" auto":""}">${auto?"自動":"手動"}</span>`:""}`;
+  b.setAttribute("aria-label",k?`仕分け(${ps}、${auto?"開いたときに自動で削除予定へ移す":"自動では移さない"})`:"仕分け");
   $("sort").value=state.sort;
 }
 // 一覧に出す案件(カレンダーで日付を選んでいるときは、その日が撮影日の案件だけ)
@@ -931,6 +938,7 @@ const HELP=[
   <li><b>年齢</b>: 未成年と5歳刻み(18〜19、20〜24 … 50以上)、「成人済み」とだけ書いている人の「成人(年齢不明)」、記載なしを並べています。「20代」「30↑」のように幅がある人は、当てはまる刻みの全部にチェックが付いたときだけ当てはまります(20代の人は 20〜24 と 25〜29 の両方)。</li>
   <li><b>撮影場所</b>はスタジオや会場の都道府県(本文・イベントの一覧・画像から)です。イベントの一覧にないイベントは、AIが知っている開催地を使い(カードに「推定」)、そのイベントを一覧に足します。間違いは Notion の一覧で直すと次から使われます。47都道府県を地方ごとの行で最初から全部並べ、分からない案件は「不明」です。「たたむ」で今ある値だけになります。<b>撮影日の予定</b>は Google カレンダーとの照合で、つながっているときだけ出ます(休みの予定は「休み」)。</li>
   <li><b>開いたときに自動で仕分ける</b>: オンにすると、アプリを開くたび(引っぱって再読み込みしたときも)、当てはまる新着を削除予定に移し、件数を下に出します。「元に戻す」で戻した案件や、一度でも状態を変えた案件は、次からは自動では移しません。</li>
+  <li><b>ホームの仕分けボタン</b>: チェックがあるとき、使っているプリセットの名前(なければ「プリセットなし」)と、開いたときに自動で移すなら赤い「自動」、移さないなら「手動」が出ます。</li>
   <li><b>今すぐ削除予定にする</b>: 今の新着で当てはまるものを全部移します。あとから「元に戻す」で戻せます。</li>
   <li><b>プリセット</b>: 選べるのは1つだけで、タップするとそのチェックに切り替わります。選んだあとにチェックを変えると「プリセットなし」になり、「＋ 新しいプリセットとして保存」で名前を付けて保存できます(同じ名前は上書き)。× で消せます。チェックとプリセットはどの端末でも同じです。</li></ul>`],
  ["並び順・日付",`<ul><li><b>並び順</b>: 点数順・新着順・FF率順・フォロワー数順。</li>
