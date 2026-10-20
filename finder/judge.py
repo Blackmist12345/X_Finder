@@ -47,9 +47,10 @@ PREFECTURES = [
 ]
 UNKNOWN_PLACE = "不明"
 EVENT_SOURCE = "イベント表"
+EVENT_GUESS_SOURCE = "イベント推定"  # イベントの一覧にないイベントの開催地を、AI が知っている範囲で補ったとき
 IMAGE_SOURCE = "画像"  # 判定のあとに image_step.py が画像から読んだとき
 PROFILE_SOURCE = "プロフィール"  # 前の判定の分だけ。撮影場所はプロフィールから決めない(活動地域は画面で別に読む)
-PLACE_SOURCES = ["本文", EVENT_SOURCE, UNKNOWN_PLACE]
+PLACE_SOURCES = ["本文", EVENT_SOURCE, EVENT_GUESS_SOURCE, UNKNOWN_PLACE]
 
 SCHEMA = {
     "type": "ARRAY",
@@ -66,11 +67,14 @@ SCHEMA = {
             "prefecture": {"type": "STRING", "enum": PREFECTURES + [UNKNOWN_PLACE]},
             "prefecture_source": {"type": "STRING", "enum": PLACE_SOURCES},
             "place": {"type": "STRING"},
+            "event": {"type": "STRING"},
+            "event_venue": {"type": "STRING"},
+            "event_prefecture": {"type": "STRING", "enum": PREFECTURES + [UNKNOWN_PLACE, VARIES]},
             "dates": {"type": "STRING"},
             "summary": {"type": "STRING"},
         },
         "required": ["id", "wants_photographer", "official_or_job", "case_type", "is_cosplay", "works",
-                     "excluded_work", "prefecture", "prefecture_source", "place", "dates", "summary"],
+                     "excluded_work", "prefecture", "prefecture_source", "place", "event", "event_venue", "event_prefecture", "dates", "summary"],
     },
 }
 
@@ -100,10 +104,16 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
 - prefecture: 撮影する場所(スタジオ・会場・イベントの開催地)の都道府県。次の順で判断する。
   1. 本文・引用元の本文に書かれた地名・会場名・駅名
   2. ポストに「イベントの意味」が付いていれば、そこに書かれた開催地(「回ごとにちがう」なら本文から判断する)
-  どちらでも分からなければ「不明」。投稿者プロフィールの地域・自己紹介は依頼主の活動地域で、撮影場所とは別なので使わない。
+  3. 「イベントの意味」が付いていないイベントで撮影するなら、下の event_prefecture(そのイベントの開催地として知っている都道府県)
+  どれでも分からなければ「不明」。投稿者プロフィールの地域・自己紹介は依頼主の活動地域で、撮影場所とは別なので使わない。
   全国のポストが混ざっているので、推測で東京などにしないこと。
-- prefecture_source: prefecture をどこから判断したか(本文 / イベント表 / 不明)。
-- place: 会場名やイベント名・地域(本文に書かれていれば。イベント表から分かった会場でもよい。なければ空文字)。
+- prefecture_source: prefecture をどこから判断したか(本文 / イベント表 / イベント推定 / 不明)。上の 3 で決めたら「イベント推定」。
+- place: 会場名やイベント名・地域(本文に書かれていれば。イベント表から分かった会場や、event_venue でもよい。なければ空文字)。
+- event: 撮影するイベント(即売会・コスプレイベント・ライブ・展示会など)の名前を、本文に書かれているとおりに(略称でもよい)。
+  「イベント」「併せ」「撮影会」のような一般的な言葉だけなら空文字。イベントでないなら空文字。
+- event_venue: event の会場として知っている場所(例: 東京ビッグサイト)。確かでなければ空文字。
+- event_prefecture: event の開催地として知っている都道府県。開催地が回ごとに変わるイベントなら「毎回ちがう」。
+  確かに知っているときだけ書き、よく知らないイベント・聞いたことのないイベントは推測せず「不明」。event が空文字なら「不明」。
 - dates: 撮影日や候補日(なければ空文字)。日付は「10/18(土)」のように月/日(曜日)で書き、何日もあれば「、」で並べ、続く日は「10/18(土)〜19(日)」と書く。
   「明日」「明後日」「今週の土曜」「来週の日曜」「今週末」「来週末」「3日後」のように日付が数字で書かれていないときは、
   そのポストの「投稿日時」を基準に月/日(曜日)に直し、後ろに元の言い方を添える(例: 「10/18(土)(今週の土曜)」)。
@@ -316,6 +326,12 @@ def normalize(result):
         result["prefecture"], result["prefecture_source"] = UNKNOWN_PLACE, UNKNOWN_PLACE  # プロフィールからの推定は撮影場所にしない
     elif result.get("prefecture_source") not in PLACE_SOURCES:
         result["prefecture_source"] = "本文" if pref != UNKNOWN_PLACE else UNKNOWN_PLACE
+    if result.get("prefecture_source") == EVENT_GUESS_SOURCE and result.get("event_prefecture") != result.get("prefecture"):
+        result["prefecture"], result["prefecture_source"] = UNKNOWN_PLACE, UNKNOWN_PLACE  # 推定の根拠と食い違うものは使わない
+    if result.get("event_prefecture") not in PREFECTURES + [VARIES]:
+        result["event_prefecture"] = UNKNOWN_PLACE
+    result["event"] = str(result.get("event") or "").strip()[:60]
+    result["event_venue"] = str(result.get("event_venue") or "").strip()[:60]
     if result.get("case_type") not in TYPES:
         result["case_type"] = "その他"
     return result
