@@ -115,6 +115,18 @@ test("カードの状態: 開いても新着のまま(青い点だけ消える)�
   await assert.rejects(setReview(db, "1", { state: "bad" }), RangeError);
 });
 
+test("確認中: 自分で付けたときだけ。開いても変わらず、2週間を過ぎたら新着と同じく出ない", async () => {
+  assert.equal(await setReview(db, "1", { opened: true }), "new"); // 開いただけでは新着のまま
+  assert.equal(await setReview(db, "1", { state: "checking" }), "checking");
+  assert.equal(await setReview(db, "1", { opened: true }), "checking");
+  assert.equal((await getCase(db, "1")).review, "checking");
+  assert.equal(await setReview(db, "4", { state: "checking" }), "checking"); // 30 日前の案件
+  const ids = (await listCases(db, new URLSearchParams())).map((c) => [c.id, c.review]);
+  assert.ok(ids.some(([id, r]) => id === "1" && r === "checking"));
+  assert.ok(!ids.some(([id]) => id === "4"));
+  assert.equal((await saveSettings(db, { swipe_right: "checking" })).swipe_right, "checking");
+});
+
 test("前の「確認済み」の行は新着(開いた)として出る", async () => {
   db.raw.prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES ('1', 'seen', 'x', 'x')`).run();
   const c = (await listCases(db, new URLSearchParams())).find((x) => x.id === "1");

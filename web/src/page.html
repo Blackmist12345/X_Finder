@@ -51,7 +51,7 @@ try{applyFont(localStorage.getItem("finder-font")||"gothic")}catch(e){}
 :root{
   --bg:#f3f5f8; --surface:#ffffff; --surface-2:#eaeef4; --line:#d9dfe8;
   --fg:#141a24; --muted:#5d6878; --accent:#2b54d6; --accent-soft:#e3e9fb;
-  --rec:#e2372b; --rec-soft:#fde6e3; --ok:#1d8a55; --ok-soft:#e0f3e9; --warn:#b26a00; --warn-soft:#fbefd9;
+  --rec:#e2372b; --rec-soft:#fde6e3; --ok:#1d8a55; --ok-soft:#e0f3e9; --warn:#b26a00; --warn-soft:#fbefd9; --chk:#6a4bd6; --chk-soft:#ece7fb;
   --font-body:"Zen Kaku Gothic New",system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
   --font-num:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
 }
@@ -65,12 +65,12 @@ try{applyFont(localStorage.getItem("finder-font")||"gothic")}catch(e){}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#0e1118; --surface:#161b25; --surface-2:#1f2633; --line:#2a3242;
   --fg:#e8ecf3; --muted:#97a2b4; --accent:#7f9cff; --accent-soft:#1f2a4a;
-  --rec:#ff5a4d; --rec-soft:#3a1b19; --ok:#4fd08f; --ok-soft:#14301f; --warn:#f0b04a; --warn-soft:#352812;
+  --rec:#ff5a4d; --rec-soft:#3a1b19; --ok:#4fd08f; --ok-soft:#14301f; --warn:#f0b04a; --warn-soft:#352812; --chk:#a58cff; --chk-soft:#241c3f;
   --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0e1118; --surface:#161b25; --surface-2:#1f2633; --line:#2a3242;
   --fg:#e8ecf3; --muted:#97a2b4; --accent:#7f9cff; --accent-soft:#1f2a4a;
-  --rec:#ff5a4d; --rec-soft:#3a1b19; --ok:#4fd08f; --ok-soft:#14301f; --warn:#f0b04a; --warn-soft:#352812;
+  --rec:#ff5a4d; --rec-soft:#3a1b19; --ok:#4fd08f; --ok-soft:#14301f; --warn:#f0b04a; --warn-soft:#352812; --chk:#a58cff; --chk-soft:#241c3f;
   --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:15px;line-height:1.55;
@@ -236,11 +236,11 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 header.top.slim .tab .t{max-height:0;opacity:0}
 header.top.slim .filters{grid-template-rows:0fr;opacity:0;pointer-events:none}
 header.top.slim .tab .c{font-size:17px}
-.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:10px;background:var(--surface-2);border-radius:12px;padding:3px}
+.tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:10px;background:var(--surface-2);border-radius:12px;padding:3px}
 .tab{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12.5px;border-radius:9px;padding:6px 2px;cursor:pointer;white-space:nowrap}
 .tab .c{display:block;font-family:var(--font-num);font-size:16px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
-/* 状態ごとの色: 新着=青 受注中=緑 保留=オレンジ 削除予定=赤 */
-.tab[data-tab="new"]{--tc:var(--accent);--tc-soft:var(--accent-soft)} .tab[data-tab="accepted"]{--tc:var(--ok);--tc-soft:var(--ok-soft)}
+/* 状態ごとの色: 新着=青 確認中=紫 受注中=緑 保留=オレンジ 削除予定=赤 */
+.tab[data-tab="new"]{--tc:var(--accent);--tc-soft:var(--accent-soft)} .tab[data-tab="checking"]{--tc:var(--chk);--tc-soft:var(--chk-soft)} .tab[data-tab="accepted"]{--tc:var(--ok);--tc-soft:var(--ok-soft)}
 .tab[data-tab="hold"]{--tc:var(--warn);--tc-soft:var(--warn-soft)} .tab[data-tab="delete"]{--tc:var(--rec);--tc-soft:var(--rec-soft)}
 .tab .c{color:var(--tc)}
 .tab[aria-pressed="true"]{background:var(--tc-soft);color:var(--tc);box-shadow:inset 0 0 0 1.5px var(--tc)}
@@ -248,11 +248,14 @@ header.top.slim .tab .c{font-size:17px}
 .pill.hold{background:var(--warn-soft);color:var(--warn);font-weight:500}
 .pill.del{background:var(--rec-soft);color:var(--rec)}
 .pill.acc{background:var(--ok-soft);color:var(--ok);font-weight:500}
+.pill.chk{background:var(--chk-soft);color:var(--chk);font-weight:500}
 .detail-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:20px}
 .detail-actions .btn{padding:13px 4px;font-size:14px;white-space:nowrap}
 /* 保留・削除予定はタブと同じ色、ブラックリストは黒と赤 */
 .btn.acc{grid-column:1/-1;border-color:var(--ok);color:var(--ok);background:var(--ok-soft)}
 .btn.acc.on{background:var(--ok);color:#fff}
+.btn.chk{grid-column:1/-1;border-color:var(--chk);color:var(--chk);background:var(--chk-soft)}
+.btn.chk.on{background:var(--chk);color:#fff}
 .btn.hold{border-color:var(--warn);color:var(--warn);background:var(--warn-soft)}
 .btn.hold.on{background:var(--warn);color:#fff}
 .btn.del{border-color:var(--rec);color:var(--rec);background:var(--rec-soft)}
@@ -267,7 +270,7 @@ header.top.slim .tab .c{font-size:17px}
 .swipe{position:relative;border-radius:var(--r);overflow:hidden}
 /* 裏の色はスワイプしている間だけ出す(スクロール中に裏が透けてチカチカしないように) */
 .swipe-bg{visibility:hidden;position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-weight:700;font-size:14px;color:#fff;background:var(--muted);border-radius:var(--r)}
-.swipe-bg.hold{background:var(--warn)} .swipe-bg.delete{background:var(--rec)} .swipe-bg.accepted{background:var(--ok)} .swipe-bg.new{background:var(--accent)}
+.swipe-bg.hold{background:var(--warn)} .swipe-bg.delete{background:var(--rec)} .swipe-bg.accepted{background:var(--ok)} .swipe-bg.checking{background:var(--chk)} .swipe-bg.new{background:var(--accent)}
 .swipe-bg.toR,.swipe-bg.toL{visibility:visible}
 .swipe-bg{opacity:.55;transition:opacity .12s} .swipe-bg.ready{opacity:1}
 .swipe-bg .l,.swipe-bg .r{opacity:0} .swipe-bg.toR .l,.swipe-bg.toL .r{opacity:1}
@@ -447,12 +450,12 @@ const TYPES=["コスプレ撮影","コスパフォ","踊ってみた","ポート
 // 値の並び。ここにない値は件数の多い順、記載なし・不明は最後
 const SORT_ORDER={gender:["女性","男性"],plan:["空き","休み","予定あり"],crit:["クリティカル","クリティカルでない"],type:TYPES};
 const ROLE={mention:"メンション",quoted:"引用元の投稿者",reply_to:"リプライ先",image:"画像から"};
-// カードの状態。新着=集めた案件が最初に入る(開いても変わらない) / 受注中=引き受けた案件(2週間を過ぎても残る)
-// 保留=ピン留め(2週間を過ぎても残る) / 削除予定=投稿日から14日で消える
-const TABS=[{k:"new",t:"新着"},{k:"accepted",t:"受注中"},{k:"hold",t:"保留"},{k:"delete",t:"削除予定"}];
+// カードの状態。新着=集めた案件が最初に入る(開いても変わらない) / 確認中=一度見て、まだ決めていない案件(自分で移したときだけ)
+// 受注中=引き受けた案件(2週間を過ぎても残る) / 保留=ピン留め(2週間を過ぎても残る) / 削除予定=投稿日から14日で消える
+const TABS=[{k:"new",t:"新着"},{k:"checking",t:"確認中"},{k:"accepted",t:"受注中"},{k:"hold",t:"保留"},{k:"delete",t:"削除予定"}];
 const DELETE_DAYS=14;
 // 左右のスワイプで付ける状態(左上の「X Finder」から開く設定で変えられる。保存先は D1 なので、どの端末でも同じ)
-const SWIPE_LABEL={hold:"📌 保留",delete:"削除予定",accepted:"受注中",none:"何もしない"};
+const SWIPE_LABEL={hold:"📌 保留",delete:"削除予定",checking:"確認中",accepted:"受注中",none:"何もしない"};
 let settings={swipe_right:"hold",swipe_left:"delete",sort_rule:{},sort_auto:false,sort_presets:[],sort_active:null};
 let state={rejected:false,sort:"score",tab:"new",day:null}; // day(カレンダーで選んだ撮影日)は保存しない
 let cases=[],loadedView=null,areaChoices=null;
@@ -545,6 +548,7 @@ function setLocalReview(id,review){const c=cases.find(x=>x.id===id);if(c)c.revie
 function daysLeft(c){if(!c.created_at)return null;return Math.max(0,Math.ceil((new Date(c.created_at).getTime()+DELETE_DAYS*864e5-Date.now())/864e5))}
 function reviewPill(c){
   if(c.review==="accepted"){const d=caseDates(c);return `<span class="pill acc">受注中${d.length&&d[d.length-1]<jstDay(0)?"・撮影日を過ぎました":""}</span>`}
+  if(c.review==="checking")return '<span class="pill chk">確認中</span>';
   if(c.review==="hold")return '<span class="pill hold">📌 保留</span>';
   if(c.review==="delete"){const d=daysLeft(c);return `<span class="pill del">削除予定${d==null?"":d?`・あと${d}日`:"・まもなく"}</span>`}
   return "";
@@ -591,7 +595,7 @@ function render(){
   const a=filtered();
   const crit=cases.filter(c=>c.critical).length;
   $("count").textContent=state.rejected?`対象外 ${cases.length}件(直近2週間)`:`直近2週間 ${cases.length}件 ・ クリティカル ${crit}件`;
-  const emptyMsg={new:"新着の案件はありません。",accepted:"受注中の案件はありません。<br>引き受けた案件は、詳細の「受注中にする」でここに移せます。",hold:"保留の案件はありません。<br>あとで見直したい案件は、詳細の「保留にする」でここに残せます。",
+  const emptyMsg={new:"新着の案件はありません。",checking:"確認中の案件はありません。<br>見たけれどまだ決めていない案件は、詳細の「確認中にする」でここに移せます。",accepted:"受注中の案件はありません。<br>引き受けた案件は、詳細の「受注中にする」でここに移せます。",hold:"保留の案件はありません。<br>あとで見直したい案件は、詳細の「保留にする」でここに残せます。",
     delete:`削除予定の案件はありません。<br>削除予定にした案件は、投稿日から${DELETE_DAYS}日で消えます。`}[state.tab];
   const rb=$("rejBar");rb.hidden=!state.rejected;
   rb.innerHTML=state.rejected?`<span>AI が募集ではないと判断したポスト(対象外)を表示中</span><button type="button" class="chip" data-rejected="0">戻る</button>`:"";
@@ -609,7 +613,6 @@ const PLACE_TAG={"イベント表":"イベント","イベント推定":"推定",
 function placeShort(c){const k=shootKnown(c)?c.prefecture_source:"";return PLACE_TAG[k]?`${place(c)}・${PLACE_TAG[k]}`:place(c)}
 function placeFrom(c){const k=shootKnown(c)?c.prefecture_source:"";return PLACE_FROM[k]?`(${PLACE_FROM[k]})`:""}
 // プロフィールから読み取った年齢と活動地域(依頼主の名前の横に小さく出す)
-const areaText=c=>(c.areas||[]).slice(0,2).join("・")+((c.areas||[]).length>2?" ほか":"");
 // どこから読んだか。プロフィールに書いてない項目だけリンク先(Litlink など)から読む
 function profileFrom(c){
   const items=[["年齢",c.age,c.age_from],["活動地域",(c.areas||[]).length,c.areas_from],["性別",c.gender,c.gender_from]].filter(i=>i[1]);
@@ -617,8 +620,13 @@ function profileFrom(c){
   if(!link.length)return "プロフィールから";
   return link.length<items.length?`${link.join("と")}はリンク先から`:"リンク先から";
 }
+// 名前の横は性別と年齢だけ(名前が長いと切れるので、活動地域はカードの「活動地域」の行に出す)
 function clientTags(c){
-  return `${c.gender?`<span class="ctag">${esc(c.gender)}</span>`:""}${c.age?`<span class="ctag ${c.age.minor?"minor":""}">${esc(c.age.label)}</span>`:""}${(c.areas||[]).length?`<span class="ctag">${esc(areaText(c))}</span>`:""}`;
+  return `${c.gender?`<span class="ctag">${esc(c.gender)}</span>`:""}${c.age?`<span class="ctag ${c.age.minor?"minor":""}">${esc(c.age.label)}</span>`:""}`;
+}
+function areaFact(c){
+  const a=c.areas||[];
+  return `<dt>活動地域</dt><dd>${a.length?esc(a.slice(0,4).join("・")+(a.length>4?` ほか${a.length-4}`:"")):'<span class="sub">記載なし</span>'}</dd>`;
 }
 function card(c){
   const rejected=state.rejected;
@@ -627,7 +635,7 @@ function card(c){
    <div class="score">${rejected?"":`<span class="n">${c.score==null?"—":Math.round(c.score)}</span><span class="l">点</span>`}</div>
    <div class="title">${esc(c.summary||"(要約なし)")}</div>
    <p class="excerpt">${esc((c.text||"").replace(/\s+/g," "))}</p>
-   ${c.dates||c.place||c.works?`<dl class="facts">${c.dates?`<dt>日程</dt><dd>${esc(c.dates)}${calBadge(c)}</dd>`:""}${c.place?`<dt>場所</dt><dd>${esc(c.place)}</dd>`:""}${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}</dl>`:""}
+   <dl class="facts">${c.dates?`<dt>日程</dt><dd>${esc(c.dates)}${calBadge(c)}</dd>`:""}${c.place?`<dt>場所</dt><dd>${esc(c.place)}</dd>`:""}${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}${areaFact(c)}</dl>
    <div class="client">${ava(c)}
     <span class="who">${esc(c.name||"")}${clientTags(c)} <span class="sub">@${esc(c.username||"")}</span>${c.others?` <span class="sub">ほか${c.others}人</span>`:""}</span>
     <span class="ff"><span class="num">${ffText(c)}</span><small>FF率</small></span></div>
@@ -775,13 +783,14 @@ function postBox(text,url,id,from){
   const body=`${from?`<span class="from">${esc(from)}</span>`:""}${esc(text)}`;
   return url&&/^\d+$/.test(String(id||""))?`<a class="post link" href="${esc(url)}" data-xpost="${esc(id)}" target="_blank" rel="noopener noreferrer">${body}<span class="open-x">X で開く ›</span></a>`:`<div class="post">${body}</div>`;
 }
-// 詳細のいちばん下のボタンは「受注中にする」(横いっぱい)と「とじる」「保留にする」「ブラックリストにいれる」「削除予定にする」。
+// 詳細のいちばん下のボタンは「確認中にする」「受注中にする」(横いっぱい)と「とじる」「保留にする」「ブラックリストにいれる」「削除予定にする」。
 // その状態のときにもう一度押すと外れて、新着に戻る
 function reviewButtons(review,c){
   const black=c&&c.blacklist?'<button type="button" class="btn blk" disabled>ブラックリスト登録済み</button>'
     :`<button type="button" class="btn blk" data-black-open="1" ${c&&c.author_id?"":"disabled"}>ブラックリストにいれる</button>`;
   const toggle=(k,on,off,cls)=>`<button type="button" class="btn ${cls} ${review===k?"on":""}" data-review="${review===k?"new":k}">${review===k?off:on}</button>`;
-  return `${toggle("accepted","受注中にする","受注中を外す","acc")}
+  return `${toggle("checking","確認中にする","確認中を外す","chk")}
+   ${toggle("accepted","受注中にする","受注中を外す","acc")}
    <button type="button" class="btn" data-close="1">とじる</button>
    ${toggle("hold","保留にする","保留を外す","hold")}
    ${black}
@@ -796,7 +805,7 @@ async function changeReview(btn){
     setLocalReview(id,review);
     box.innerHTML=reviewButtons(review,c0);
     const c=cases.find(x=>x.id===id);const meta=$("sheetMeta");
-    if(meta){meta.querySelectorAll(".pill.hold,.pill.del,.pill.acc").forEach(e=>e.remove());if(c)meta.insertAdjacentHTML("afterbegin",reviewPill(c))}
+    if(meta){meta.querySelectorAll(".pill.hold,.pill.del,.pill.acc,.pill.chk").forEach(e=>e.remove());if(c)meta.insertAdjacentHTML("afterbegin",reviewPill(c))}
   }catch(e){box.querySelectorAll("button").forEach(b=>b.disabled=false);alert(`保存できませんでした(${e.message})`)}
 }
 // ---- スワイプ ----
@@ -887,7 +896,7 @@ function pickFont(f){
   applyFont(f);
 }
 function openSettings(){
-  const opt=v=>["hold","delete","accepted","none"].map(k=>`<option value="${k}" ${v===k?"selected":""}>${SWIPE_LABEL[k]}</option>`).join("");
+  const opt=v=>["hold","delete","checking","accepted","none"].map(k=>`<option value="${k}" ${v===k?"selected":""}>${SWIPE_LABEL[k]}</option>`).join("");
   presentSheet(`<div class="grab"></div>
    <h2>設定</h2>
    <button type="button" class="btn help-btn" data-help="1">つかいかた ›</button>
@@ -924,15 +933,16 @@ function openBlacklist(){
 }
 // ---- つかいかた(詳しい仕様と使い方はここに集める) ----
 const HELP=[
- ["ホームの見かた",`<p>カードは点数の高い順に並びます(並び順は変えられます)。上の4つのタブで、カードの状態ごとに分けて見られます。</p>
+ ["ホームの見かた",`<p>カードは点数の高い順に並びます(並び順は変えられます)。上の5つのタブで、カードの状態ごとに分けて見られます。</p>
   <ul><li><b>新着</b>: 集めた案件が最初に入ります。開いても変わりません。投稿から2週間で一覧から消えます。</li>
+  <li><b>確認中</b>: 一度見て、まだ受注・保留・削除を決めていない案件です。詳細の「確認中にする」かスワイプで自分で移したときだけ入ります(開いただけでは新着のまま)。新着と同じく投稿から2週間で消えます。</li>
   <li><b>受注中</b>: 引き受けた案件です。2週間を過ぎても残り、撮影日が過ぎると「撮影日を過ぎました」と出ます。</li>
   <li><b>保留</b>: あとで見直したい案件です。2週間を過ぎても残ります。</li>
   <li><b>削除予定</b>: 投稿日から14日で消えます。</li></ul>
   <p>点数は Notion の「点数表」(種類・都道府県)と減点語で決まり、プラスの点のときは依頼主の FF率(フォロワー数÷フォロー数)を倍率として掛けます(0.5〜1.5倍。幅は【7】基本設定で変えられる)。内訳は詳細で見られます。</p>
-  <p><b>REC</b> はクリティカル(合計点が基準以上か、Notion の「クリティカル条件」に当たった案件)の印で、カードの枠も赤くなります。日程の横の「予定あり / 空き / 休み」は Google カレンダーとの照合です。依頼主の名前の横には、プロフィールから読んだ性別・年齢・活動地域が出ます(未成年は赤)。</p>
+  <p><b>REC</b> はクリティカル(合計点が基準以上か、Notion の「クリティカル条件」に当たった案件)の印で、カードの枠も赤くなります。日程の横の「予定あり / 空き / 休み」は Google カレンダーとの照合です。依頼主の名前の横には、プロフィールから読んだ性別・年齢が出ます(未成年は赤)。活動地域はカードの「活動地域」の行に出ます(書いていない人は「記載なし」)。</p>
   <p>一番上で下に引っぱると再読み込みします。下へスクロールすると上部がたたまれます。</p>`],
- ["仕分け",`<p>ホームの「仕分け」から、要らない案件をまとめて削除予定に移せます。チェックした値に1つでも当てはまる新着が移ります(受注中・保留は動かしません)。ボタンの赤い数字は、チェックしている値の数です。</p>
+ ["仕分け",`<p>ホームの「仕分け」から、要らない案件をまとめて削除予定に移せます。チェックした値に1つでも当てはまる新着が移ります(確認中・受注中・保留は動かしません)。</p>
   <ul><li><b>項目と値</b>: 依頼主(性別・年齢・活動地域)と案件(撮影場所・撮影日の予定・クリティカル・種類)ごとに、今の案件にある値を件数つきで並べます。件数は新着で数えます。書いていない・分からない案件は「記載なし」「不明」「日付不明」という1つの値になっていて、これもチェックできます。</li>
   <li><b>活動地域</b>: 読み取れる地域を最初から全部並べています。地方(関西・東海など)、都道府県(地方ごとの行)、都市(名古屋・神戸・仙台など)の3つで、市の名前で書いている人はその市の値になります(名古屋の人は「愛知」ではなく「名古屋」)。今の新着にいない地域は薄い字です。「たたむ」で今の新着にある値とチェックした値だけになり、「すべて出す」で戻ります。いくつも書いてある人は、その全部にチェックが付いたときだけ当てはまります(東京と大阪の人は、大阪だけのチェックでは移りません)。</li>
   <li><b>年齢</b>: 未成年と5歳刻み(18〜19、20〜24 … 50以上)、「成人済み」とだけ書いている人の「成人(年齢不明)」、記載なしを並べています。「20代」「30↑」のように幅がある人は、当てはまる刻みの全部にチェックが付いたときだけ当てはまります(20代の人は 20〜24 と 25〜29 の両方)。</li>
@@ -944,7 +954,7 @@ const HELP=[
  ["並び順・日付",`<ul><li><b>並び順</b>: 点数順・新着順・FF率順・フォロワー数順。</li>
   <li><b>日付</b>: 月のカレンダーが開き、日ごとに「その日が撮影日の案件の数」(青い数字、今のタブで数える)と Google カレンダーの予定(休みは緑)が出ます。日をタップすると、その日が撮影日の案件だけを一覧に出します。上の「解除」で戻ります。予定は今日から120日先まで出ます。</li></ul>`],
  ["案件の詳細",`<p>カードをタップすると詳細が開きます。本文をタップすると X アプリでそのポストが開きます。一番上で下に引っぱると閉じます。</p>
-  <p>下のボタンで「受注中」「保留」「削除予定」にできます。その状態のときにもう一度押すと外れて新着に戻ります。スパム・虚偽の申告・カメラマンだった人などは「ブラックリストにいれる」で、これまでとこれからのポストを出さず、AI の判定にもかけません(設定の「ブラックリスト」から解除できます)。</p>
+  <p>下のボタンで「確認中」「受注中」「保留」「削除予定」にできます。その状態のときにもう一度押すと外れて新着に戻ります。スパム・虚偽の申告・カメラマンだった人などは「ブラックリストにいれる」で、これまでとこれからのポストを出さず、AI の判定にもかけません(設定の「ブラックリスト」から解除できます)。</p>
   <p>場所(都道府県)は、本文 → Notion の「イベントの一覧」→ 添付画像 の順に判断し、本文以外から判断したときはカードに小さく出ます。依頼主のプロフィールからは決めません(分からないときは「場所不明」)。添付画像(メンバー表など)から読んだ X のアカウントは「関係するアカウント」に「画像から」と出ます。</p>
   <p>依頼主の年齢・活動地域・性別は、プロフィールに書いてある書き方(18↓、30↑、成人済み、関西、♀ など)から読みます。プロフィールに書いてないときは、プロフィールのリンク先(Litlink など)からも読み、「リンク先から」と出ます。</p>`],
  ["スワイプ",`<p>カードを左右にスワイプすると、設定で選んだ状態を付けられます(初期値は右=保留、左=削除予定)。その状態のカードをもう一度同じ向きにスワイプすると外れて、新着に戻ります。</p>`],
@@ -1206,8 +1216,8 @@ async function renderStats(){
    <div class="sec"><h3>対象の案件の種類(${statsDays}日)</h3>${hbars(st.types)}</div>
    <div class="sec"><h3>対象の案件の都道府県(${statsDays}日)</h3>${hbars(st.prefectures)}</div>
    <div class="sec"><h3>対象外の理由(${statsDays}日)</h3>${hbars(st.reject_reasons)}</div>
-   <div class="sec"><h3>カードの状態</h3><div class="kpis" style="grid-template-columns:repeat(3,1fr);margin-top:0">
-    <div class="kpi"><div class="k">受注中</div><div class="v">${fmt(rv.accepted||0)}</div></div><div class="kpi"><div class="k">保留</div><div class="v">${fmt(rv.hold||0)}</div></div><div class="kpi"><div class="k">削除予定</div><div class="v">${fmt(rv.delete||0)}</div></div></div></div>
+   <div class="sec"><h3>カードの状態</h3><div class="kpis" style="grid-template-columns:repeat(4,1fr);margin-top:0">
+    <div class="kpi"><div class="k">確認中</div><div class="v">${fmt(rv.checking||0)}</div></div><div class="kpi"><div class="k">受注中</div><div class="v">${fmt(rv.accepted||0)}</div></div><div class="kpi"><div class="k">保留</div><div class="v">${fmt(rv.hold||0)}</div></div><div class="kpi"><div class="k">削除予定</div><div class="v">${fmt(rv.delete||0)}</div></div></div></div>
    <p class="sub">金額は設定の為替レート(1ドル ${st.rate}円)で円にしています。日付は日本時間です。</p>
    <div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;
 }

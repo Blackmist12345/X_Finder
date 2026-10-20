@@ -16,9 +16,10 @@ const shootArea = (r) => {
   return { shoot_pref: pref, shoot_kanto: !!pref && KANTO.includes(pref), shoot_far: !!pref && !KANTO.includes(pref), shoot_metro: !!pref && METRO.includes(pref) };
 };
 const MAX_LIST = 300;
-// カードの状態。new=新着 / accepted=受注中 / hold=保留 / delete=削除予定。行がなければ新着(まだ開いていない)。
+// カードの状態。new=新着 / checking=確認中 / accepted=受注中 / hold=保留 / delete=削除予定。行がなければ新着(まだ開いていない)。
+// 確認中は自分で付けたときだけ(開いただけでは新着のまま)。2週間を過ぎたら新着と同じく消える
 // 開いたかどうかは状態とは別に opened_at で持つ(今の画面では使っていない。前に開いただけの行は opened_at = updated_at の新着になっている)
-const REVIEW_STATES = ["new", "accepted", "hold", "delete"];
+const REVIEW_STATES = ["new", "checking", "accepted", "hold", "delete"];
 // 前の名前(確認済み・未確認)で届いたら新着として扱う
 const STATE_ALIASES = { seen: "new", unread: "new" };
 const normState = (s) => STATE_ALIASES[s] || s;
@@ -26,7 +27,7 @@ const normState = (s) => STATE_ALIASES[s] || s;
 const KEEP_STATES = "('accepted', 'hold')";
 // 画面の設定(D1 の meta に保存するので、スマホでも PC でも同じになる)。スワイプで付ける状態。none は何もしない
 const SETTINGS_KEY = "finder_settings";
-const SWIPE_CHOICES = ["hold", "delete", "accepted", "none"];
+const SWIPE_CHOICES = ["hold", "delete", "checking", "accepted", "none"];
 const DEFAULT_SETTINGS = { swipe_right: "hold", swipe_left: "delete" };
 
 // ブラックリストの理由。spam=スパム / false=虚偽の申告 / photographer=被写体ではなくカメラマンだった / other=その他
@@ -108,7 +109,7 @@ function daysAgoIso(days) {
 const CASE_COLUMNS = `
   p.id, p.text, p.url, p.created_at, p.collected_at, p.status, p.skip_reason, p.quoted_id,
   j.case_type, j.works, j.prefecture, j.prefecture_source, j.place, j.dates, j.summary, j.score, j.critical, j.critical_reason, j.reject_reason,
-  p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, CASE WHEN r.state IN ('accepted', 'hold', 'delete') THEN r.state ELSE 'new' END AS review, (r.opened_at IS NOT NULL) AS opened,
+  p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, CASE WHEN r.state IN ('checking', 'accepted', 'hold', 'delete') THEN r.state ELSE 'new' END AS review, (r.opened_at IS NOT NULL) AS opened,
   (r.post_id IS NOT NULL AND NOT (r.state = 'new' AND r.opened_at IS r.updated_at)) AS touched,
   u.description, u.location, (SELECT ul.found_json FROM user_links ul WHERE ul.user_id = p.author_id) AS link_found`;
 
