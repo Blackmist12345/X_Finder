@@ -449,7 +449,7 @@ const TABS=[{k:"new",t:"新着"},{k:"accepted",t:"受注中"},{k:"hold",t:"保�
 const DELETE_DAYS=14;
 // 左右のスワイプで付ける状態(左上の「X Finder」から開く設定で変えられる。保存先は D1 なので、どの端末でも同じ)
 const SWIPE_LABEL={hold:"📌 保留",delete:"削除予定",accepted:"受注中",none:"何もしない"};
-let settings={swipe_right:"hold",swipe_left:"delete",sort_rule:{},sort_auto:false,sort_presets:[]};
+let settings={swipe_right:"hold",swipe_left:"delete",sort_rule:{},sort_auto:false,sort_presets:[],sort_active:null};
 let state={rejected:false,sort:"score",tab:"new",day:null}; // day(カレンダーで選んだ撮影日)は保存しない
 let cases=[],loadedView=null,areaChoices=null;
 try{const s=JSON.parse(localStorage.getItem("finder-ui")||"null");if(s){state.sort=s.sort||"score";state.tab=TABS.some(t=>t.k===s.tab)?s.tab:"new"}}catch(e){}
@@ -932,7 +932,7 @@ const HELP=[
   <li><b>撮影場所</b>はスタジオや会場の都道府県(本文・イベントの一覧・画像から)です。イベントの一覧にないイベントは、AIが知っている開催地を使い(カードに「推定」)、そのイベントを一覧に足します。間違いは Notion の一覧で直すと次から使われます。47都道府県を地方ごとの行で最初から全部並べ、分からない案件は「不明」です。「たたむ」で今ある値だけになります。<b>撮影日の予定</b>は Google カレンダーとの照合で、つながっているときだけ出ます(休みの予定は「休み」)。</li>
   <li><b>開いたときに自動で仕分ける</b>: オンにすると、アプリを開くたび(引っぱって再読み込みしたときも)、当てはまる新着を削除予定に移し、件数を下に出します。「元に戻す」で戻した案件や、一度でも状態を変えた案件は、次からは自動では移しません。</li>
   <li><b>今すぐ削除予定にする</b>: 今の新着で当てはまるものを全部移します。あとから「元に戻す」で戻せます。</li>
-  <li><b>プリセット</b>: 「＋ 今のチェックを保存」で今のチェックに名前を付けて保存し、タップで切り替えます。× で消せます。チェックとプリセットはどの端末でも同じです。</li></ul>`],
+  <li><b>プリセット</b>: 選べるのは1つだけで、タップするとそのチェックに切り替わります。選んだあとにチェックを変えると「プリセットなし」になり、「＋ 新しいプリセットとして保存」で名前を付けて保存できます(同じ名前は上書き)。× で消せます。チェックとプリセットはどの端末でも同じです。</li></ul>`],
  ["並び順・日付",`<ul><li><b>並び順</b>: 点数順・新着順・FF率順・フォロワー数順。</li>
   <li><b>日付</b>: 月のカレンダーが開き、日ごとに「その日が撮影日の案件の数」(青い数字、今のタブで数える)と Google カレンダーの予定(休みは緑)が出ます。日をタップすると、その日が撮影日の案件だけを一覧に出します。上の「解除」で戻ります。予定は今日から120日先まで出ます。</li></ul>`],
  ["案件の詳細",`<p>カードをタップすると詳細が開きます。本文をタップすると X アプリでそのポストが開きます。一番上で下に引っぱると閉じます。</p>
@@ -1045,12 +1045,13 @@ function openSort(){
 }
 function renderSort(){
   const body=$("sortBody");if(!body)return;
-  const rule=settings.sort_rule,cur=ruleKey(rule);
+  const rule=settings.sort_rule;
   const news=cases.filter(c=>c.review==="new"),hits=news.filter(c=>sortHit(c)).length;
   const item=f=>{const vals=facetValues(f),on=rule[f.k]||[];
     return `<div class="sort-item"><h3>${f.t}</h3><div class="vals">${vals.length?vals.map(([v,n])=>`<button type="button" class="v${NA_VALUES.includes(v)?" na":""}" data-sv="${f.k}" data-val="${esc(v)}" aria-pressed="${on.includes(v)}"><i></i>${esc(v)}<small>${n}</small></button>`).join(""):'<span class="sub">新着がありません</span>'}</div></div>`};
-  body.innerHTML=`<div class="sort-presets">${settings.sort_presets.map((p,i)=>`<span class="preset${ruleKey(p.rule)===cur?" on":""}"><button type="button" class="chip" data-preset="${i}">${esc(p.name)}</button><button type="button" class="pdel" data-preset-del="${i}" aria-label="${esc(p.name)}を消す">×</button></span>`).join("")}
-     <button type="button" class="chip add" data-preset-save="1">＋ 今のチェックを保存</button></div>
+  const act=activePreset();
+  body.innerHTML=`<div class="sort-presets">${settings.sort_presets.map((p,i)=>`<span class="preset${p===act?" on":""}"><button type="button" class="chip" data-preset="${i}" aria-pressed="${p===act}">${esc(p.name)}</button><button type="button" class="pdel" data-preset-del="${i}" aria-label="${esc(p.name)}を消す">×</button></span>`).join("")}
+     ${act?"":`<button type="button" class="chip add" data-preset-save="1">＋ ${settings.sort_presets.length?"新しいプリセットとして保存":"今のチェックを保存"}</button>`}</div>
    ${["依頼主","案件"].map(g=>`<div class="sort-grp">${g}</div>${usedFacets().filter(f=>f.g===g).map(f=>{const fs=fullSections(f.k);return fs?fullItem(f,fs):item(f)}).join("")}`).join("")}
    <div class="sort-auto" data-sort-auto="1"><span>開いたときに自動で仕分ける</span><button type="button" class="switch" role="switch" aria-checked="${!!settings.sort_auto}" aria-label="開いたときに自動で仕分ける"></button></div>
    <div class="sort-foot"><p class="sum">今の新着 ${news.length}件のうち <b>${hits}件</b> が当てはまります</p>
@@ -1067,15 +1068,25 @@ async function saveSort(body){
 function toggleSortValue(k,v){
   const on=new Set(settings.sort_rule[k]||[]);on.has(v)?on.delete(v):on.add(v);
   const rule={...settings.sort_rule,[k]:[...on]};if(!on.size)delete rule[k];
-  saveSort({sort_rule:rule});
+  saveSort({sort_rule:rule,sort_active:null}); // チェックを変えたら、プリセットを使っていない状態になる
+}
+// 選べるプリセットは1つだけ。選んだあとにチェックを変えたものは、選んでいないことにする
+function activePreset(){
+  const p=settings.sort_presets.find(x=>x.name===settings.sort_active);
+  return p&&ruleKey(p.rule)===ruleKey(settings.sort_rule)?p:null;
+}
+function presetPick(i){
+  const p=settings.sort_presets[i];if(!p||p===activePreset())return;
+  saveSort({sort_rule:p.rule,sort_active:p.name});
 }
 function presetSave(){
-  const name=(prompt("プリセットの名前","")||"").trim().slice(0,20);if(!name)return;
-  saveSort({sort_presets:[...settings.sort_presets.filter(p=>p.name!==name),{name,rule:settings.sort_rule}].slice(-20)});
+  const name=(prompt("新しいプリセットの名前","")||"").trim().slice(0,20);if(!name)return;
+  if(settings.sort_presets.some(p=>p.name===name)&&!confirm(`「${name}」はもうあります。今のチェックで上書きしますか`))return;
+  saveSort({sort_presets:[...settings.sort_presets.filter(p=>p.name!==name),{name,rule:settings.sort_rule}].slice(-20),sort_active:name});
 }
 function presetDelete(i){
   const p=settings.sort_presets[i];if(!p||!confirm(`プリセット「${p.name}」を消しますか`))return;
-  saveSort({sort_presets:settings.sort_presets.filter((_,j)=>j!==i)});
+  saveSort({sort_presets:settings.sort_presets.filter((_,j)=>j!==i),...(p.name===settings.sort_active?{sort_active:null}:{})});
 }
 // 削除予定に移して「元に戻す」を出す。移した案件は、このあと自動では動かさない(touched)
 async function moveToDelete(ids,msg){
@@ -1214,7 +1225,7 @@ document.addEventListener("click",ev=>{
     $("blackBox").scrollIntoView({behavior:"smooth",block:"nearest"});return}
   if(ev.target.closest("[data-black-cancel]")){$("blackBox").innerHTML="";return}
   const ub=ev.target.closest("[data-unblack]");if(ub){unblack(ub);return}
-  const pr=ev.target.closest("[data-preset]");if(pr){const p=settings.sort_presets[Number(pr.dataset.preset)];if(p)saveSort({sort_rule:p.rule});return}
+  const pr=ev.target.closest("[data-preset]");if(pr){presetPick(Number(pr.dataset.preset));return}
   const pd=ev.target.closest("[data-preset-del]");if(pd){presetDelete(Number(pd.dataset.presetDel));return}
   if(ev.target.closest("[data-preset-save]")){presetSave();return}
   const tp=ev.target.closest("[data-theme-pick]");if(tp){pickTheme(tp.dataset.themePick);return}
