@@ -31,6 +31,10 @@ def now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def days_ago_iso(days, now=None):
+    return ((now or datetime.now(timezone.utc)) - timedelta(days=days)).replace(microsecond=0).isoformat()
+
+
 def to_iso(created_at):
     """TwitterAPI.io の createdAt("Sat Oct 12 10:00:00 +0000 2026")を ISO 形式にする。"""
     if not created_at:
@@ -217,7 +221,7 @@ def purge_deleted(d1, now=None):
     for i in range(0, len(ids), 90):
         part = ids[i:i + 90]
         marks = ", ".join("?" for _ in part)
-        for table, col in (("post_users", "post_id"), ("image_reads", "post_id"), ("judgments", "post_id"), ("reviews", "post_id"), ("posts", "id")):
+        for table, col in (("post_users", "post_id"), ("image_reads", "post_id"), ("post_checks", "post_id"), ("judgments", "post_id"), ("reviews", "post_id"), ("posts", "id")):
             d1.query(f"DELETE FROM {table} WHERE {col} IN ({marks})", part)
     return len(ids)
 

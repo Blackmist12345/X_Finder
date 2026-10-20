@@ -52,6 +52,8 @@ const TABLES_DDL = [
   // プロフィールのリンク先から読み取った年齢・活動地域・性別(書くのは収集の方。表がまだなくても一覧が開けるように作っておく)
   `CREATE TABLE IF NOT EXISTS user_links (
     user_id TEXT PRIMARY KEY, urls_json TEXT NOT NULL, updated_at TEXT NOT NULL, fetched_at TEXT, page_url TEXT, found_json TEXT, error TEXT)`,
+  // 削除ポスト確認の結果(書くのは収集の方。元のポストが見られなくなったら gone_at が入る)
+  `CREATE TABLE IF NOT EXISTS post_checks (post_id TEXT PRIMARY KEY, checked_at TEXT NOT NULL, gone_at TEXT)`,
 ];
 let tablesReady = false;
 async function ensureTables(db) {
@@ -113,7 +115,8 @@ const CASE_COLUMNS = `
   j.case_type, j.works, j.prefecture, j.prefecture_source, j.place, j.dates, j.summary, j.score, j.critical, j.critical_reason, j.reject_reason,
   p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, CASE WHEN r.state IN ('checking', 'accepted', 'hold', 'delete') THEN r.state ELSE 'new' END AS review, (r.opened_at IS NOT NULL) AS opened,
   (r.post_id IS NOT NULL AND NOT (r.state = 'new' AND r.opened_at IS r.updated_at)) AS touched,
-  u.description, u.location, (SELECT ul.found_json FROM user_links ul WHERE ul.user_id = p.author_id) AS link_found`;
+  u.description, u.location, (SELECT ul.found_json FROM user_links ul WHERE ul.user_id = p.author_id) AS link_found,
+  (SELECT pc.gone_at FROM post_checks pc WHERE pc.post_id = p.id) AS gone_at`;
 
 export async function listCases(db, params) {
   const view = params.get("view") === "rejected" ? "rejected" : "judged";

@@ -55,6 +55,14 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 CREATE INDEX IF NOT EXISTS reviews_state ON reviews (state);
 
+-- 削除ポスト確認(finder/deleted_step.py)の結果。元のポストが見られなくなったら gone_at を入れ、削除予定へ移す。
+-- 印の付いたポストは二度と確かめない(自分で新着などに戻したら、そのまま残る)。
+CREATE TABLE IF NOT EXISTS post_checks (
+  post_id TEXT PRIMARY KEY,
+  checked_at TEXT NOT NULL,
+  gone_at TEXT
+);
+
 -- ブラックリスト: X Finderで「スパム」「虚偽の申告」などと判断したアカウント(1 人 = 1 行、数字の ID)。
 -- 載っている人のポストは収集しても AI 判定にかけず(status=skipped)、X Finderにも出さない。解除もできる。
 CREATE TABLE IF NOT EXISTS blacklist (

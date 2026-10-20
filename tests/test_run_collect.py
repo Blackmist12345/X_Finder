@@ -11,6 +11,7 @@ def wired(d1, monkeypatch, tmp_path):
     monkeypatch.setattr(run_collect, "Notion", lambda key: notion)
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.delenv("TWITTERAPI_KEY", raising=False)  # 削除ポスト確認が本物の API を呼ばないように
     return d1, summary
 
 

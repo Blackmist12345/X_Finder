@@ -127,6 +127,14 @@ test("確認中: 自分で付けたときだけ。開いても変わらず、2�
   assert.equal((await saveSettings(db, { swipe_right: "checking" })).swipe_right, "checking");
 });
 
+test("削除ポスト確認で見られなくなったカードには印(gone_at)が付く", async () => {
+  db.raw.prepare("INSERT INTO post_checks (post_id, checked_at, gone_at) VALUES ('1', 't', 't')").run();
+  const cases = await listCases(db, new URLSearchParams());
+  assert.equal(cases.find((c) => c.id === "1").gone_at, "t");
+  assert.ok(cases.filter((c) => c.id !== "1").every((c) => c.gone_at === null));
+  assert.equal((await getCase(db, "1")).gone_at, "t");
+});
+
 test("スワイプは状態タブごと: 前からの設定はどのタブも同じ、そのタブの状態は新着に戻すになる", async () => {
   const first = await getSettings(db);
   assert.deepEqual(first.swipe_tabs.new, { right: "hold", left: "delete" });

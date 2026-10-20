@@ -135,6 +135,7 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .pill{font-size:11.5px;border-radius:6px;padding:2px 7px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
 .pill.type{background:var(--accent-soft);color:var(--accent);font-weight:500}
 .pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.gone{background:var(--surface-2);color:var(--muted);border:1px dashed var(--muted)}
 .ctag{display:inline-block;font-size:11px;line-height:1.5;border-radius:5px;padding:0 5px;margin-left:4px;background:var(--surface-2);color:var(--muted);vertical-align:1px;white-space:nowrap}
 .ctag.minor{background:var(--rec-soft);color:var(--rec);font-weight:600}
 /* Google カレンダーの照合 */
@@ -559,6 +560,8 @@ function reviewPill(c){
   if(c.review==="delete"){const d=daysLeft(c);return `<span class="pill del">削除予定${d==null?"":d?`・あと${d}日`:"・まもなく"}</span>`}
   return "";
 }
+// 削除ポスト確認で、元のポストが見られなくなっていたカード
+const gonePill=c=>c.gone_at?'<span class="pill gone">元のポストが見られません</span>':"";
 async function load(){
   const view=state.rejected?"rejected":"judged";
   detailCache.clear();
@@ -637,7 +640,7 @@ function areaFact(c){
 function card(c){
   const rejected=state.rejected;
   return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card ${c.critical?"crit":""}" data-id="${esc(c.id)}">
-   <div class="meta">${reviewPill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(placeShort(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
+   <div class="meta">${reviewPill(c)}${gonePill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(placeShort(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
    <div class="score">${rejected?"":`<span class="n">${c.score==null?"—":Math.round(c.score)}</span><span class="l">点</span>`}</div>
    <div class="title">${esc(c.summary||"(要約なし)")}</div>
    <p class="excerpt">${esc((c.text||"").replace(/\s+/g," "))}</p>
@@ -728,7 +731,7 @@ function sheetHtml(c,full){
   const cu=safeUser(c.username);
   const detail=c.score_detail||[];
   return `<div class="grab"></div>
-   <div class="meta" id="sheetMeta">${reviewPill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span>${c.score!=null?`<span class="pill">${Math.round(c.score)}点</span>`:""}<span class="pill">${ago(c.created_at)}に投稿</span>${c.reject_reason?`<span class="pill warn">${esc(c.reject_reason)}</span>`:""}</div>
+   <div class="meta" id="sheetMeta">${reviewPill(c)}${gonePill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span>${c.score!=null?`<span class="pill">${Math.round(c.score)}点</span>`:""}<span class="pill">${ago(c.created_at)}に投稿</span>${c.reject_reason?`<span class="pill warn">${esc(c.reject_reason)}</span>`:""}</div>
    <h2>${esc(c.summary||"(要約なし)")}</h2>
    <dl class="facts"><dt>日程</dt><dd>${esc(c.dates||"不明")}</dd>${calDetail(c)}<dt>場所</dt><dd>${esc(c.place||"")}${c.place?" ・ ":""}${esc(place(c))}${esc(placeFrom(c))}</dd>
     ${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}${c.critical_reason?`<dt>REC</dt><dd>${esc(c.critical_reason)}</dd>`:""}</dl>
@@ -950,6 +953,7 @@ const HELP=[
   <li><b>受注中</b>: 引き受けた案件です。2週間を過ぎても残り、撮影日が過ぎると「撮影日を過ぎました」と出ます。</li>
   <li><b>保留</b>: あとで見直したい案件です。2週間を過ぎても残ります。</li>
   <li><b>削除予定</b>: 投稿日から14日で消えます。</li></ul>
+  <p>新着・確認中・保留のカードは、元のポストが消されていないかを決まった間隔で確かめます(Notion【8】の「削除確認の頻度(時間)」、0 で確かめない)。見られなくなっていたら「元のポストが見られません」の印を付けて削除予定に移します。印の付いたカードを自分で戻したときは、もう確かめません。受注中と削除予定は確かめません。</p>
   <p>点数は Notion の「点数表」(種類・都道府県)と減点語で決まり、プラスの点のときは依頼主の FF率(フォロワー数÷フォロー数)を倍率として掛けます(0.5〜1.5倍。幅は【7】基本設定で変えられる)。内訳は詳細で見られます。</p>
   <p><b>REC</b> はクリティカル(合計点が基準以上か、Notion の「クリティカル条件」に当たった案件)の印で、カードの枠も赤くなります。日程の横の「予定あり / 空き / 休み」は Google カレンダーとの照合です。依頼主の名前の横には、プロフィールから読んだ性別・年齢が出ます(未成年は赤)。活動地域はカードの「活動地域」の行に出ます(書いていない人は「記載なし」)。</p>
   <p>一番上で下に引っぱると再読み込みします。下へスクロールすると上部がたたまれます。</p>`],
