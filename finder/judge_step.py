@@ -5,11 +5,15 @@ production: D1 で判定待ち(status=new)のポストが「まとめて判定�
 dry_run: 今回集めたポストを判定して要約に出すだけで、何も保存しない。
 """
 import json
+import unicodedata
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from finder import judge, store
+from finder import notion as nt
+from finder.config import TABLE_IDS_KEY
 from finder.score import score
+from finder.tables import VARIES
 
 MAX_PER_RUN = 200  # 1 回で判定する上限(長く止まっていたあとに費用が跳ねないように)
 
@@ -91,6 +95,54 @@ def save(d1, evaluated, missing_ids, model):
                      [status, reason] + part)
 
 
+ADDED_EVENTS_KEY = "ai_added_events"  # AI が一覧に足したイベント名。Notion で消した行をまた足さないために覚えておく
+MAX_EVENTS_PER_RUN = 10
+
+
+def _event_key(name):
+    return unicodedata.normalize("NFKC", name or "").lower().replace(" ", "")
+
+
+def new_events(evaluated, events, added):
+    """対象の案件に出てきた、イベントの一覧にないイベントを返す。[(名前, 会場, 都道府県, ポストのURL)]"""
+    seen = set(added)
+    out = []
+    for it, r, reject, *_ in evaluated:
+        name = r.get("event") or ""
+        key = _event_key(name)
+        if reject or len(key) < 2 or key in seen or judge.match_events(name, events):
+            continue
+        seen.add(key)
+        pref = r.get("event_prefecture")
+        out.append((name, r.get("event_venue") or "", pref if pref in judge.PREFECTURES or pref == VARIES else "", it.get("url") or ""))
+    return out[:MAX_EVENTS_PER_RUN]
+
+
+def add_events(notion, d1, evaluated, config):
+    """一覧にないイベントを【10】イベントの一覧に足す(開催地は AI の推定。Notion で直せば次から一覧が使われる)。要約の行を返す。"""
+    table_id = (d1.get_meta(TABLE_IDS_KEY) or {}).get("events")
+    if not notion or not table_id:
+        return []
+    added = d1.get_meta(ADDED_EVENTS_KEY, []) or []
+    found = new_events(evaluated, config.get("events"), added)
+    if not found:
+        return []
+    today = store.now_iso()[:10]
+    done = []
+    for name, venue, pref, url in found:
+        try:
+            notion.create_page(table_id, {"略称": nt.p_title(name), "正式名": nt.p_text(""), "会場": nt.p_text(venue),
+                                          "都道府県": nt.p_text(pref), "有効": nt.p_check(True),
+                                          "備考": nt.p_text(f"AIが足した(開催地は推定・要確認) {today} {url}".strip())})
+        except Exception as e:  # 足せなくても判定の結果は残す
+            return [f"- ⚠️ イベントの一覧に足せませんでした: {e}"] + ([f"- イベントの一覧に足した: {'、'.join(done)}"] if done else [])
+        added.append(_event_key(name))
+        done.append(f"{name}({pref or '開催地不明'})")
+        d1.set_meta(ADDED_EVENTS_KEY, added[-500:])
+        config.setdefault("events", []).append({"aliases": [name], "name": "", "venue": venue, "prefecture": pref})
+    return [f"- イベントの一覧に足した: {'、'.join(done)}"]
+
+
 def should_wait(items, batch_size, max_wait_minutes, now=None):
     """判定を次回に回すなら True。件数がそろうか、いちばん古いポストが待ちすぎたら判定する。"""
     if len(items) >= batch_size:
@@ -104,7 +156,7 @@ def should_wait(items, batch_size, max_wait_minutes, now=None):
     return waited < timedelta(minutes=max_wait_minutes)
 
 
-def run(d1, config, production, api_keys, tweets=None, decisions=None, session=None):
+def run(d1, config, production, api_keys, tweets=None, decisions=None, session=None, notion=None):
     """判定と採点を行い、要約の行を返す。失敗しても例外は出さない(ポストは判定待ちのまま残る)。
 
     api_keys は {環境変数の名前: 鍵}。判定に使うAI の会社に合う鍵を使う。
@@ -137,9 +189,11 @@ def run(d1, config, production, api_keys, tweets=None, decisions=None, session=N
     usd = judge.cost_usd(model, t_in, t_out)
     evaluated = evaluate(items, results, config)
     missing = [it["id"] for it in items if it["id"] not in results]
+    event_lines = []
     if production:
         save(d1, evaluated, missing, model)
         store.record_cost(d1, judge.provider(model), t_in + t_out, usd, f"{model} {len(items)}件")
+        event_lines = add_events(notion, d1, evaluated, config)
 
     kept = sorted([e for e in evaluated if not e[2]], key=lambda e: -e[3])
     reasons = Counter(e[2].split(":")[0] for e in evaluated if e[2])
@@ -151,6 +205,7 @@ def run(d1, config, production, api_keys, tweets=None, decisions=None, session=N
     ]
     if reasons:
         lines.append("- 対象外の理由: " + "、".join(f"{k} {v}件" for k, v in reasons.most_common()))
+    lines += event_lines
     critical = sum(1 for e in kept if e[5])
     if critical:
         lines.append(f"- クリティカル: {critical}件")

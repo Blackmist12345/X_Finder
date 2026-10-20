@@ -290,6 +290,63 @@ def test_normalize_unknown_place_source():
     assert judge.normalize(ai_result("1", prefecture="千葉県", prefecture_source="画面"))["prefecture_source"] == "本文"
 
 
+def test_normalize_event_guess():
+    # 一覧にないイベントは、AI が知っている開催地を「イベント推定」で使う
+    r = judge.normalize(ai_result("1", prefecture="千葉県", prefecture_source="イベント推定", event=" ホココス ",
+                                  event_venue="幕張メッセ", event_prefecture="千葉県"))
+    assert (r["prefecture"], r["prefecture_source"], r["event"]) == ("千葉県", "イベント推定", "ホココス")
+    # 推定と言いながら開催地を知らない・食い違うときは使わない
+    r = judge.normalize(ai_result("2", prefecture="東京都", prefecture_source="イベント推定", event="なにか", event_prefecture="不明"))
+    assert (r["prefecture"], r["prefecture_source"]) == ("不明", "不明")
+    r = judge.normalize(ai_result("3", event_prefecture="関東"))
+    assert r["event_prefecture"] == "不明" and r["event"] == "" and r["prefecture"] == "東京都"
+    assert "イベント推定" in judge.RULES and "event_prefecture" in judge.SCHEMA["items"]["required"]
+
+
+class EventNotion:
+    def __init__(self, fail=False):
+        self.created, self.fail = [], fail
+
+    def create_page(self, db_id, props):
+        if self.fail:
+            raise RuntimeError("down")
+        self.created.append((db_id, props))
+
+
+def test_add_unknown_events_to_list(d1):
+    from finder.config import TABLE_IDS_KEY
+    d1.set_meta(TABLE_IDS_KEY, {"events": "ev-db"})
+    cfg = {"events": [{"aliases": ["コミケ", "夏コミ"], "name": "コミックマーケット", "venue": "", "prefecture": "東京都"}]}
+    def ev(pid, name, pref="千葉県", reject=None, venue="幕張メッセ"):
+        it = {"id": pid, "url": f"https://x.com/u/status/{pid}"}
+        return (it, judge.normalize(ai_result(pid, event=name, event_venue=venue, event_prefecture=pref)), reject, 50, [], False, "")
+    evaluated = [ev("1", "ホココス"), ev("2", "ﾎｺｺｽ"),  # 全角半角ちがいは同じイベント
+                 ev("3", "夏コミ"),  # 一覧にある
+                 ev("4", "ACOSTA", pref="毎回ちがう", venue=""), ev("5", "撮影NG", reject="カメラマン募集ではない"),
+                 ev("6", "なぞイベ", pref="不明", venue=""), ev("7", "")]
+    notion = EventNotion()
+    lines = judge_step.add_events(notion, d1, evaluated, cfg)
+    names = [p["略称"]["title"][0]["text"]["content"] for _, p in notion.created]
+    assert names == ["ホココス", "ACOSTA", "なぞイベ"]
+    first = notion.created[0][1]
+    assert first["会場"]["rich_text"][0]["text"]["content"] == "幕張メッセ"
+    assert first["都道府県"]["rich_text"][0]["text"]["content"] == "千葉県"
+    assert "推定" in first["備考"]["rich_text"][0]["text"]["content"]
+    assert notion.created[1][1]["都道府県"]["rich_text"][0]["text"]["content"] == "毎回ちがう"
+    assert notion.created[2][1]["都道府県"] == {"rich_text": []}
+    assert lines == ["- イベントの一覧に足した: ホココス(千葉県)、ACOSTA(毎回ちがう)、なぞイベ(開催地不明)"]
+    # 一度足したものは、Notion で消されても足し直さない。この回の一覧にも入る
+    assert judge.match_events("ホココスで撮影", cfg["events"])
+    cfg["events"] = cfg["events"][:1]
+    notion2 = EventNotion()
+    assert judge_step.add_events(notion2, d1, evaluated, cfg) == [] and notion2.created == []
+    # Notion に書けなくても例外にしない
+    assert "足せませんでした" in judge_step.add_events(EventNotion(fail=True), d1, [ev("8", "新イベ")], cfg)[0]
+    # 一覧の表がまだないときは何もしない
+    d1.set_meta(TABLE_IDS_KEY, {})
+    assert judge_step.add_events(EventNotion(), d1, [ev("9", "別イベ")], cfg) == []
+
+
 def test_post_time_in_prompt_for_relative_dates():
     # 「今週の土曜」などを日付に直せるよう、投稿日時を日本時間と曜日で渡す
     assert judge.posted_label("2026-10-15T13:08:00+00:00") == "2026/10/15(木) 22:08"

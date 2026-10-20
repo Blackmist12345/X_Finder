@@ -140,7 +140,7 @@ def main():
     for w in warnings:
         lines.append(f"- ⚠️ {w}")
     lines += judge_step.run(d1, config, production, {k: os.environ.get(k) for k in judge.KEY_NAMES.values()},
-                            tweets=fresh, decisions=decisions)
+                            tweets=fresh, decisions=decisions, notion=notion)
     try:
         lines += image_step.run(d1, config, production, {k: os.environ.get(k) for k in judge.KEY_NAMES.values()})
     except Exception as e:  # 画像が読めなくても収集・判定の結果は残す
