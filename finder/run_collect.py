@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from finder import collect, filters, image_step, judge, judge_step, link_step, store
+from finder import collect, deleted_step, filters, image_step, judge, judge_step, link_step, store
 from finder.config import load_config
 from finder.d1 import D1
 from finder.notion import Notion
@@ -149,6 +149,10 @@ def main():
         lines += link_step.run(d1, production)
     except Exception as e:  # リンク先が読めなくても収集・判定の結果は残す
         lines += ["", f"- ⚠️ プロフィールのリンク先を読めませんでした: {e}"]
+    try:
+        lines += deleted_step.run(d1, config, production, os.environ.get("TWITTERAPI_KEY"))
+    except Exception as e:  # 確かめられなくても収集・判定の結果は残す(次の収集でもう一度試す)
+        lines += ["", f"- ⚠️ 削除ポスト確認ができませんでした: {e}"]
     lines += month_cost_lines(d1, basic)
     write_summary(lines)
 

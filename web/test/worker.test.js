@@ -115,6 +115,39 @@ test("カードの状態: 開いても新着のまま(青い点だけ消える)�
   await assert.rejects(setReview(db, "1", { state: "bad" }), RangeError);
 });
 
+test("確認中: 自分で付けたときだけ。開いても変わらず、2週間を過ぎたら新着と同じく出ない", async () => {
+  assert.equal(await setReview(db, "1", { opened: true }), "new"); // 開いただけでは新着のまま
+  assert.equal(await setReview(db, "1", { state: "checking" }), "checking");
+  assert.equal(await setReview(db, "1", { opened: true }), "checking");
+  assert.equal((await getCase(db, "1")).review, "checking");
+  assert.equal(await setReview(db, "4", { state: "checking" }), "checking"); // 30 日前の案件
+  const ids = (await listCases(db, new URLSearchParams())).map((c) => [c.id, c.review]);
+  assert.ok(ids.some(([id, r]) => id === "1" && r === "checking"));
+  assert.ok(!ids.some(([id]) => id === "4"));
+  assert.equal((await saveSettings(db, { swipe_right: "checking" })).swipe_right, "checking");
+});
+
+test("削除ポスト確認で見られなくなったカードには印(gone_at)が付く", async () => {
+  db.raw.prepare("INSERT INTO post_checks (post_id, checked_at, gone_at) VALUES ('1', 't', 't')").run();
+  const cases = await listCases(db, new URLSearchParams());
+  assert.equal(cases.find((c) => c.id === "1").gone_at, "t");
+  assert.ok(cases.filter((c) => c.id !== "1").every((c) => c.gone_at === null));
+  assert.equal((await getCase(db, "1")).gone_at, "t");
+});
+
+test("スワイプは状態タブごと: 前からの設定はどのタブも同じ、そのタブの状態は新着に戻すになる", async () => {
+  const first = await getSettings(db);
+  assert.deepEqual(first.swipe_tabs.new, { right: "hold", left: "delete" });
+  assert.deepEqual(first.swipe_tabs.hold, { right: "new", left: "delete" });
+  assert.deepEqual(first.swipe_tabs.delete, { right: "hold", left: "new" });
+  const s = await saveSettings(db, { swipe_tabs: { checking: { right: "accepted", left: "checking" }, new: { left: "new" } } });
+  assert.deepEqual(s.swipe_tabs.checking, { right: "accepted", left: "new" });
+  assert.deepEqual(s.swipe_tabs.new, { right: "hold", left: "none" });
+  assert.deepEqual((await getSettings(db)).swipe_tabs.checking, { right: "accepted", left: "new" });
+  await assert.rejects(saveSettings(db, { swipe_tabs: { bad: { right: "hold" } } }), RangeError);
+  await assert.rejects(saveSettings(db, { swipe_tabs: { new: { right: "zzz" } } }), RangeError);
+});
+
 test("前の「確認済み」の行は新着(開いた)として出る", async () => {
   db.raw.prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES ('1', 'seen', 'x', 'x')`).run();
   const c = (await listCases(db, new URLSearchParams())).find((x) => x.id === "1");

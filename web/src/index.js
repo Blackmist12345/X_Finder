@@ -16,9 +16,10 @@ const shootArea = (r) => {
   return { shoot_pref: pref, shoot_kanto: !!pref && KANTO.includes(pref), shoot_far: !!pref && !KANTO.includes(pref), shoot_metro: !!pref && METRO.includes(pref) };
 };
 const MAX_LIST = 300;
-// カードの状態。new=新着 / accepted=受注中 / hold=保留 / delete=削除予定。行がなければ新着(まだ開いていない)。
+// カードの状態。new=新着 / checking=確認中 / accepted=受注中 / hold=保留 / delete=削除予定。行がなければ新着(まだ開いていない)。
+// 確認中は自分で付けたときだけ(開いただけでは新着のまま)。2週間を過ぎたら新着と同じく消える
 // 開いたかどうかは状態とは別に opened_at で持つ(今の画面では使っていない。前に開いただけの行は opened_at = updated_at の新着になっている)
-const REVIEW_STATES = ["new", "accepted", "hold", "delete"];
+const REVIEW_STATES = ["new", "checking", "accepted", "hold", "delete"];
 // 前の名前(確認済み・未確認)で届いたら新着として扱う
 const STATE_ALIASES = { seen: "new", unread: "new" };
 const normState = (s) => STATE_ALIASES[s] || s;
@@ -26,7 +27,9 @@ const normState = (s) => STATE_ALIASES[s] || s;
 const KEEP_STATES = "('accepted', 'hold')";
 // 画面の設定(D1 の meta に保存するので、スマホでも PC でも同じになる)。スワイプで付ける状態。none は何もしない
 const SETTINGS_KEY = "finder_settings";
-const SWIPE_CHOICES = ["hold", "delete", "accepted", "none"];
+const SWIPE_CHOICES = ["new", "hold", "delete", "checking", "accepted", "none"];
+// スワイプは状態タブごとに決める(swipe_tabs = { タブ: { right, left } })。そのタブの状態そのものは選べない(新着に戻すのと同じなので new にする)
+const swipeFor = (tab, v) => (v === tab ? (tab === "new" ? "none" : "new") : v);
 const DEFAULT_SETTINGS = { swipe_right: "hold", swipe_left: "delete" };
 
 // ブラックリストの理由。spam=スパム / false=虚偽の申告 / photographer=被写体ではなくカメラマンだった / other=その他
@@ -49,6 +52,8 @@ const TABLES_DDL = [
   // プロフィールのリンク先から読み取った年齢・活動地域・性別(書くのは収集の方。表がまだなくても一覧が開けるように作っておく)
   `CREATE TABLE IF NOT EXISTS user_links (
     user_id TEXT PRIMARY KEY, urls_json TEXT NOT NULL, updated_at TEXT NOT NULL, fetched_at TEXT, page_url TEXT, found_json TEXT, error TEXT)`,
+  // 削除ポスト確認の結果(書くのは収集の方。元のポストが見られなくなったら gone_at が入る)
+  `CREATE TABLE IF NOT EXISTS post_checks (post_id TEXT PRIMARY KEY, checked_at TEXT NOT NULL, gone_at TEXT)`,
 ];
 let tablesReady = false;
 async function ensureTables(db) {
@@ -108,9 +113,10 @@ function daysAgoIso(days) {
 const CASE_COLUMNS = `
   p.id, p.text, p.url, p.created_at, p.collected_at, p.status, p.skip_reason, p.quoted_id,
   j.case_type, j.works, j.prefecture, j.prefecture_source, j.place, j.dates, j.summary, j.score, j.critical, j.critical_reason, j.reject_reason,
-  p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, CASE WHEN r.state IN ('accepted', 'hold', 'delete') THEN r.state ELSE 'new' END AS review, (r.opened_at IS NOT NULL) AS opened,
+  p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, CASE WHEN r.state IN ('checking', 'accepted', 'hold', 'delete') THEN r.state ELSE 'new' END AS review, (r.opened_at IS NOT NULL) AS opened,
   (r.post_id IS NOT NULL AND NOT (r.state = 'new' AND r.opened_at IS r.updated_at)) AS touched,
-  u.description, u.location, (SELECT ul.found_json FROM user_links ul WHERE ul.user_id = p.author_id) AS link_found`;
+  u.description, u.location, (SELECT ul.found_json FROM user_links ul WHERE ul.user_id = p.author_id) AS link_found,
+  (SELECT pc.gone_at FROM post_checks pc WHERE pc.post_id = p.id) AS gone_at`;
 
 export async function listCases(db, params) {
   const view = params.get("view") === "rejected" ? "rejected" : "judged";
@@ -383,6 +389,12 @@ export async function getSettings(db) {
   const saved = parseJson(row?.value, {});
   const out = { ...DEFAULT_SETTINGS };
   for (const k of Object.keys(DEFAULT_SETTINGS)) if (SWIPE_CHOICES.includes(saved[k])) out[k] = saved[k];
+  // タブごとの設定がまだない(前からの)保存は、どのタブも右・左の設定と同じにする
+  out.swipe_tabs = Object.fromEntries(REVIEW_STATES.map((tab) => {
+    const t = saved.swipe_tabs?.[tab] || {};
+    const pick = (v, fallback) => swipeFor(tab, SWIPE_CHOICES.includes(v) ? v : fallback);
+    return [tab, { right: pick(t.right, out.swipe_right), left: pick(t.left, out.swipe_left) }];
+  }));
   out.sort_rule = cleanRule(saved.sort_rule) || {};
   out.sort_auto = saved.sort_auto === true;
   out.sort_presets = cleanSortPresets(saved.sort_presets) || [];
@@ -402,6 +414,17 @@ export async function saveSettings(db, body) {
     if (body[k] === undefined) continue;
     if (!SWIPE_CHOICES.includes(body[k])) throw new RangeError(k);
     next[k] = body[k];
+  }
+  if (body.swipe_tabs !== undefined) {
+    if (!body.swipe_tabs || typeof body.swipe_tabs !== "object") throw new RangeError("swipe_tabs");
+    for (const [tab, t] of Object.entries(body.swipe_tabs)) {
+      if (!REVIEW_STATES.includes(tab) || !t || typeof t !== "object") throw new RangeError("swipe_tabs");
+      for (const side of ["right", "left"]) {
+        if (t[side] === undefined) continue;
+        if (!SWIPE_CHOICES.includes(t[side])) throw new RangeError("swipe_tabs");
+        next.swipe_tabs[tab][side] = swipeFor(tab, t[side]);
+      }
+    }
   }
   if (body.sort_rule !== undefined) {
     const rule = cleanRule(body.sort_rule);
