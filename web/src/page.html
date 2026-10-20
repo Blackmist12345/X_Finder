@@ -328,6 +328,12 @@ header.top.slim .tab .c{font-size:17px}
 .dbbar input{flex:1;min-width:0;font:inherit;font-size:16px;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:10px;padding:8px 10px}
 .setting{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
 .setting select{font-size:16px;padding:8px}
+/* スワイプの設定: 状態タブごとに左・右を選ぶ表。タブ名は状態の色 */
+.swgrid{display:grid;grid-template-columns:auto 1fr 1fr;gap:8px 8px;align-items:center;margin-top:4px}
+.swgrid>.sub{font-size:12px;text-align:center}
+.swgrid select{min-width:0;width:100%;font-size:15px;padding:7px 4px}
+.swtab{font-weight:700;font-size:14px;white-space:nowrap}
+.swtab[data-tab-c="new"]{color:var(--accent)} .swtab[data-tab-c="checking"]{color:var(--chk)} .swtab[data-tab-c="accepted"]{color:var(--ok)} .swtab[data-tab-c="hold"]{color:var(--warn)} .swtab[data-tab-c="delete"]{color:var(--rec)}
 .empty{text-align:center;color:var(--muted);padding:40px 0}
 .scrim{position:fixed;inset:0;background:rgba(10,14,20,.45);z-index:20;touch-action:none}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:21;background:var(--surface);border-radius:20px 20px 0 0;max-height:88%;overflow-y:auto;overscroll-behavior:none;-webkit-overflow-scrolling:touch;padding:8px 16px calc(24px + env(safe-area-inset-bottom,0px));max-width:560px;margin:0 auto;box-shadow:0 -8px 30px rgba(0,0,0,.18)}
@@ -455,8 +461,8 @@ const ROLE={mention:"メンション",quoted:"引用元の投稿者",reply_to:"�
 const TABS=[{k:"new",t:"新着"},{k:"checking",t:"確認中"},{k:"accepted",t:"受注中"},{k:"hold",t:"保留"},{k:"delete",t:"削除予定"}];
 const DELETE_DAYS=14;
 // 左右のスワイプで付ける状態(左上の「X Finder」から開く設定で変えられる。保存先は D1 なので、どの端末でも同じ)
-const SWIPE_LABEL={hold:"📌 保留",delete:"削除予定",checking:"確認中",accepted:"受注中",none:"何もしない"};
-let settings={swipe_right:"hold",swipe_left:"delete",sort_rule:{},sort_auto:false,sort_presets:[],sort_active:null};
+const SWIPE_LABEL={new:"新着に戻す",checking:"確認中",accepted:"受注中",hold:"📌 保留",delete:"削除予定",none:"何もしない"};
+let settings={swipe_right:"hold",swipe_left:"delete",swipe_tabs:{},sort_rule:{},sort_auto:false,sort_presets:[],sort_active:null};
 let state={rejected:false,sort:"score",tab:"new",day:null}; // day(カレンダーで選んだ撮影日)は保存しない
 let cases=[],loadedView=null,areaChoices=null;
 try{const s=JSON.parse(localStorage.getItem("finder-ui")||"null");if(s){state.sort=s.sort||"score";state.tab=TABS.some(t=>t.k===s.tab)?s.tab:"new"}}catch(e){}
@@ -809,10 +815,13 @@ async function changeReview(btn){
   }catch(e){box.querySelectorAll("button").forEach(b=>b.disabled=false);alert(`保存できませんでした(${e.message})`)}
 }
 // ---- スワイプ ----
+// スワイプで付ける状態は、今見ている状態タブごとに設定で決める。
 // 設定の状態をすでに付けているカードをスワイプしたら、その状態を外して新着に戻す
 function swipeTarget(c,dir){
-  const want=settings[dir>0?"swipe_right":"swipe_left"];
-  if(!want||want==="none")return null;
+  const side=dir>0?"right":"left";
+  const want=(settings.swipe_tabs?.[state.tab]||{})[side]||settings[dir>0?"swipe_right":"swipe_left"];
+  if(!want||want==="none"||(want==="new"&&c.review==="new"))return null;
+  if(want==="new")return {state:"new",label:SWIPE_LABEL.new,cls:"new"};
   if(c.review===want)return {state:"new",label:`${SWIPE_LABEL[want]}を外す`,cls:"new"};
   return {state:want,label:SWIPE_LABEL[want],cls:want};
 }
@@ -896,16 +905,18 @@ function pickFont(f){
   applyFont(f);
 }
 function openSettings(){
-  const opt=v=>["hold","delete","checking","accepted","none"].map(k=>`<option value="${k}" ${v===k?"selected":""}>${SWIPE_LABEL[k]}</option>`).join("");
+  // タブごとに、そのタブの状態以外を選べる(新着のタブでは「新着に戻す」もなし)
+  const opt=(tab,v)=>Object.keys(SWIPE_LABEL).filter(k=>k!==tab).map(k=>`<option value="${k}" ${v===k?"selected":""}>${SWIPE_LABEL[k]}</option>`).join("");
+  const sw=settings.swipe_tabs||{};
   presentSheet(`<div class="grab"></div>
    <h2>設定</h2>
    <button type="button" class="btn help-btn" data-help="1">つかいかた ›</button>
    <div class="sec" style="margin-top:8px"><h3>画面の色</h3><div class="theme-seg" id="themeSeg" role="group" aria-label="画面の色">${THEMES.map(([k,l])=>`<button type="button" data-theme-pick="${k}" class="${curTheme()===k?"on":""}" aria-pressed="${curTheme()===k}">${l}</button>`).join("")}</div></div>
    <div class="sec"><h3>文字のフォント</h3><label class="setting" style="border:0;padding-top:0"><span>フォント</span><select id="fontSel" aria-label="文字のフォント">${FONTS.map(([k,l])=>`<option value="${k}" ${curFont()===k?"selected":""}>${l}</option>`).join("")}</select></label>
     <p class="font-sample">カメラマン募集 10/25(土) 渋谷スタジオ</p></div>
-   <div class="sec"><h3>スワイプ</h3>
-   <label class="setting"><span>右にスワイプ →</span><select id="swR">${opt(settings.swipe_right)}</select></label>
-   <label class="setting"><span>← 左にスワイプ</span><select id="swL">${opt(settings.swipe_left)}</select></label>
+   <div class="sec"><h3>スワイプ(状態タブごと)</h3>
+   <div class="swgrid"><span></span><span class="sub">← 左</span><span class="sub">右 →</span>
+   ${TABS.map(t=>`<span class="swtab" data-tab-c="${t.k}">${t.t}</span><select id="sw-${t.k}-left" data-sw-tab="${t.k}" data-sw-side="left" aria-label="${t.t}のタブで左にスワイプ">${opt(t.k,(sw[t.k]||{}).left)}</select><select id="sw-${t.k}-right" data-sw-tab="${t.k}" data-sw-side="right" aria-label="${t.t}のタブで右にスワイプ">${opt(t.k,(sw[t.k]||{}).right)}</select>`).join("")}</div>
    <p class="sub" id="setMsg"></p></div>
    <div class="sec"><h3>Google カレンダー</h3><p class="sub" style="margin:0">${!cal.configured?"まだつながっていません(つなぎ方は「つかいかた」にあります)":cal.error?esc(cal.error):"つながっています"}</p></div>
    <div class="sec"><h3>対象外のポスト</h3>
@@ -916,12 +927,12 @@ function openSettings(){
     <button type="button" class="btn" data-db="1" style="width:100%">中身を見る ›</button></div>
    <div class="actions"><button class="btn" data-close="1">閉じる</button></div>`,"設定");
   const onChange=async()=>{
-    const body={swipe_right:$("swR").value,swipe_left:$("swL").value};
+    const body={swipe_tabs:Object.fromEntries(TABS.map(t=>[t.k,{left:$(`sw-${t.k}-left`).value,right:$(`sw-${t.k}-right`).value}]))};
     $("setMsg").textContent="保存中…";
     try{settings=await postJson("/api/settings",body);$("setMsg").textContent="保存しました"}
     catch(e){$("setMsg").textContent=`保存できませんでした(${e.message})`}
   };
-  $("swR").onchange=onChange;$("swL").onchange=onChange;
+  document.querySelectorAll("[data-sw-tab]").forEach(e=>e.onchange=onChange);
   $("fontSel").onchange=e=>pickFont(e.target.value);
 }
 // ブラックリストは設定から 1 段入ったページで見る(「‹ 設定」で戻る)
@@ -957,7 +968,10 @@ const HELP=[
   <p>下のボタンで「確認中」「受注中」「保留」「削除予定」にできます。その状態のときにもう一度押すと外れて新着に戻ります。スパム・虚偽の申告・カメラマンだった人などは「ブラックリストにいれる」で、これまでとこれからのポストを出さず、AI の判定にもかけません(設定の「ブラックリスト」から解除できます)。</p>
   <p>場所(都道府県)は、本文 → Notion の「イベントの一覧」→ 添付画像 の順に判断し、本文以外から判断したときはカードに小さく出ます。依頼主のプロフィールからは決めません(分からないときは「場所不明」)。添付画像(メンバー表など)から読んだ X のアカウントは「関係するアカウント」に「画像から」と出ます。</p>
   <p>依頼主の年齢・活動地域・性別は、プロフィールに書いてある書き方(18↓、30↑、成人済み、関西、♀ など)から読みます。プロフィールに書いてないときは、プロフィールのリンク先(Litlink など)からも読み、「リンク先から」と出ます。</p>`],
- ["スワイプ",`<p>カードを左右にスワイプすると、設定で選んだ状態を付けられます(初期値は右=保留、左=削除予定)。その状態のカードをもう一度同じ向きにスワイプすると外れて、新着に戻ります。</p>`],
+ ["スワイプ",`<p>カードを左右にスワイプすると、設定で選んだ状態を付けられます。割り当ては状態タブごとに決められます(設定の「スワイプ(状態タブごと)」)。初期値は右=保留、左=削除予定です(保留のタブの右と、削除予定のタブの左は「新着に戻す」)。</p>
+  <ul><li>そのタブの状態は選べません。代わりに「新着に戻す」を選べます(新着のタブにはありません)。</li>
+  <li>付けたい状態がもう付いているカードをスワイプすると、その状態が外れて新着に戻ります。</li>
+  <li>「何もしない」を選ぶと、その向きにはスワイプしません。</li></ul>`],
  ["Google カレンダーのつなぎ方",`<p>Google カレンダーの「設定」→ 予定表を選ぶ →「iCal 形式の非公開 URL」をコピーし、GitHub のリポジトリの Settings → Secrets and variables → Actions に、名前 GCAL_ICS_URL で登録します(チャットには貼らないでください)。次に X Finder を公開し直すと使えます。複数の予定表は改行で区切って入れられます。</p>
   <p>予定は X Finder の中で見るだけで、保存しません。予定名に「休み」「有給」などの言葉(Notion の基本設定「休みとみなす予定の言葉」)が入っている予定は、予定ありに数えず「休み」と出します。</p>`],
  ["設定",`<ul><li><b>画面の色・文字のフォント</b>: この端末に保存します。数字(点数・件数)の書体は変わりません。</li>

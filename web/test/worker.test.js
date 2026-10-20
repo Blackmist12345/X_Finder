@@ -127,6 +127,19 @@ test("確認中: 自分で付けたときだけ。開いても変わらず、2�
   assert.equal((await saveSettings(db, { swipe_right: "checking" })).swipe_right, "checking");
 });
 
+test("スワイプは状態タブごと: 前からの設定はどのタブも同じ、そのタブの状態は新着に戻すになる", async () => {
+  const first = await getSettings(db);
+  assert.deepEqual(first.swipe_tabs.new, { right: "hold", left: "delete" });
+  assert.deepEqual(first.swipe_tabs.hold, { right: "new", left: "delete" });
+  assert.deepEqual(first.swipe_tabs.delete, { right: "hold", left: "new" });
+  const s = await saveSettings(db, { swipe_tabs: { checking: { right: "accepted", left: "checking" }, new: { left: "new" } } });
+  assert.deepEqual(s.swipe_tabs.checking, { right: "accepted", left: "new" });
+  assert.deepEqual(s.swipe_tabs.new, { right: "hold", left: "none" });
+  assert.deepEqual((await getSettings(db)).swipe_tabs.checking, { right: "accepted", left: "new" });
+  await assert.rejects(saveSettings(db, { swipe_tabs: { bad: { right: "hold" } } }), RangeError);
+  await assert.rejects(saveSettings(db, { swipe_tabs: { new: { right: "zzz" } } }), RangeError);
+});
+
 test("前の「確認済み」の行は新着(開いた)として出る", async () => {
   db.raw.prepare(`INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES ('1', 'seen', 'x', 'x')`).run();
   const c = (await listCases(db, new URLSearchParams())).find((x) => x.id === "1");

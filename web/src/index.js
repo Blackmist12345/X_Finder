@@ -27,7 +27,9 @@ const normState = (s) => STATE_ALIASES[s] || s;
 const KEEP_STATES = "('accepted', 'hold')";
 // 画面の設定(D1 の meta に保存するので、スマホでも PC でも同じになる)。スワイプで付ける状態。none は何もしない
 const SETTINGS_KEY = "finder_settings";
-const SWIPE_CHOICES = ["hold", "delete", "checking", "accepted", "none"];
+const SWIPE_CHOICES = ["new", "hold", "delete", "checking", "accepted", "none"];
+// スワイプは状態タブごとに決める(swipe_tabs = { タブ: { right, left } })。そのタブの状態そのものは選べない(新着に戻すのと同じなので new にする)
+const swipeFor = (tab, v) => (v === tab ? (tab === "new" ? "none" : "new") : v);
 const DEFAULT_SETTINGS = { swipe_right: "hold", swipe_left: "delete" };
 
 // ブラックリストの理由。spam=スパム / false=虚偽の申告 / photographer=被写体ではなくカメラマンだった / other=その他
@@ -384,6 +386,12 @@ export async function getSettings(db) {
   const saved = parseJson(row?.value, {});
   const out = { ...DEFAULT_SETTINGS };
   for (const k of Object.keys(DEFAULT_SETTINGS)) if (SWIPE_CHOICES.includes(saved[k])) out[k] = saved[k];
+  // タブごとの設定がまだない(前からの)保存は、どのタブも右・左の設定と同じにする
+  out.swipe_tabs = Object.fromEntries(REVIEW_STATES.map((tab) => {
+    const t = saved.swipe_tabs?.[tab] || {};
+    const pick = (v, fallback) => swipeFor(tab, SWIPE_CHOICES.includes(v) ? v : fallback);
+    return [tab, { right: pick(t.right, out.swipe_right), left: pick(t.left, out.swipe_left) }];
+  }));
   out.sort_rule = cleanRule(saved.sort_rule) || {};
   out.sort_auto = saved.sort_auto === true;
   out.sort_presets = cleanSortPresets(saved.sort_presets) || [];
@@ -403,6 +411,17 @@ export async function saveSettings(db, body) {
     if (body[k] === undefined) continue;
     if (!SWIPE_CHOICES.includes(body[k])) throw new RangeError(k);
     next[k] = body[k];
+  }
+  if (body.swipe_tabs !== undefined) {
+    if (!body.swipe_tabs || typeof body.swipe_tabs !== "object") throw new RangeError("swipe_tabs");
+    for (const [tab, t] of Object.entries(body.swipe_tabs)) {
+      if (!REVIEW_STATES.includes(tab) || !t || typeof t !== "object") throw new RangeError("swipe_tabs");
+      for (const side of ["right", "left"]) {
+        if (t[side] === undefined) continue;
+        if (!SWIPE_CHOICES.includes(t[side])) throw new RangeError("swipe_tabs");
+        next.swipe_tabs[tab][side] = swipeFor(tab, t[side]);
+      }
+    }
   }
   if (body.sort_rule !== undefined) {
     const rule = cleanRule(body.sort_rule);
