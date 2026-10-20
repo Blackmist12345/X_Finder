@@ -196,6 +196,18 @@ test("仕分けのチェック・自動・プリセットを保存でき、お�
   await assert.rejects(saveSettings(db, { sort_rule: { gender: "男性" } }), RangeError);
   await assert.rejects(saveSettings(db, { sort_auto: "yes" }), RangeError);
   await assert.rejects(saveSettings(db, { sort_presets: [{ name: "", rule: {} }] }), RangeError);
+  // 選んでいるプリセットは1つ。ないプリセットの名前は残さず、プリセットを消すと外れる
+  const a = await saveSettings(db, { sort_presets: [{ name: "A", rule: {} }, { name: "B", rule: { gender: ["男性"] } }], sort_active: "B" });
+  assert.equal(a.sort_active, "B");
+  assert.equal((await saveSettings(db, { sort_active: "ない" })).sort_active, null);
+  await saveSettings(db, { sort_active: "B" });
+  assert.equal((await saveSettings(db, { sort_presets: [{ name: "A", rule: {} }] })).sort_active, null);
+  assert.equal((await getSettings(db)).sort_active, null);
+  await assert.rejects(saveSettings(db, { sort_active: 3 }), RangeError);
+  // 前からの保存(sort_active がない)は、今のチェックと同じプリセットを選んでいることにする
+  await db.prepare("UPDATE meta SET value = ? WHERE key = 'finder_settings'")
+    .bind(JSON.stringify({ sort_rule: { gender: ["男性"] }, sort_presets: [{ name: "A", rule: {} }, { name: "B", rule: { gender: ["男性"] } }] })).run();
+  assert.equal((await getSettings(db)).sort_active, "B");
 });
 
 test("前の「まとめて」のプリセットは読み飛ばす", async () => {

@@ -386,6 +386,13 @@ export async function getSettings(db) {
   out.sort_rule = cleanRule(saved.sort_rule) || {};
   out.sort_auto = saved.sort_auto === true;
   out.sort_presets = cleanSortPresets(saved.sort_presets) || [];
+  // 選んでいるプリセットは1つだけ。消したプリセットの名前は残さない
+  // まだ一度も選んでいない(この項目ができる前の)保存は、今のチェックと同じプリセットを選んでいることにする
+  const key = (r) => JSON.stringify(SORT_FACETS.map((k) => [...(r[k] || [])].sort()));
+  const active = saved.sort_active === undefined
+    ? out.sort_presets.find((p) => key(p.rule) === key(out.sort_rule))?.name
+    : saved.sort_active;
+  out.sort_active = out.sort_presets.some((p) => p.name === active) ? active : null;
   return out;
 }
 
@@ -410,6 +417,11 @@ export async function saveSettings(db, body) {
     if (!presets) throw new RangeError("sort_presets");
     next.sort_presets = presets;
   }
+  if (body.sort_active !== undefined) {
+    if (body.sort_active !== null && typeof body.sort_active !== "string") throw new RangeError("sort_active");
+    next.sort_active = body.sort_active ? body.sort_active.trim().slice(0, 20) || null : null;
+  }
+  if (!next.sort_presets.some((p) => p.name === next.sort_active)) next.sort_active = null;
   await db
     .prepare(`INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?)
               ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
