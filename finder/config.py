@@ -152,6 +152,8 @@ def load_config(notion, d1):
     ids = d1.get_meta(TABLE_IDS_KEY)
     if not ids:
         raise ConfigError("Notion の表の ID が見つかりません。先に setup ワークフローの notion_tables を実行してください")
+    if "points" not in ids:
+        raise ConfigError("【3】点数表がまだありません。先に setup ワークフローの points_merge_apply を実行してください")
     last_good = d1.get_meta(LAST_GOOD_KEY, {}) or {}
     warnings, config = [], {}
     titles = {t["key"]: t["title"] for t in TABLES}

@@ -46,7 +46,7 @@ function seed(db) {
          VALUES (?, '100', 'search', ?, ?, ?, '["https://pbs.twimg.com/m.jpg"]', ?, ?)`, id, text, `https://x.com/client/status/${id}`, collected, status, collected);
   const judged = (id, score, critical, pref, reject = null) =>
     run(`INSERT INTO judgments (post_id, judged_at, case_type, prefecture, summary, score, score_json, critical, reject_reason)
-         VALUES (?, ?, 'コスプレ撮影', ?, '併せ撮影', ?, '[{"label":"種類: コスプレ撮影","points":50}]', ?, ?)`, id, now, pref, score, critical, reject);
+         VALUES (?, ?, 'コスプレ撮影', ?, '併せ撮影', ?, '[{"label":"種類: コスプレ撮影","points":50},{"label":"作品: 呪術廻戦","points":-100}]', ?, ?)`, id, now, pref, score, critical, reject);
   post("1", "judged", now); judged("1", 50, 0, "東京都");
   post("2", "judged", now); judged("2", 80, 1, "大阪府");
   post("3", "rejected", now); judged("3", null, 0, "不明", "カメラマン募集ではない");
@@ -68,7 +68,8 @@ beforeEach(() => {
 test("一覧は対象の案件を点数順に、直近の分だけ返す", async () => {
   const cases = await listCases(db, new URLSearchParams());
   assert.deepEqual(cases.map((c) => c.id), ["2", "1"]);
-  assert.equal(cases[0].critical, true);
+  assert.equal(cases[0].critical, undefined); // クリティカルは点数に一本化したので返さない
+  assert.deepEqual(cases[0].work_points, [{ name: "呪術廻戦", points: -100 }]);
   assert.equal(cases[1].shoot_kanto, true);
   assert.equal(cases[1].shoot_metro, true);
   assert.equal(cases[1].shoot_pref, "東京都");
@@ -161,10 +162,8 @@ test("サマリー: 日ごとの数・累計・今月と先月の比べ・種類
   const today = s.daily.at(-1);
   assert.equal(today.judged, 4); // seed の judged_at はすべて今
   assert.equal(today.target, 3);
-  assert.equal(today.critical, 2);
   assert.equal(today.ai_yen, 150); // claude $1 × 150円
   assert.equal(s.totals.collected, 5);
-  assert.equal(s.totals.critical, 2);
   assert.equal(s.this_month.target, 3);
   assert.deepEqual(s.types, [{ k: "コスプレ撮影", n: 3 }]);
   assert.equal((await getStats(db, new URLSearchParams("days=5"))).days, 30); // 決まった期間以外は 30 日
@@ -218,8 +217,8 @@ test("スワイプの設定は初期値があり、変えると保存される",
 });
 
 test("仕分けのチェック・自動・プリセットを保存でき、おかしな中身は受け付けない", async () => {
-  const saved = await saveSettings(db, { sort_rule: { gender: ["男性", "男性", " "], area: ["大阪府"], zzz: ["x"] }, sort_auto: true });
-  assert.deepEqual(saved.sort_rule, { gender: ["男性"], area: ["大阪府"] });
+  const saved = await saveSettings(db, { sort_rule: { gender: ["男性", "男性", " "], area: ["大阪府"], score: ["-50"], crit: ["クリティカル"], zzz: ["x"] }, sort_auto: true });
+  assert.deepEqual(saved.sort_rule, { gender: ["男性"], area: ["大阪府"], score: ["-50"] }); // 廃止したクリティカルの項目は落とす
   assert.equal(saved.sort_auto, true);
   assert.equal(saved.swipe_right, "hold");
   const p = await saveSettings(db, { sort_presets: [{ name: "ふだん", rule: { gender: ["男性"] } }, { name: "空", rule: {} }] });
