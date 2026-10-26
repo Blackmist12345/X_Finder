@@ -102,7 +102,8 @@ def share_lines(d1, since):
     reply = d1.query(f"SELECT COUNT(*) AS n {base} AND p.reply_to_id IS NOT NULL", args)[0]["n"]
     quote = d1.query(f"SELECT COUNT(*) AS n {base} AND p.quoted_id IS NOT NULL", args)[0]["n"]
     both = d1.query(f"SELECT COUNT(*) AS n {base} AND p.reply_to_id IS NOT NULL AND p.quoted_id IS NOT NULL", args)[0]["n"]
-    q_rows = d1.query("SELECT COUNT(*) AS n, SUM(reply_to_id IS NOT NULL) AS r, SUM(quoted_id IS NOT NULL) AS q "
+    q_rows = d1.query("SELECT COUNT(*) AS n, SUM(reply_to_id IS NOT NULL) AS r, SUM(quoted_id IS NOT NULL) AS q, "
+                      "SUM(conversation_id IS NOT NULL) AS c, SUM(conversation_id IS NOT NULL AND conversation_id != id) AS cr "
                       "FROM posts WHERE source = 'quoted' AND collected_at >= ?", [since])[0]
     return total, reply, quote, both, q_rows
 
@@ -128,7 +129,9 @@ def main():
               f"- N3 を通ったポスト: {total}件(1日あたり約{total / days:.0f}件)",
               f"- 返信: {reply}件({pct(reply, total)}) / 引用: {quote}件({pct(quote, total)}) / 両方: {both}件",
               f"- 一緒に届いた引用元 {q_rows['n'] or 0}件のうち、返信先 ID が入っていた {q_rows['r'] or 0}件、"
-              f"さらに引用元が入っていた {q_rows['q'] or 0}件", ""]
+              f"さらに引用元が入っていた {q_rows['q'] or 0}件",
+              f"- 同じ引用元のうち、会話の ID が入っていた {q_rows['c'] or 0}件、"
+              f"会話の ID が自分の ID と違う(=返信なのに返信先 ID が抜けている疑い) {q_rows['cr'] or 0}件", ""]
 
     # 2. 引用元の入れ子を、取り直して確かめる
     q_sample = d1.query("SELECT id, reply_to_id, quoted_id FROM posts WHERE source = 'quoted' AND collected_at >= ? "
