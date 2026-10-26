@@ -52,10 +52,10 @@ JUDGMENT_COLUMNS = ["post_id", "judged_at", "model", "case_type", "is_cosplay", 
 
 
 def evaluate(items, results, config):
-    """判定結果に対象外の理由と点数を付ける。[(item, result, reject, total, detail, critical, critical_reason)]"""
+    """判定結果に対象外の理由と点数を付ける。[(item, result, reject, total, detail)]"""
     cosplay_only = config["basic"]["コスプレに絞る"] == "オン"
-    # 第1段階で保存したポストは減点語のカテゴリを持たないので、今の減点語の表から補う
-    categories = {p["word"]: p.get("category") for p in config.get("penalty_words", [])}
+    # 前に保存したポストは語のカテゴリを持たないことがあるので、今の点数表から補う
+    categories = {w["word"]: w.get("category") for w in config.get("words", [])}
     for it in items:
         for p in it["penalties"]:
             p.setdefault("category", categories.get(p["word"], "その他"))
@@ -65,21 +65,27 @@ def evaluate(items, results, config):
         if r is None:
             continue
         reject = judge.reject_reason(r, cosplay_only)
-        total, detail, critical, why = (None, [], False, "") if reject else score(
+        total, detail = (None, []) if reject else score(
             r, it["penalties"], it.get("text"), config,
             {"followers": it.get("author_followers"), "following": it.get("author_following")})
-        out.append((it, r, reject, total, detail, critical, why))
+        out.append((it, r, reject, total, detail))
     return out
+
+
+def point_works(config):
+    """点数表の作品の行の名前(AI に渡す)。[[名前, 略称, …]]"""
+    return [r["names"] for r in config.get("points") or [] if r["kind"] == "作品"]
 
 
 def save(d1, evaluated, missing_ids, model):
     now = store.now_iso()
     rows = []
-    for it, r, reject, total, detail, critical, why in evaluated:
+    for it, r, reject, total, detail in evaluated:
+        # 点数に一本化したので critical は使わない(列は残して 0 を書く)。excluded_work の列には当たった作品を書く
         rows.append([it["id"], now, model, r.get("case_type"), int(bool(r.get("is_cosplay"))), r.get("works"),
-                     r.get("excluded_work"), r.get("prefecture"), r.get("prefecture_source"), r.get("place"),
+                     "、".join(r.get("matched_works") or []) or None, r.get("prefecture"), r.get("prefecture_source"), r.get("place"),
                      r.get("dates"), r.get("summary"), reject, total,
-                     json.dumps(detail, ensure_ascii=False) if detail else None, int(critical), why or None,
+                     json.dumps(detail, ensure_ascii=False) if detail else None, 0, None,
                      json.dumps(r, ensure_ascii=False)])
     d1.insert_many("judgments", JUDGMENT_COLUMNS, rows, conflict="OR REPLACE")
 
@@ -119,7 +125,7 @@ def new_events(evaluated, events, added):
 
 
 def add_events(notion, d1, evaluated, config):
-    """一覧にないイベントを【10】イベントの一覧に足す(開催地は AI の推定。Notion で直せば次から一覧が使われる)。要約の行を返す。"""
+    """一覧にないイベントを【7】イベントの一覧に足す(開催地は AI の推定。Notion で直せば次から一覧が使われる)。要約の行を返す。"""
     table_id = (d1.get_meta(TABLE_IDS_KEY) or {}).get("events")
     if not notion or not table_id:
         return []
@@ -181,7 +187,7 @@ def run(d1, config, production, api_keys, tweets=None, decisions=None, session=N
         return lines + [f"- 判定待ち {len(items)}件。{batch_size}件たまるか、いちばん古いポストが{max_wait}分待ったら判定します"]
 
     try:
-        results, t_in, t_out, calls = judge.judge(items, api_key, model, config["excluded_works"], batch_size, session,
+        results, t_in, t_out, calls = judge.judge(items, api_key, model, point_works(config), batch_size, session,
                                                      config.get("emojis"), config.get("events"))
     except judge.JudgeError as e:
         return lines + [f"- ⚠️ 判定に失敗しました。ポストは判定待ちのまま、次の実行でもう一度判定します。{e}"]
@@ -206,15 +212,11 @@ def run(d1, config, production, api_keys, tweets=None, decisions=None, session=N
     if reasons:
         lines.append("- 対象外の理由: " + "、".join(f"{k} {v}件" for k, v in reasons.most_common()))
     lines += event_lines
-    critical = sum(1 for e in kept if e[5])
-    if critical:
-        lines.append(f"- クリティカル: {critical}件")
     if kept:
         lines += ["", "### 点数の高い案件(先頭10件)", ""]
-        for it, r, _, total, detail, is_critical, _ in kept[:10]:
-            mark = "🔴 " if is_critical else ""
+        for it, r, _, total, detail in kept[:10]:
             pref = r.get("prefecture") or "不明"
-            lines.append(f"- {mark}**{total:g}点** {r.get('case_type')} / {pref} / {r.get('summary') or ''} {it.get('url') or ''}")
+            lines.append(f"- **{total:g}点** {r.get('case_type')} / {pref} / {r.get('summary') or ''} {it.get('url') or ''}")
             lines.append("  - " + "、".join(f"{d['label']} {d['points']:+g}" for d in detail))
     rejected = [e for e in evaluated if e[2]]
     if rejected:

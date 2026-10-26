@@ -17,8 +17,8 @@ def test_cost_uses_per_tweet_price_with_per_call_minimum():
 
 def test_penalty_word_does_not_match_inside_tokyo():
     words = [{"word": "京都", "points": -30}, {"word": "大阪", "points": -30}]
-    assert filters.penalty_hits("東京都内のスタジオで撮影", words) == []
-    assert filters.penalty_hits("京都で撮影、東京都も可", words) == [{"word": "京都", "category": "その他", "points": -30}]
+    assert filters.word_hits("東京都内のスタジオで撮影", words) == []
+    assert filters.word_hits("京都で撮影、東京都も可", words) == [{"word": "京都", "category": "その他", "points": -30}]
 
 
 def test_skip_reason(make_tweet):

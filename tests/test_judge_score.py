@@ -11,7 +11,7 @@ from tests.test_config import chk, good_tables, kv_rows, num, row, sel, setup, t
 
 def ai_result(pid, **over):
     r = {"id": pid, "wants_photographer": True, "official_or_job": False, "case_type": "コスプレ撮影", "is_cosplay": True,
-         "works": "", "excluded_work": "", "prefecture": "東京都", "prefecture_source": "本文", "place": "",
+         "works": "", "matched_works": [], "prefecture": "東京都", "prefecture_source": "本文", "place": "",
          "dates": "", "summary": "併せの撮影"}
     r.update(over)
     return r
@@ -57,19 +57,21 @@ def _dumps(x):
     return json.dumps(x, ensure_ascii=False)
 
 
+def prow(cond, kind, points, names=None, category="その他"):
+    return {"condition": cond, "names": names or [cond], "kind": kind, "points": float(points), "category": category}
+
+
 def config():
     cfg = {
-        "scores": [
-            {"condition": "コスプレ撮影", "kind": "種類", "points": 50.0},
-            {"condition": "ポートレート", "kind": "種類", "points": 30.0},
-            {"condition": "東京都", "kind": "都道府県", "points": 0.0},
-            {"condition": "神奈川県", "kind": "都道府県", "points": -5.0},
-            {"condition": "その他の道府県", "kind": "都道府県", "points": -30.0},
-            {"condition": "場所不明", "kind": "都道府県", "points": 0.0},
+        "points": [
+            prow("コスプレ撮影", "種類", 50), prow("ポートレート", "種類", 30),
+            prow("東京都", "都道府県", 0), prow("神奈川県", "都道府県", -5),
+            prow("その他の道府県", "都道府県", -30), prow("場所不明", "都道府県", 0),
+            prow("呪術廻戦", "作品", -100, ["呪術廻戦", "呪術"]), prow("ブルーアーカイブ", "作品", 10, ["ブルーアーカイブ", "ブルアカ"]),
+            prow("コミックマーケット", "イベント", 5, ["コミックマーケット"]),
         ],
-        "critical": {"threshold": 50.0, "conditions": [{"name": "推し作品", "value": "ブルアカ"}]},
+        "events": [{"aliases": ["コミケ", "C107"], "name": "コミックマーケット", "venue": "東京ビッグサイト", "prefecture": "東京都"}],
         "basic": {"コスプレに絞る": "オフ", "判定に使うAI": "gemini-3.5-flash-lite", "まとめて判定する件数": 2, "為替レート(円/ドル)": 155},
-        "excluded_works": ["呪術廻戦"],
     }
     return cfg
 
@@ -77,11 +79,11 @@ def config():
 def test_judge_batches_and_asks_again_for_missing():
     items = [{"id": str(i), "text": f"募集{i}", "penalties": []} for i in range(3)]
     fake = FakeGemini(skip={"1"})
-    results, t_in, t_out, calls = judge.judge(items, "key", "gemini-3.5-flash-lite", ["呪術廻戦"], 2, session=fake)
+    results, t_in, t_out, calls = judge.judge(items, "key", "gemini-3.5-flash-lite", [["呪術廻戦", "呪術"]], 2, session=fake)
     assert set(results) == {"0", "1", "2"}
     assert calls == 3  # 2件 + 1件 + 返し忘れた 1件を聞き直し
     assert (t_in, t_out) == (3000, 750)
-    assert "呪術廻戦" in fake.prompts[0]
+    assert "- 呪術廻戦(別名: 呪術)" in fake.prompts[0]
 
 
 def test_judge_error_is_raised():
@@ -93,7 +95,7 @@ def test_reject_reason():
     assert judge.reject_reason(ai_result("1"), False) is None
     assert judge.reject_reason(ai_result("1", wants_photographer=False), False) == "カメラマン募集ではない"
     assert judge.reject_reason(ai_result("1", official_or_job=True), False) == "公式・求人"
-    assert judge.reject_reason(ai_result("1", excluded_work="呪術廻戦"), False) == "除外作品: 呪術廻戦"
+    assert judge.reject_reason(ai_result("1", matched_works=["呪術廻戦"]), False) is None  # 作品では対象外にしない(点数で下げる)
     assert judge.reject_reason(ai_result("1", is_cosplay=False, case_type="ポートレート"), True) == "コスプレ以外"
 
 
@@ -102,18 +104,18 @@ def test_cost_uses_model_price():
 
 
 def test_score_type_and_prefecture():
-    total, detail, critical, why = score(ai_result("1"), [], "併せ", config())
-    assert total == 50 and critical and why == "50点以上"
-    total, detail, _, _ = score(ai_result("1", prefecture="大阪府"), [], "", config())
+    total, detail = score(ai_result("1"), [], "併せ", config())
+    assert total == 50
+    total, detail = score(ai_result("1", prefecture="大阪府"), [], "", config())
     assert total == 20
     assert detail[1]["label"] == "場所: 大阪府(その他の道府県)"
 
 
 def test_region_penalty_only_when_prefecture_unknown():
     penalties = [{"word": "大阪", "category": "地方・都市名", "points": -30}, {"word": "栄", "category": "その他", "points": -10}]
-    known, _, _, _ = score(ai_result("1", prefecture="大阪府"), penalties, "", config())
-    assert known == 50 - 30 - 10  # 地名の減点語は使わず、都道府県の点だけ
-    unknown, detail, _, _ = score(ai_result("1", prefecture="不明"), penalties, "", config())
+    known, _ = score(ai_result("1", prefecture="大阪府"), penalties, "", config())
+    assert known == 50 - 30 - 10  # 地名の語は使わず、都道府県の点だけ
+    unknown, detail = score(ai_result("1", prefecture="不明"), penalties, "", config())
     assert unknown == 50 + 0 - 30 - 10
     assert "場所: 場所不明" in [d["label"] for d in detail]
 
@@ -132,16 +134,36 @@ def test_ff_rate_multiplies_positive_score_within_range():
     assert score(ai_result("1"), [], "", cfg, {"followers": 300, "following": 100})[0] == 150  # 0 は制限なし
 
 
-def test_critical_condition_matches_text():
-    _, _, critical, why = score(ai_result("1", case_type="ポートレート", prefecture="神奈川県"), [], "ブルアカ併せ", config())
-    assert critical and why == "条件: 推し作品"
+def test_text_prefecture_stands_in_when_place_unknown():
+    total, detail = score(ai_result("1", prefecture="不明"), [{"word": "梅田", "category": "地方・都市名", "points": -10}],
+                          "大阪の梅田か神奈川でカメラマン募集", config())
+    assert total == 50 - 30  # 本文に最初に出た大阪の点を当て、地名の語は使わない
+    assert "場所(本文の地名): 大阪府(その他の道府県)" in [d["label"] for d in detail]
+    total, _ = score(ai_result("1", prefecture="不明"), [], "東京都内のスタジオ", config())
+    assert total == 50  # 「東京都」の中の「京都」は数えない
+    _, detail = score(ai_result("1", prefecture="不明"), [], "スタジオで", config())
+    assert "場所: 場所不明" in [d["label"] for d in detail]  # 本文に地名がなければ場所不明
+
+
+def test_works_and_event_points():
+    total, detail = score(ai_result("1", matched_works=["呪術廻戦", "ブルアカ", "呪術", "知らない作品"], event="C107"), [], "", config())
+    assert total == 50 - 100 + 10 + 5  # 同じ作品は1回、表にない作品は 0、イベントは一覧の略称から正式名で当てる
+    labels = [d["label"] for d in detail]
+    assert "作品: 呪術廻戦" in labels and "作品: ブルーアーカイブ" in labels and "イベント: コミックマーケット" in labels
+    assert score(ai_result("1", event="コミックマーケット"), [], "", config())[0] == 55  # 一覧を通さず名前で当たる
+    assert score(ai_result("1", event="知らないイベント"), [], "", config())[0] == 50
+
+
+def test_negative_total_is_not_multiplied():
+    total, _ = score(ai_result("1", matched_works=["呪術廻戦"]), [], "", config(), {"followers": 3000, "following": 100})
+    assert total == -50
 
 
 @pytest.fixture
 def wired(d1, monkeypatch, tmp_path):
     tables = good_tables()
     tables["basic"] = kv_rows(BASIC, まとめて判定する件数="1")  # 1件でも判定する(待たない)
-    tables["scores"] += [row(条件=title("東京都"), 区分=sel("都道府県"), 点数=num(0), 有効=chk()),
+    tables["points"] += [row(条件=title("東京都"), 区分=sel("都道府県"), 点数=num(0), 有効=chk()),
                          row(条件=title("その他の道府県"), 区分=sel("都道府県"), 点数=num(-30), 有効=chk())]
     notion = setup(d1, tables)
     monkeypatch.setattr(run_collect.D1, "from_env", classmethod(lambda cls: d1))
@@ -255,9 +277,9 @@ def test_should_wait():
 
 def test_old_penalties_get_category_from_config():
     cfg = config()
-    cfg["penalty_words"] = [{"word": "大阪", "category": "地方・都市名", "points": -30}]
+    cfg["words"] = [{"word": "大阪", "category": "地方・都市名", "points": -30}]
     items = [{"id": "1", "text": "大阪", "penalties": [{"word": "大阪", "points": -30}]}]
-    (_, _, _, total, *_), = judge_step.evaluate(items, {"1": ai_result("1", prefecture="大阪府")}, cfg)
+    (_, _, _, total, _), = judge_step.evaluate(items, {"1": ai_result("1", prefecture="大阪府")}, cfg)
     assert total == 20  # 地名の減点語は使われず、都道府県の -30 だけ
 
 
@@ -270,7 +292,7 @@ def test_emoji_hints_in_prompt():
     assert "🐑=ひつじ太郎(にじさんじ)" in line
     assert "🌸=さくら(A) / はな(B)" in line
     assert "❤‍🔥=ほのお" in line and "はーと" not in line  # 組み合わせの絵文字を先に取る。異体字セレクタは無視
-    assert "絵文字の意味" not in judge.build_prompt([{"id": "2", "text": "募集"}], [], emojis).split("除外作品")[1]
+    assert "絵文字の意味" not in judge.build_prompt([{"id": "2", "text": "募集"}], [], emojis).split("点数を付ける作品")[1]
 
 
 def test_event_hints_in_prompt():

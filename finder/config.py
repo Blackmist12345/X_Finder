@@ -1,4 +1,4 @@
-"""N1 設定読込: Notion の設定の表(8表+絵文字の一覧・イベントの一覧)から設定を読む。
+"""N1 設定読込: Notion の設定の表(【1】〜【7】)から設定を読む。
 
 読めなかった表や、値が不正な項目は、前回正しく読めた値(D1 の meta に保存)を使い、
 warnings に理由を残す。
@@ -6,7 +6,9 @@ warnings に理由を残す。
 import re
 
 from finder import notion as nt
-from finder.tables import BASIC, PERIODS, TABLES
+from finder.tables import BASIC, PERIODS, POINT_KINDS, POINT_MAX, POINT_MIN, TABLES
+
+POINT_KIND_NAMES = [n for n, _ in POINT_KINDS]
 
 LAST_GOOD_KEY = "config_last_good"
 TABLE_IDS_KEY = "notion_tables"
@@ -50,57 +52,40 @@ def parse_search_excludes(rows):
     return out
 
 
-def parse_penalty_words(rows, warnings):
+def split_names(value):
+    """「ブルーアーカイブ, ブルアカ」のようにカンマで並べた名前を分ける。"""
+    return [a.strip() for a in re.split(r"[,、，]", value or "") if a.strip()]
+
+
+def parse_points(rows, warnings):
+    """【3】点数表。[{condition, names, kind, points, category}]。点数は −100〜+100 にそろえる。"""
     out = []
     for r in rows:
         p = r["properties"]
-        word = nt.text(p.get("単語"))
-        if not _enabled(r) or not word:
-            continue
-        points = nt.number(p.get("減点"))
-        if points is None:
-            warnings.append(f"減点語「{word}」の減点が空欄なので −10 として扱いました")
-            points = -10
-        out.append({"word": word, "category": nt.text(p.get("カテゴリ")) or "その他", "points": -abs(float(points))})
-    return out
-
-
-def parse_excluded_works(rows):
-    return [nt.text(r["properties"].get("作品名 / 略称")) for r in rows if _enabled(r) and nt.text(r["properties"].get("作品名 / 略称"))]
-
-
-def parse_scores(rows, warnings):
-    out = []
-    for r in rows:
-        p = r["properties"]
-        cond = nt.text(p.get("条件"))
+        cond = nt.text(p.get("条件")).strip()
         if not _enabled(r) or not cond:
+            continue
+        kind = nt.text(p.get("区分"))
+        if kind not in POINT_KIND_NAMES:
+            warnings.append(f"点数表「{cond}」の区分「{kind}」が分からないので使いませんでした")
             continue
         points = nt.number(p.get("点数"))
         if points is None:
             warnings.append(f"点数表「{cond}」の点数が空欄なので 0 として扱いました")
             points = 0
-        out.append({"condition": cond, "kind": nt.text(p.get("区分")) or "その他", "points": float(points)})
+        if not POINT_MIN <= points <= POINT_MAX:
+            fixed = max(POINT_MIN, min(POINT_MAX, points))
+            warnings.append(f"点数表「{cond}」の点数 {points:g} が {POINT_MIN}〜+{POINT_MAX} の外なので {fixed:g} にしました")
+            points = fixed
+        names = split_names(cond) if kind in ("作品", "イベント") else [cond]
+        out.append({"condition": names[0], "names": names, "kind": kind, "points": float(points),
+                    "category": nt.text(p.get("カテゴリ")) or "その他"})
     return out
 
 
-def parse_critical(rows):
-    threshold, conditions = None, []
-    for r in rows:
-        p = r["properties"]
-        if not _enabled(r):
-            continue
-        kind, value = nt.text(p.get("種類")), nt.text(p.get("値"))
-        if kind == "基準点":
-            try:
-                threshold = float(value)
-            except ValueError as e:
-                raise ConfigError(f"クリティカルの基準点「{value}」が数字ではありません") from e
-        elif kind == "条件" and value:
-            conditions.append({"name": nt.text(p.get("名前")), "value": value})
-    if threshold is None:
-        raise ConfigError("クリティカルの基準点がありません")
-    return {"threshold": threshold, "conditions": conditions}
+def word_rows(points):
+    """区分「語」の行を、収集のときの文字照合(N3)で使う形にする。"""
+    return [{"word": r["condition"], "category": r["category"], "points": r["points"]} for r in points if r["kind"] == "語"]
 
 
 def parse_emojis(rows):
@@ -187,10 +172,7 @@ def load_config(notion, d1):
 
     load("keywords", parse_keywords)
     load("search_excludes", parse_search_excludes)
-    load("penalty_words", lambda rows: parse_penalty_words(rows, warnings))
-    load("excluded_works", parse_excluded_works)
-    load("scores", lambda rows: parse_scores(rows, warnings))
-    load("critical", parse_critical)
+    load("points", lambda rows: parse_points(rows, warnings))
     load("emojis", parse_emojis)
     load("events", parse_events)
     missing = {"basic": [], "periods": []}
@@ -207,4 +189,5 @@ def load_config(notion, d1):
                 warnings.append(f"{titles[key]}に「{item}」の行がないので {config[key][item]} を使いました(行を足せませんでした: {e})")
 
     d1.set_meta(LAST_GOOD_KEY, config)
+    config["words"] = word_rows(config["points"])
     return config, warnings

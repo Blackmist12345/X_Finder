@@ -108,7 +108,7 @@ def main():
     for tw in fresh:
         in_blacklist = str((tw.get("author") or {}).get("id")) in blocked
         reason = store.BLACKLIST_REASON if in_blacklist else filters.skip_reason(tw, overflow, min_followers)
-        hits = filters.penalty_hits(tw.get("text", ""), config["penalty_words"])
+        hits = filters.word_hits(tw.get("text", ""), config["words"])
         decisions[str(tw.get("id"))] = ("skipped" if reason else "new", reason, hits)
         if reason:
             reasons[reason.split(":")[0]] += 1
