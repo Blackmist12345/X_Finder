@@ -3,11 +3,12 @@
 MODE=preview(初期値): まとめ方の案を表示するだけで、何も書き込まない。
 MODE=apply: 新しい【3】点数表を作って行を入れ、残りの表の番号を【4】〜【7】に振り直し、D1 の表の ID を書き換える。
   古い4表は消さずに「(旧)」を付けて残す(新しい表で動くのを確かめてから、Notion で手で消す)。
+  途中で止まったときは、もう一度 apply を動かせば、作りかけの【3】点数表に足りない行だけを足して続きから進める。
 
 行の移し方(点数は −100〜+100 の新しい刻みに書き換える):
   - 種類・都道府県: tables.py の初期値(コスプレ撮影 +20、その他の道府県 −20 など)
   - 減点語: 都道府県の名前は外す(都道府県の行と重なるため)。地名(地方・都市名)は −20、それ以外は −5 か −10
-  - 除外作品: 区分「作品」で −100(仕分けの「点数以下」で削除予定へ回す)
+  - 除外作品: 区分「作品」で −30(Latte 2026-10-27。強く外したい作品は Notion で点を下げる)
   - クリティカル条件の「条件」行: 区分「語」で +20(基準点は使わない)
 """
 import os
@@ -23,8 +24,9 @@ from finder.tables import POINT_SEED, TABLES  # noqa: E402
 
 OLD_KEYS = ["penalty_words", "excluded_works", "scores", "critical"]
 OLD_TABLES_KEY = "notion_tables_old"
+PENDING_KEY = "points_merge_pending"  # 作りかけの【3】点数表の ID(途中で止まったときの続きに使う)
 REGION_POINTS, WORD_POINTS, LIGHT_WORD_POINTS = -20, -10, -5
-EXCLUDED_WORK_POINTS = -100
+EXCLUDED_WORK_POINTS = -30
 CRITICAL_POINTS = 20
 PREF_NAMES = set(PREFECTURES) | {p[:-1] for p in PREFECTURES if p != "北海道" and p[-1] in "都府県"}
 
@@ -62,6 +64,38 @@ def plan(notion, ids):
             if nt.text(p.get("種類")) == "条件" and value and nt.checkbox(p.get("有効")):
                 rows.append((value, "語", CRITICAL_POINTS, "その他", "旧【6】クリティカル条件から"))
     return rows, dropped
+
+
+def row_key(page):
+    p = page["properties"]
+    return nt.text(p.get("条件")), nt.text(p.get("区分"))
+
+
+def unfinished_table(notion, d1, parent, title):
+    """前に途中で止まった【3】点数表があれば、その ID。"""
+    pending = d1.get_meta(PENDING_KEY)
+    if pending:
+        return pending
+    found = [db["id"] for db in notion.find_databases(title) if db["parent"].lower() == parent.replace("-", "").lower()]
+    return found[0] if found else None
+
+
+def fill(notion, db_id, rows):
+    """表にまだない行だけを足し、同じ行が2つ以上あれば1つを残してアーカイブする。足した行の数を返す。"""
+    have = {row_key(p) for p in notion.query_all(db_id)}
+    added = 0
+    for r in rows:
+        if (r[0], r[1]) not in have:
+            notion.create_page(db_id, props(r))
+            have.add((r[0], r[1]))
+            added += 1
+    seen = set()
+    for page in notion.query_all(db_id):  # 返事が来ずにやり直した行が二重に入ることがある
+        key = row_key(page)
+        if key in seen:
+            notion.archive_page(page["id"])
+        seen.add(key)
+    return added
 
 
 def props(row):
@@ -103,9 +137,13 @@ def main():
 
     parent = notion_parent()
     table = next(t for t in TABLES if t["key"] == "points")
-    new_id = notion.create_database(parent, table["title"], table["props"])
-    for r in rows:
-        notion.create_page(new_id, props(r))
+    new_id = unfinished_table(notion, d1, parent, table["title"])
+    if new_id:
+        print(f"\n作りかけの{table['title']}があったので、続きから進めます。")
+    else:
+        new_id = notion.create_database(parent, table["title"], table["props"])
+    d1.set_meta(PENDING_KEY, new_id)
+    added = fill(notion, new_id, rows)
     old = {k: ids.pop(k) for k in OLD_KEYS if k in ids}
     ids["points"] = new_id
     d1.set_meta(OLD_TABLES_KEY, old)
@@ -116,7 +154,8 @@ def main():
     old_titles = {"penalty_words": "【3】減点語", "excluded_works": "【4】除外作品", "scores": "【5】点数表", "critical": "【6】クリティカル条件"}
     for key, db_id in old.items():
         notion.rename_database(db_id, f"(旧){old_titles[key]}")
-    print(f"\n新しい【3】点数表を作り、{len(rows)}行を入れました。古い表は「(旧)」を付けて残しています。")
+    d1.set_meta(PENDING_KEY, None)
+    print(f"\n新しい【3】点数表に{added}行を足しました(全部で{len(rows)}行)。古い表は「(旧)」を付けて残しています。")
 
 
 def notion_parent():

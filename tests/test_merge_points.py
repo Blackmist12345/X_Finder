@@ -3,9 +3,15 @@ from tests.test_config import FakeNotion, chk, num, row, rt, sel, title
 
 
 class RenamingNotion(FakeNotion):
-    def __init__(self, tables):
-        super().__init__(tables)
-        self.renamed, self.dbs = {}, []
+    def __init__(self, tables, found=()):
+        super().__init__({"new-points": [], **tables})
+        self.renamed, self.dbs, self.found, self.archived = {}, [], list(found), []
+
+    def find_databases(self, title):
+        return self.found
+
+    def archive_page(self, page_id):
+        self.archived.append(page_id)
 
     def create_database(self, parent, title, props):
         self.dbs.append(title)
@@ -35,7 +41,7 @@ def test_plan_rewrites_points_and_drops_prefectures():
     got = {(c, k): p for c, k, p, _, _ in rows}
     assert dropped == ["大阪"]  # 都道府県の名前は都道府県の行と重なるので外す
     assert got[("名古屋", "語")] == -20 and got[("栄", "語")] == -5 and got[("時給", "語")] == -10
-    assert got[("呪術廻戦", "作品")] == -100
+    assert got[("呪術廻戦", "作品")] == -30
     assert got[("コスプレ撮影", "種類")] == 20 and got[("その他の道府県", "都道府県")] == -20
     assert ("無効", "語") not in got
 
@@ -57,3 +63,22 @@ def test_apply_creates_table_and_renumbers(d1, monkeypatch):
     assert len([c for c in notion.created if c[0] == "new-points"]) > 10
     merge_points.main()  # 2 回目は何もしない
     assert notion.dbs == ["【3】点数表"]
+
+
+def test_apply_resumes_unfinished_table(d1, monkeypatch):
+    """前に途中で止まったときは、作りかけの表に足りない行だけを足し、二重の行をアーカイブする。"""
+    d1.set_meta(merge_points.TABLE_IDS_KEY, dict(IDS))
+    done = [dict(row(条件=title("コスプレ撮影"), 区分=sel("種類")), id="p1"),
+            dict(row(条件=title("コスプレ撮影"), 区分=sel("種類")), id="p2")]
+    notion = RenamingNotion({**old_tables(), "half": done}, found=[{"id": "half", "parent": "parent"}, {"id": "other", "parent": "x"}])
+    monkeypatch.setattr(merge_points.D1, "from_env", classmethod(lambda cls: d1))
+    monkeypatch.setattr(merge_points.nt, "Notion", lambda key: notion)
+    monkeypatch.setattr(merge_points, "notion_parent", lambda: "parent")
+    monkeypatch.setenv("MODE", "apply")
+    merge_points.main()
+    assert notion.dbs == []  # 新しく作らない
+    assert d1.get_meta(merge_points.TABLE_IDS_KEY)["points"] == "half"
+    names = [c[1]["条件"]["title"][0]["text"]["content"] for c in notion.created if c[0] == "half"]
+    assert "コスプレ撮影" not in names and "呪術廻戦" in names
+    assert notion.archived == ["p2"]
+    assert d1.get_meta(merge_points.PENDING_KEY) is None
