@@ -111,7 +111,7 @@ function daysAgoIso(days) {
 }
 
 const CASE_COLUMNS = `
-  p.id, p.text, p.url, p.created_at, p.collected_at, p.status, p.skip_reason, p.quoted_id,
+  p.id, p.text, p.url, p.created_at, p.collected_at, p.status, p.skip_reason, p.quoted_id, p.reply_to_id,
   j.case_type, j.works, j.prefecture, j.prefecture_source, j.place, j.dates, j.summary, j.score, j.reject_reason,
   p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, CASE WHEN r.state IN ('checking', 'accepted', 'hold', 'delete') THEN r.state ELSE 'new' END AS review, (r.opened_at IS NOT NULL) AS opened,
   (r.post_id IS NOT NULL AND NOT (r.state = 'new' AND r.opened_at IS r.updated_at)) AS touched,
@@ -215,6 +215,8 @@ export async function getCase(db, id) {
     m.role = m.roles[0];
   }
   const black = await db.prepare("SELECT reason, note, added_at FROM blacklist WHERE user_id = ?").bind(row.author_id).first();
+  // 公開直後は表がまだないことがある(次の収集で作られる)ので、読めなければツリーなしで出す
+  const tree = await getTree(db, id, row.author_id).catch(() => []);
   const { media_json, score_json, link_found, ...rest } = row;
   return {
     ...rest,
@@ -225,11 +227,39 @@ export async function getCase(db, id) {
     score_detail: parseJson(score_json, []),
     people: [...merged.values()],
     blacklist: black || null,
+    tree,
   };
 }
 
+// 遡った返信元・引用元(ツリー)を古い順に返す。relation は root(いちばん上)/ reply(返信)/ quote(引用)。
+// by_client は投稿者が依頼主本人か。遡りが済んでいなければ空。
+async function getTree(db, id, authorId) {
+  const t = await db.prepare("SELECT ids_json FROM post_trees WHERE post_id = ?").bind(id).first();
+  const ids = parseJson(t && t.ids_json, []).filter((x) => typeof x === "string").slice(0, 20);
+  if (!ids.length) return [];
+  const { results } = await db
+    .prepare(
+      `SELECT p.id, p.text, p.url, p.created_at, p.author_id, p.reply_to_id, p.quoted_id, p.media_json, u.username, u.name
+       FROM posts p LEFT JOIN users u ON u.id = p.author_id WHERE p.id IN (${ids.map(() => "?").join(", ")})`,
+    )
+    .bind(...ids)
+    .all();
+  const byId = new Map(results.map((r) => [r.id, r]));
+  return ids
+    .filter((x) => byId.has(x))
+    .map((x, i) => {
+      const { media_json, reply_to_id, quoted_id, author_id, ...r } = byId.get(x);
+      return {
+        ...r,
+        relation: i === 0 ? "root" : reply_to_id ? "reply" : quoted_id ? "quote" : "root",
+        by_client: author_id === authorId,
+        media: parseJson(media_json, []),
+      };
+    });
+}
+
 // データベースの中身を見る画面(読むだけ)。見せる表はここに並べたものだけ
-const DB_TABLES = ["posts", "judgments", "reviews", "blacklist", "users", "user_links", "user_aliases", "post_users", "image_reads", "runs", "costs", "meta"];
+const DB_TABLES = ["posts", "judgments", "reviews", "blacklist", "users", "user_links", "user_aliases", "post_users", "image_reads", "post_trees", "missing_posts", "runs", "costs", "meta"];
 const DB_PAGE = 30;
 const DB_CELL_MAX = 400; // 長い値(AI の返事の JSON など)は先頭だけ返す
 

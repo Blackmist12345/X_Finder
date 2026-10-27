@@ -1,4 +1,4 @@
-"""収集の 1 回分: N1 設定読込 → N2 収集 → N3 一次フィルタ → N12/N15 保存 → N4 AI 判定 → N10 採点。
+"""収集の 1 回分: N1 設定読込 → N2 収集 → N3 一次フィルタ → N12/N15 保存 → 遡り・2 回目の N3 → N4 AI 判定 → N10 採点。
 
 環境変数:
   MODE   production(保存して検索時間枠を進める)/ dry_run(何も保存しない試し)
@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from finder import collect, deleted_step, filters, image_step, judge, judge_step, link_step, store
+from finder import collect, deleted_step, filters, image_step, judge, judge_step, link_step, store, tree_step
 from finder.config import load_config
 from finder.d1 import D1
 from finder.notion import Notion
@@ -139,6 +139,10 @@ def main():
         lines.append("- 減点語に当たった数: " + "、".join(f"{k} {v}件" for k, v in penalty_count.most_common(10)))
     for w in warnings:
         lines.append(f"- ⚠️ {w}")
+    try:
+        lines += tree_step.run(d1, config, production, os.environ.get("TWITTERAPI_KEY"))
+    except Exception as e:  # 遡れなくても収集の結果は残す(次の収集でもう一度遡る)
+        lines += ["", f"- ⚠️ 引用元・返信元を遡れませんでした: {e}"]
     lines += judge_step.run(d1, config, production, {k: os.environ.get(k) for k in judge.KEY_NAMES.values()},
                             tweets=fresh, decisions=decisions, notion=notion)
     try:

@@ -49,8 +49,9 @@ UNKNOWN_PLACE = "不明"
 EVENT_SOURCE = "イベント表"
 EVENT_GUESS_SOURCE = "イベント推定"  # イベントの一覧にないイベントの開催地を、AI が知っている範囲で補ったとき
 IMAGE_SOURCE = "画像"  # 判定のあとに image_step.py が画像から読んだとき
+TREE_SOURCE = "ツリー"  # 本文ではなく、遡った返信元・引用元(ツリー)のポストから読んだとき
 PROFILE_SOURCE = "プロフィール"  # 前の判定の分だけ。撮影場所はプロフィールから決めない(活動地域は画面で別に読む)
-PLACE_SOURCES = ["本文", EVENT_SOURCE, EVENT_GUESS_SOURCE, UNKNOWN_PLACE]
+PLACE_SOURCES = ["本文", TREE_SOURCE, EVENT_SOURCE, EVENT_GUESS_SOURCE, UNKNOWN_PLACE]
 
 SCHEMA = {
     "type": "ARRAY",
@@ -82,6 +83,10 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
 下のポストそれぞれについて、書かれている事実を読み取り、指定の JSON 配列で返してください。
 ポストの数だけ、id をそのまま付けて返してください。
 
+- ツリー: ポストに「ツリー」が付いていれば、そのポストに至るまでの返信元・引用元を古い順に並べたもの。
+  撮影の場所・会場・イベント・日程・作品は、ツリーの最初のポストにだけ書かれていることがあるので、ツリーも読む。
+  ただし募集かどうか(wants_photographer)は、本文の投稿者(依頼主)が撮影者を探しているかで決める。
+  「別の人」のポストは、依頼主の募集の中身(場所・イベント・日程)として使えるときだけ使う。
 - wants_photographer: 投稿者(引用ポストなら引用元の募集者を含む)が、撮影してくれるカメラマン・撮影者を探していれば true。
   被写体やモデルだけを募集している、カメラマン自身が被写体を探している、募集の締め切り報告・お礼・雑談なら false。
   他人の募集への返信や質問(「まだ募集していますか」「立候補します」など)も false。
@@ -103,12 +108,13 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
 - matched_works: 撮影する作品(works・本文・絵文字の意味から判断。略称・キャラクター名からの判断も含む)が、下の「点数を付ける作品」の
   どれかに当たれば、その作品の名前を一覧の行頭の名前のとおりに書いて並べる。何作品でもよい。当たらなければ空の配列。
 - prefecture: 撮影する場所(スタジオ・会場・イベントの開催地)の都道府県。次の順で判断する。
-  1. 本文・引用元の本文に書かれた地名・会場名・駅名
+  1. 本文・引用元の本文・ツリーのポストに書かれた地名・会場名・駅名
   2. ポストに「イベントの意味」が付いていれば、そこに書かれた開催地(「回ごとにちがう」なら本文から判断する)
   3. 「イベントの意味」が付いていないイベントで撮影するなら、下の event_prefecture(そのイベントの開催地として知っている都道府県)
   どれでも分からなければ「不明」。投稿者プロフィールの地域・自己紹介は依頼主の活動地域で、撮影場所とは別なので使わない。
   全国のポストが混ざっているので、推測で東京などにしないこと。
-- prefecture_source: prefecture をどこから判断したか(本文 / イベント表 / イベント推定 / 不明)。上の 3 で決めたら「イベント推定」。
+- prefecture_source: prefecture をどこから判断したか(本文 / ツリー / イベント表 / イベント推定 / 不明)。
+  1 のうち本文・引用元の本文なら「本文」、ツリーのポストから決めたら「ツリー」、上の 3 で決めたら「イベント推定」。
 - place: 会場名やイベント名・地域(本文に書かれていれば。イベント表から分かった会場や、event_venue でもよい。なければ空文字)。
 - event: 撮影するイベント(即売会・コスプレイベント・ライブ・展示会など)の名前を、本文に書かれているとおりに(略称でもよい)。
   「イベント」「併せ」「撮影会」のような一般的な言葉だけなら空文字。イベントでないなら空文字。
@@ -193,6 +199,9 @@ def posted_label(created_at):
     return f"{t:%Y/%m/%d}({WEEKDAYS[t.weekday()]}) {t:%H:%M}"
 
 
+TREE_TEXT_LIMIT = 400  # ツリーのポスト 1 件あたり、AI に渡す文字数の上限
+
+
 def works_lines(works):
     """点数表の作品の行を「- 名前(別名: 略称、…)」の形で並べる。点数は AI に渡さない(点数を変えても指示文が変わらないように)。"""
     if not works:
@@ -214,9 +223,14 @@ def build_prompt(items, works, emojis=None, events=None):
         if it.get("author_location") or it.get("author_description"):
             lines.append(f"投稿者プロフィール: 地域={it.get('author_location') or ''} / 自己紹介={(it.get('author_description') or '')[:160]}")
         lines.append("本文: " + (it.get("text") or ""))
-        if it.get("quoted_text"):
+        tree = it.get("tree") or []
+        if tree:  # 引用元もツリーに入っている
+            lines.append("ツリー(古い順):")
+            lines += [f"- [{t['relation']}・{'依頼主' if t['by_client'] else '別の人'}] {(t['text'] or '')[:TREE_TEXT_LIMIT]}"
+                      for t in tree]
+        elif it.get("quoted_text"):
             lines.append("引用元の本文: " + it["quoted_text"])
-        body = (it.get("text") or "") + "\n" + (it.get("quoted_text") or "")
+        body = "\n".join([it.get("text") or "", it.get("quoted_text") or ""] + [t["text"] or "" for t in tree])
         hints = emoji_hints(body, index)
         if hints:
             lines.append("絵文字の意味: " + "、".join(hints))
