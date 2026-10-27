@@ -193,7 +193,7 @@ export function calendarUrls(env) {
   return String(env.GCAL_ICS_URL || "").split(/[\s,]+/).filter((u) => /^https:\/\/\S+$/.test(u));
 }
 
-// 予定名にこの言葉が入っていれば「休み」(予定ありに数えない)。Notion【7】の「休みとみなす予定の言葉」で変えられる
+// 予定名にこの言葉が入っていれば「休み」(予定ありに数えない)。Notion【4】の「休みとみなす予定の言葉」で変えられる
 export const DEFAULT_OFF_WORDS = ["休み", "有給", "休日", "公休", "代休", "振休"];
 
 export function offWords(value) {

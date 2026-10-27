@@ -63,7 +63,7 @@ SCHEMA = {
             "case_type": {"type": "STRING", "enum": TYPES},
             "is_cosplay": {"type": "BOOLEAN"},
             "works": {"type": "STRING"},
-            "excluded_work": {"type": "STRING"},
+            "matched_works": {"type": "ARRAY", "items": {"type": "STRING"}},
             "prefecture": {"type": "STRING", "enum": PREFECTURES + [UNKNOWN_PLACE]},
             "prefecture_source": {"type": "STRING", "enum": PLACE_SOURCES},
             "place": {"type": "STRING"},
@@ -74,7 +74,7 @@ SCHEMA = {
             "summary": {"type": "STRING"},
         },
         "required": ["id", "wants_photographer", "official_or_job", "case_type", "is_cosplay", "works",
-                     "excluded_work", "prefecture", "prefecture_source", "place", "event", "event_venue", "event_prefecture", "dates", "summary"],
+                     "matched_works", "prefecture", "prefecture_source", "place", "event", "event_venue", "event_prefecture", "dates", "summary"],
     },
 }
 
@@ -100,7 +100,8 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
   VTuber などはキャラ名の代わりに決まった絵文字(推しマーク)で書かれることがある。ポストに「絵文字の意味」が付いていれば、
   それを使ってキャラクター名を works に書く(例: 「にじさんじ 〇〇」)。同じ絵文字に候補が何人もあるときは、本文の流れから選ぶ。
   ただの飾りとして使われている絵文字なら無視する。
-- excluded_work: works が下の「除外作品」のどれかに当たれば、その除外作品名(略称・キャラクター名からの判断も含む)。当たらなければ空文字。
+- matched_works: 撮影する作品(works・本文・絵文字の意味から判断。略称・キャラクター名からの判断も含む)が、下の「点数を付ける作品」の
+  どれかに当たれば、その作品の名前を一覧の行頭の名前のとおりに書いて並べる。何作品でもよい。当たらなければ空の配列。
 - prefecture: 撮影する場所(スタジオ・会場・イベントの開催地)の都道府県。次の順で判断する。
   1. 本文・引用元の本文に書かれた地名・会場名・駅名
   2. ポストに「イベントの意味」が付いていれば、そこに書かれた開催地(「回ごとにちがう」なら本文から判断する)
@@ -192,8 +193,18 @@ def posted_label(created_at):
     return f"{t:%Y/%m/%d}({WEEKDAYS[t.weekday()]}) {t:%H:%M}"
 
 
-def build_prompt(items, excluded_works, emojis=None, events=None):
-    lines = [RULES, "除外作品: " + ("、".join(excluded_works) if excluded_works else "なし"), ""]
+def works_lines(works):
+    """点数表の作品の行を「- 名前(別名: 略称、…)」の形で並べる。点数は AI に渡さない(点数を変えても指示文が変わらないように)。"""
+    if not works:
+        return ["点数を付ける作品: なし"]
+    lines = ["点数を付ける作品:"]
+    for names in works:
+        lines.append(f"- {names[0]}" + (f"(別名: {'、'.join(names[1:])})" if len(names) > 1 else ""))
+    return lines
+
+
+def build_prompt(items, works, emojis=None, events=None):
+    lines = [RULES] + works_lines(works) + [""]
     index = emoji_index(emojis)
     for it in items:
         lines.append(f"### id: {it['id']}")
@@ -292,7 +303,7 @@ def call(api_key, model, prompt, session=None):
     return result, tokens_in, tokens_out
 
 
-def judge(items, api_key, model, excluded_works, batch_size, session=None, emojis=None, events=None):
+def judge(items, api_key, model, works, batch_size, session=None, emojis=None, events=None):
     """items をまとめて判定する。(結果 {id: 判定}, 入力トークン, 出力トークン, 呼び出し回数) を返す。
 
     AI が返し忘れたポストは 1 件ずつ聞き直す。それでも返らなければ結果に入れない。
@@ -301,7 +312,7 @@ def judge(items, api_key, model, excluded_works, batch_size, session=None, emoji
 
     def run(batch):
         nonlocal tokens_in, tokens_out, calls
-        out, t_in, t_out = call(api_key, model, build_prompt(batch, excluded_works, emojis, events), session)
+        out, t_in, t_out = call(api_key, model, build_prompt(batch, works, emojis, events), session)
         tokens_in, tokens_out, calls = tokens_in + t_in, tokens_out + t_out, calls + 1
         wanted = {it["id"] for it in batch}
         for r in out:
@@ -330,6 +341,8 @@ def normalize(result):
         result["prefecture"], result["prefecture_source"] = UNKNOWN_PLACE, UNKNOWN_PLACE  # 推定の根拠と食い違うものは使わない
     if result.get("event_prefecture") not in PREFECTURES + [VARIES]:
         result["event_prefecture"] = UNKNOWN_PLACE
+    works = result.get("matched_works")
+    result["matched_works"] = [str(w).strip()[:60] for w in works if str(w).strip()][:10] if isinstance(works, list) else []
     result["event"] = str(result.get("event") or "").strip()[:60]
     result["event_venue"] = str(result.get("event_venue") or "").strip()[:60]
     if result.get("case_type") not in TYPES:
@@ -343,8 +356,6 @@ def reject_reason(result, cosplay_only):
         return "カメラマン募集ではない"
     if result.get("official_or_job"):
         return "公式・求人"
-    if result.get("excluded_work"):
-        return f"除外作品: {result['excluded_work']}"
     if cosplay_only and not result.get("is_cosplay"):
         return "コスプレ以外"
     return None

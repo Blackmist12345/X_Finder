@@ -23,7 +23,11 @@ class Notion:
 
     def _request(self, method, path, payload=None):
         for attempt in range(4):
-            res = requests.request(method, f"{API}{path}", headers=self.headers, json=payload, timeout=30)
+            try:
+                res = requests.request(method, f"{API}{path}", headers=self.headers, json=payload, timeout=30)
+            except (requests.Timeout, requests.ConnectionError):
+                time.sleep(2 ** attempt)  # 返事が来ないときも間を空けてやり直す
+                continue
             if res.status_code == 429 or res.status_code >= 500:
                 time.sleep(2 ** attempt)
                 continue
@@ -52,13 +56,29 @@ class Notion:
         }
         return self._request("POST", "/databases", payload)["id"]
 
+    def rename_database(self, database_id, title):
+        self._request("PATCH", f"/databases/{database_id}", {"title": [{"type": "text", "text": {"content": title}}]})
+
+    def find_databases(self, title):
+        """この連携から見える、名前が title と同じ表の [{id, parent}](parent は親ページの ID、ハイフンなし)。"""
+        data = self._request("POST", "/search", {"query": title, "filter": {"property": "object", "value": "database"}})
+        out = []
+        for db in data.get("results", []):
+            name = "".join(t.get("plain_text", "") for t in db.get("title", []))
+            if name == title:
+                out.append({"id": db["id"], "parent": (db.get("parent") or {}).get("page_id", "").replace("-", "")})
+        return out
+
+    def archive_page(self, page_id):
+        self._request("PATCH", f"/pages/{page_id}", {"archived": True})
+        time.sleep(0.35)
+
     def update_page(self, page_id, properties):
         self._request("PATCH", f"/pages/{page_id}", {"properties": properties})
         time.sleep(0.35)
 
     def create_page(self, database_id, properties):
         self._request("POST", "/pages", {"parent": {"database_id": database_id}, "properties": properties})
-        time.sleep(0.35)  # Notion は 1 秒に 3 回まで
         time.sleep(0.35)  # Notion の上限は平均 3 リクエスト/秒
 
 

@@ -10,9 +10,11 @@ on:
         type: choice
         options:
           - 'd1_schema'        # 1. D1 にテーブルを作る
-          - 'notion_tables'    # 2. Notion 8表を作る
+          - 'notion_tables'    # 2. Notion の表を作る
           - 'migrate_preview'  # 3. 今の4表からの振り分け案を見る(書き込まない)
           - 'migrate_apply'    # 4. 振り分け案のとおりに新しい表へ移す
+          - 'points_merge_preview'  # 減点語・除外作品・点数表・クリティカル条件を【3】点数表にまとめる案を見る(書き込まない)
+          - 'points_merge_apply'    # 案のとおりに【3】点数表を作り、表の番号を振り直す
 
 concurrency:
   group: finder-setup
@@ -48,4 +50,6 @@ jobs:
             notion_tables)   python -u scripts/setup_notion.py ;;
             migrate_preview) MODE=preview python -u scripts/migrate_from_old.py ;;
             migrate_apply)   MODE=apply python -u scripts/migrate_from_old.py ;;
+            points_merge_preview) MODE=preview python -u scripts/merge_points.py ;;
+            points_merge_apply)   MODE=apply python -u scripts/merge_points.py ;;
           esac
