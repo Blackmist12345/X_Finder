@@ -1,0 +1,33 @@
+name: Probe tree
+
+# 試作: 引用元・返信元を root まで遡ると何件・いくらかかるかを調べる(scripts/probe_tree.py)。
+# D1 は読むだけ。作業ブランチに push したときだけ 1 回動く。本番には入れない。
+on:
+  push:
+    branches: [claude/project-thread-dr133u]
+    paths:
+      - scripts/probe_tree.py
+      - .github/workflows/probe-tree.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Probe
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          TWITTERAPI_KEY: ${{ secrets.TWITTERAPI_KEY }}
+          SAMPLE: '40'
+          DAYS: '7'
+        run: python -u scripts/probe_tree.py
