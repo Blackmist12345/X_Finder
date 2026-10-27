@@ -7,7 +7,7 @@ MODE=apply: 新しい【3】点数表を作って行を入れ、残りの表の�
 行の移し方(点数は −100〜+100 の新しい刻みに書き換える):
   - 種類・都道府県: tables.py の初期値(コスプレ撮影 +20、その他の道府県 −20 など)
   - 減点語: 都道府県の名前は外す(都道府県の行と重なるため)。地名(地方・都市名)は −20、それ以外は −5 か −10
-  - 除外作品: 区分「作品」で −100(仕分けの「点数以下」で削除予定へ回す)
+  - 除外作品: 区分「作品」で −30(Latte 2026-10-27。強く外したい作品は Notion で点を下げる)
   - クリティカル条件の「条件」行: 区分「語」で +20(基準点は使わない)
 """
 import os
@@ -24,7 +24,7 @@ from finder.tables import POINT_SEED, TABLES  # noqa: E402
 OLD_KEYS = ["penalty_words", "excluded_works", "scores", "critical"]
 OLD_TABLES_KEY = "notion_tables_old"
 REGION_POINTS, WORD_POINTS, LIGHT_WORD_POINTS = -20, -10, -5
-EXCLUDED_WORK_POINTS = -100
+EXCLUDED_WORK_POINTS = -30
 CRITICAL_POINTS = 20
 PREF_NAMES = set(PREFECTURES) | {p[:-1] for p in PREFECTURES if p != "北海道" and p[-1] in "都府県"}
 

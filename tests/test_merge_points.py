@@ -35,7 +35,7 @@ def test_plan_rewrites_points_and_drops_prefectures():
     got = {(c, k): p for c, k, p, _, _ in rows}
     assert dropped == ["大阪"]  # 都道府県の名前は都道府県の行と重なるので外す
     assert got[("名古屋", "語")] == -20 and got[("栄", "語")] == -5 and got[("時給", "語")] == -10
-    assert got[("呪術廻戦", "作品")] == -100
+    assert got[("呪術廻戦", "作品")] == -30
     assert got[("コスプレ撮影", "種類")] == 20 and got[("その他の道府県", "都道府県")] == -20
     assert ("無効", "語") not in got
 
