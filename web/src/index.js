@@ -1,5 +1,5 @@
 // N13 X Finder: D1 にたまった判定・採点の結果を、スマホで見るための Web ページ。
-// D1 は読むだけ。ただし案件カードの確認の状態(未確認 / 確認済み / 保留 / 削除予定)と、画面の設定だけは書く。
+// D1 は読むだけ。ただし案件カードの確認の状態(新着 / 確認中 / 連絡中 / 受注中 / 削除予定)と、画面の設定だけは書く。
 // Cloudflare Access を通った人だけが見られる(auth.js)。
 import { verifyAccess } from "./auth.js";
 import { getCalendar, offWords } from "./calendar.js";
@@ -16,7 +16,7 @@ const shootArea = (r) => {
   return { shoot_pref: pref, shoot_kanto: !!pref && KANTO.includes(pref), shoot_far: !!pref && !KANTO.includes(pref), shoot_metro: !!pref && METRO.includes(pref) };
 };
 const MAX_LIST = 300;
-// カードの状態。new=新着 / checking=確認中 / accepted=受注中 / hold=保留 / delete=削除予定。行がなければ新着(まだ開いていない)。
+// カードの状態。new=新着 / checking=確認中 / accepted=連絡中 / hold=受注中 / delete=削除予定。行がなければ新着(まだ開いていない)。
 // 確認中は自分で付けたときだけ(開いただけでは新着のまま)。2週間を過ぎたら新着と同じく消える
 // 開いたかどうかは状態とは別に opened_at で持つ(今の画面では使っていない。前に開いただけの行は opened_at = updated_at の新着になっている)
 const REVIEW_STATES = ["new", "checking", "accepted", "hold", "delete"];
@@ -127,7 +127,7 @@ function workPoints(detail) {
 
 // 一覧は新しい順に MAX_LIST 件まで取る(点数順に並べるのは画面)。点数順で打ち切ると、点の低い新しい案件が入らなくなるため。
 // 削除予定は数が多く枠を埋めてしまうので別に取る(group=deleted で削除予定だけ、ふだんは削除予定以外)。
-// 2週間を過ぎても残す状態(受注中・保留)は、枠からはみ出ないよう先に取る
+// 2週間を過ぎても残す状態(連絡中・受注中)は、枠からはみ出ないよう先に取る
 export async function listCases(db, params) {
   const view = params.get("view") === "rejected" ? "rejected" : "judged";
   const days = Math.min(Math.max(Number(params.get("days")) || 14, 1), 60);

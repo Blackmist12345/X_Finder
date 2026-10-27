@@ -242,7 +242,7 @@ header.top.slim .tab .c{font-size:17px}
 .tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:10px;background:var(--surface-2);border-radius:12px;padding:3px}
 .tab{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12.5px;border-radius:9px;padding:6px 2px;cursor:pointer;white-space:nowrap}
 .tab .c{display:block;font-family:var(--font-num);font-size:16px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
-/* 状態ごとの色: 新着=青 確認中=紫 受注中=緑 保留=オレンジ 削除予定=赤 */
+/* 状態ごとの色: 新着=青 確認中=紫 連絡中=緑 受注中=オレンジ 削除予定=赤 */
 .tab[data-tab="new"]{--tc:var(--accent);--tc-soft:var(--accent-soft)} .tab[data-tab="checking"]{--tc:var(--chk);--tc-soft:var(--chk-soft)} .tab[data-tab="accepted"]{--tc:var(--ok);--tc-soft:var(--ok-soft)}
 .tab[data-tab="hold"]{--tc:var(--warn);--tc-soft:var(--warn-soft)} .tab[data-tab="delete"]{--tc:var(--rec);--tc-soft:var(--rec-soft)}
 .tab .c{color:var(--tc)}
@@ -254,7 +254,7 @@ header.top.slim .tab .c{font-size:17px}
 .pill.chk{background:var(--chk-soft);color:var(--chk);font-weight:500}
 .detail-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:20px}
 .detail-actions .btn{padding:13px 4px;font-size:14px;white-space:nowrap}
-/* 保留・削除予定はタブと同じ色、ブラックリストは黒と赤 */
+/* 受注中・削除予定はタブと同じ色、ブラックリストは黒と赤 */
 .btn.acc{grid-column:1/-1;border-color:var(--ok);color:var(--ok);background:var(--ok-soft)}
 .btn.acc.on{background:var(--ok);color:#fff}
 .btn.chk{grid-column:1/-1;border-color:var(--chk);color:var(--chk);background:var(--chk-soft)}
@@ -446,7 +446,7 @@ header.top.slim .tab .c{font-size:17px}
 </div>
 
 <script>
-// ホームでは絞り込まない。「仕分け」でチェックした値に1つでも当てはまる新着を、削除予定に移す(受注中・保留は触らない)。
+// ホームでは絞り込まない。「仕分け」でチェックした値に1つでも当てはまる新着を、削除予定に移す(確認中・連絡中・受注中は触らない)。
 // 値は案件から作る。書いていない・分からないものも「記載なし」「不明」という1つの値として選べる
 const SORT_FACETS=[
   {k:"gender",g:"依頼主",t:"性別",v:c=>c.gender||"記載なし"},
@@ -483,11 +483,12 @@ const TYPES=["コスプレ撮影","コスパフォ","踊ってみた","ポート
 const SORT_ORDER={gender:["女性","男性"],plan:["空き","休み","予定あり"],type:TYPES};
 const ROLE={mention:"メンション",quoted:"引用元の投稿者",reply_to:"リプライ先",image:"画像から"};
 // カードの状態。新着=集めた案件が最初に入る(開いても変わらない) / 確認中=一度見て、まだ決めていない案件(自分で移したときだけ)
-// 受注中=引き受けた案件(2週間を過ぎても残る) / 保留=ピン留め(2週間を過ぎても残る) / 削除予定=投稿日から14日で消える
-const TABS=[{k:"new",t:"新着"},{k:"checking",t:"確認中"},{k:"accepted",t:"受注中"},{k:"hold",t:"保留"},{k:"delete",t:"削除予定"}];
+// 連絡中=依頼主と連絡している案件(2週間を過ぎても残る) / 受注中=引き受けた案件(2週間を過ぎても残る) / 削除予定=投稿日から14日で消える
+// 内部の値は前のまま(連絡中=accepted、受注中=hold)。名前だけ変えたので、保存しているデータは移していない
+const TABS=[{k:"new",t:"新着"},{k:"checking",t:"確認中"},{k:"accepted",t:"連絡中"},{k:"hold",t:"受注中"},{k:"delete",t:"削除予定"}];
 const DELETE_DAYS=14;
 // 左右のスワイプで付ける状態(左上の「X Finder」から開く設定で変えられる。保存先は D1 なので、どの端末でも同じ)
-const SWIPE_LABEL={new:"新着に戻す",checking:"確認中",accepted:"受注中",hold:"📌 保留",delete:"削除予定",none:"何もしない"};
+const SWIPE_LABEL={new:"新着に戻す",checking:"確認中",accepted:"連絡中",hold:"受注中",delete:"削除予定",none:"何もしない"};
 let settings={swipe_right:"hold",swipe_left:"delete",swipe_tabs:{},sort_rule:{},sort_auto:false,sort_presets:[],sort_active:null};
 let state={rejected:false,sort:"score",tab:"new",day:null}; // day(カレンダーで選んだ撮影日)は保存しない
 let cases=[],loadedView=null,areaChoices=null;
@@ -579,9 +580,9 @@ async function postReview(id,body){
 function setLocalReview(id,review){const c=cases.find(x=>x.id===id);if(c)c.review=review}
 function daysLeft(c){if(!c.created_at)return null;return Math.max(0,Math.ceil((new Date(c.created_at).getTime()+DELETE_DAYS*864e5-Date.now())/864e5))}
 function reviewPill(c){
-  if(c.review==="accepted"){const d=caseDates(c);return `<span class="pill acc">受注中${d.length&&d[d.length-1]<jstDay(0)?"・撮影日を過ぎました":""}</span>`}
+  if(c.review==="accepted")return '<span class="pill acc">連絡中</span>';
   if(c.review==="checking")return '<span class="pill chk">確認中</span>';
-  if(c.review==="hold")return '<span class="pill hold">📌 保留</span>';
+  if(c.review==="hold"){const d=caseDates(c);return `<span class="pill hold">受注中${d.length&&d[d.length-1]<jstDay(0)?"・撮影日を過ぎました":""}</span>`}
   if(c.review==="delete"){const d=daysLeft(c);return `<span class="pill del">削除予定${d==null?"":d?`・あと${d}日`:"・まもなく"}</span>`}
   return "";
 }
@@ -629,7 +630,7 @@ function render(){
   renderControls();
   const a=filtered();
   $("count").textContent=state.rejected?`対象外 ${cases.length}件(直近2週間)`:`直近2週間 ${cases.length}件`;
-  const emptyMsg={new:"新着の案件はありません。",checking:"確認中の案件はありません。<br>見たけれどまだ決めていない案件は、詳細の「確認中にする」でここに移せます。",accepted:"受注中の案件はありません。<br>引き受けた案件は、詳細の「受注中にする」でここに移せます。",hold:"保留の案件はありません。<br>あとで見直したい案件は、詳細の「保留にする」でここに残せます。",
+  const emptyMsg={new:"新着の案件はありません。",checking:"確認中の案件はありません。<br>見たけれどまだ決めていない案件は、詳細の「確認中にする」でここに移せます。",accepted:"連絡中の案件はありません。<br>依頼主と連絡している案件は、詳細の「連絡中にする」でここに移せます。",hold:"受注中の案件はありません。<br>引き受けた案件は、詳細の「受注中にする」でここに移せます。",
     delete:`削除予定の案件はありません。<br>削除予定にした案件は、投稿日から${DELETE_DAYS}日で消えます。`}[state.tab];
   const rb=$("rejBar");rb.hidden=!state.rejected;
   rb.innerHTML=state.rejected?`<span>AI が募集ではないと判断したポスト(対象外)を表示中</span><button type="button" class="chip" data-rejected="0">戻る</button>`:"";
@@ -839,16 +840,16 @@ function postBox(text,url,id,from){
   const body=`${from?`<span class="from">${esc(from)}</span>`:""}${esc(text)}`;
   return url&&/^\d+$/.test(String(id||""))?`<a class="post link" href="${esc(url)}" data-xpost="${esc(id)}" target="_blank" rel="noopener noreferrer">${body}<span class="open-x">X で開く ›</span></a>`:`<div class="post">${body}</div>`;
 }
-// 詳細のいちばん下のボタンは「確認中にする」「受注中にする」(横いっぱい)と「とじる」「保留にする」「ブラックリストにいれる」「削除予定にする」。
+// 詳細のいちばん下のボタンは「確認中にする」「連絡中にする」(横いっぱい)と「とじる」「受注中にする」「ブラックリストにいれる」「削除予定にする」。
 // その状態のときにもう一度押すと外れて、新着に戻る
 function reviewButtons(review,c){
   const black=c&&c.blacklist?'<button type="button" class="btn blk" disabled>ブラックリスト登録済み</button>'
     :`<button type="button" class="btn blk" data-black-open="1" ${c&&c.author_id?"":"disabled"}>ブラックリストにいれる</button>`;
   const toggle=(k,on,off,cls)=>`<button type="button" class="btn ${cls} ${review===k?"on":""}" data-review="${review===k?"new":k}">${review===k?off:on}</button>`;
   return `${toggle("checking","確認中にする","確認中を外す","chk")}
-   ${toggle("accepted","受注中にする","受注中を外す","acc")}
+   ${toggle("accepted","連絡中にする","連絡中を外す","acc")}
    <button type="button" class="btn" data-close="1">とじる</button>
-   ${toggle("hold","保留にする","保留を外す","hold")}
+   ${toggle("hold","受注中にする","受注中を外す","hold")}
    ${black}
    ${toggle("delete","削除予定にする","削除予定を外す","del")}`;
 }
@@ -996,15 +997,15 @@ function openBlacklist(){
 const HELP=[
  ["ホームの見かた",`<p>カードは点数の高い順に並びます(並び順は変えられます)。上の5つのタブで、カードの状態ごとに分けて見られます。</p>
   <ul><li><b>新着</b>: 集めた案件が最初に入ります。開いても変わりません。投稿から2週間で一覧から消えます。</li>
-  <li><b>確認中</b>: 一度見て、まだ受注・保留・削除を決めていない案件です。詳細の「確認中にする」かスワイプで自分で移したときだけ入ります(開いただけでは新着のまま)。新着と同じく投稿から2週間で消えます。</li>
+  <li><b>確認中</b>: 一度見て、まだ連絡・受注・削除を決めていない案件です。詳細の「確認中にする」かスワイプで自分で移したときだけ入ります(開いただけでは新着のまま)。新着と同じく投稿から2週間で消えます。</li>
+  <li><b>連絡中</b>: 依頼主と連絡している案件です。2週間を過ぎても残ります。</li>
   <li><b>受注中</b>: 引き受けた案件です。2週間を過ぎても残り、撮影日が過ぎると「撮影日を過ぎました」と出ます。</li>
-  <li><b>保留</b>: あとで見直したい案件です。2週間を過ぎても残ります。</li>
   <li><b>削除予定</b>: 投稿日から14日で消えます。</li></ul>
-  <p>新着・確認中・保留のカードは、元のポストが消されていないかを決まった間隔で確かめます(Notion【5】の「削除確認の頻度(時間)」、0 で確かめない)。見られなくなっていたら「元のポストが見られません」の印を付けて削除予定に移します。印の付いたカードを自分で戻したときは、もう確かめません。受注中と削除予定は確かめません。</p>
+  <p>新着・確認中のカードは、元のポストが消されていないかを決まった間隔で確かめます(Notion【5】の「削除確認の頻度(時間)」、0 で確かめない)。見られなくなっていたら「元のポストが見られません」の印を付けて削除予定に移します。印の付いたカードを自分で戻したときは、もう確かめません。連絡中・受注中・削除予定は確かめません(自分で動いている案件が勝手に移らないように)。</p>
   <p>点数は Notion の【3】点数表だけで決まります。区分ごとに、種類・撮影場所の都道府県(読めなければ本文の地名)・本文に出てくる語・作品・イベントに当たった行の点を足し、プラスの点のときは依頼主の FF率(フォロワー数÷フォロー数)を倍率として掛けます(0.5〜1.5倍。幅は【4】基本設定で変えられる)。点数は −100〜+100 で、内訳は詳細で見られます。点数表に当たった作品は、カードの「作品」の行に点が出ます(マイナスは赤)。点数表を変えると、そのあとに取得したポストから新しい点数になります。</p>
   <p>日程の横の「予定あり / 空き / 休み」は Google カレンダーとの照合です。依頼主の名前の横には、プロフィールから読んだ性別・年齢が出ます(未成年は赤)。活動地域はカードの「活動地域」の行に出ます(書いていない人は「記載なし」)。</p>
   <p>一番上で下に引っぱると再読み込みします。下へスクロールすると上部がたたまれます。</p>`],
- ["仕分け",`<p>ホームの「仕分け」から、要らない案件をまとめて削除予定に移せます。チェックした値に1つでも当てはまる新着が移ります(確認中・受注中・保留は動かしません)。</p>
+ ["仕分け",`<p>ホームの「仕分け」から、要らない案件をまとめて削除予定に移せます。チェックした値に1つでも当てはまる新着が移ります(確認中・連絡中・受注中は動かしません)。</p>
   <ul><li><b>項目と値</b>: 依頼主(性別・年齢・活動地域)と案件(撮影場所・撮影日の予定・種類)ごとに、今の案件にある値を件数つきで並べます。件数は新着で数えます。書いていない・分からない案件は「記載なし」「不明」「日付不明」という1つの値になっていて、これもチェックできます。</li>
   <li><b>活動地域</b>: 読み取れる地域を最初から全部並べています。地方(関西・東海など)、都道府県(地方ごとの行)、都市(名古屋・神戸・仙台など)の3つで、市の名前で書いている人はその市の値になります(名古屋の人は「愛知」ではなく「名古屋」)。今の新着にいない地域は薄い字です。「たたむ」で今の新着にある値とチェックした値だけになり、「すべて出す」で戻ります。いくつも書いてある人は、その全部にチェックが付いたときだけ当てはまります(東京と大阪の人は、大阪だけのチェックでは移りません)。</li>
   <li><b>点数</b>: 数字を入れると、その点数以下(ちょうどその点数も含む)の新着が当てはまります(例: −50)。空欄なら使いません。対象外にしたい作品は点数表で大きなマイナスにしておくと、ここで削除予定に回せます。</li>
@@ -1017,10 +1018,10 @@ const HELP=[
  ["並び順・日付",`<ul><li><b>並び順</b>: 点数順・新着順・FF率順・フォロワー数順。</li>
   <li><b>日付</b>: 月のカレンダーが開き、日ごとに「その日が撮影日の案件の数」(青い数字、今のタブで数える)と Google カレンダーの予定(休みは緑)が出ます。日をタップすると、その日が撮影日の案件だけを一覧に出します。上の「解除」で戻ります。予定は今日から120日先まで出ます。</li></ul>`],
  ["案件の詳細",`<p>カードをタップすると詳細が開きます。本文をタップすると X アプリでそのポストが開きます。一番上で下に引っぱると閉じます。</p>
-  <p>下のボタンで「確認中」「受注中」「保留」「削除予定」にできます。その状態のときにもう一度押すと外れて新着に戻ります。スパム・虚偽の申告・カメラマンだった人などは「ブラックリストにいれる」で、これまでとこれからのポストを出さず、AI の判定にもかけません(設定の「ブラックリスト」から解除できます)。</p>
+  <p>下のボタンで「確認中」「連絡中」「受注中」「削除予定」にできます。その状態のときにもう一度押すと外れて新着に戻ります。スパム・虚偽の申告・カメラマンだった人などは「ブラックリストにいれる」で、これまでとこれからのポストを出さず、AI の判定にもかけません(設定の「ブラックリスト」から解除できます)。</p>
   <p>場所(都道府県)は、本文 → Notion の「イベントの一覧」→ 添付画像 の順に判断し、本文以外から判断したときはカードに小さく出ます。依頼主のプロフィールからは決めません(分からないときは「場所不明」)。添付画像(メンバー表など)から読んだ X のアカウントは「関係するアカウント」に「画像から」と出ます。</p>
   <p>依頼主の年齢・活動地域・性別は、プロフィールに書いてある書き方(18↓、30↑、成人済み、関西、♀ など)から読みます。プロフィールに書いてないときは、プロフィールのリンク先(Litlink など)からも読み、「リンク先から」と出ます。</p>`],
- ["スワイプ",`<p>カードを左右にスワイプすると、設定で選んだ状態を付けられます。割り当ては状態タブごとに決められます(設定の「スワイプ(状態タブごと)」)。初期値は右=保留、左=削除予定です(保留のタブの右と、削除予定のタブの左は「新着に戻す」)。</p>
+ ["スワイプ",`<p>カードを左右にスワイプすると、設定で選んだ状態を付けられます。割り当ては状態タブごとに決められます(設定の「スワイプ(状態タブごと)」)。初期値は右=受注中、左=削除予定です(受注中のタブの右と、削除予定のタブの左は「新着に戻す」)。</p>
   <ul><li>そのタブの状態は選べません。代わりに「新着に戻す」を選べます(新着のタブにはありません)。</li>
   <li>付けたい状態がもう付いているカードをスワイプすると、その状態が外れて新着に戻ります。</li>
   <li>「何もしない」を選ぶと、その向きにはスワイプしません。</li></ul>`],
@@ -1297,7 +1298,7 @@ async function renderStats(){
    <div class="sec"><h3>対象の案件の都道府県(${statsDays}日)</h3>${hbars(st.prefectures)}</div>
    <div class="sec"><h3>対象外の理由(${statsDays}日)</h3>${hbars(st.reject_reasons)}</div>
    <div class="sec"><h3>カードの状態</h3><div class="kpis" style="grid-template-columns:repeat(4,1fr);margin-top:0">
-    <div class="kpi"><div class="k">確認中</div><div class="v">${fmt(rv.checking||0)}</div></div><div class="kpi"><div class="k">受注中</div><div class="v">${fmt(rv.accepted||0)}</div></div><div class="kpi"><div class="k">保留</div><div class="v">${fmt(rv.hold||0)}</div></div><div class="kpi"><div class="k">削除予定</div><div class="v">${fmt(rv.delete||0)}</div></div></div></div>
+    <div class="kpi"><div class="k">確認中</div><div class="v">${fmt(rv.checking||0)}</div></div><div class="kpi"><div class="k">連絡中</div><div class="v">${fmt(rv.accepted||0)}</div></div><div class="kpi"><div class="k">受注中</div><div class="v">${fmt(rv.hold||0)}</div></div><div class="kpi"><div class="k">削除予定</div><div class="v">${fmt(rv.delete||0)}</div></div></div></div>
    <p class="sub">金額は設定の為替レート(1ドル ${st.rate}円)で円にしています。日付は日本時間です。</p>
    <div class="actions"><button class="btn" data-close="1">閉じる</button></div>`;
 }

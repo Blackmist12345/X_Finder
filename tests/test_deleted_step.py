@@ -34,21 +34,21 @@ def states(d1):
     return {r["post_id"]: r["state"] for r in d1.query("SELECT post_id, state FROM reviews")}
 
 
-def test_targets_new_checking_hold_only(d1):
+def test_targets_new_and_checking_only(d1):
     add_case(d1, "1")
     add_case(d1, "2", "checking")
-    add_case(d1, "3", "hold", collected_at="2026-01-01T00:00:00+00:00")  # 保留は2週間を過ぎても一覧に残るので確かめる
-    add_case(d1, "4", "accepted")
+    add_case(d1, "3", "hold", collected_at="2026-01-01T00:00:00+00:00")  # 受注中(hold)は確かめない
+    add_case(d1, "4", "accepted")  # 連絡中(accepted)も確かめない
     add_case(d1, "5", "delete")
     add_case(d1, "6", collected_at="2026-01-01T00:00:00+00:00")  # 一覧から消えた新着
     add_case(d1, "7", author="999")
     d1.query("INSERT INTO blacklist (user_id, reason, added_at) VALUES ('999', 'spam', 'x')")
-    assert deleted_step.target_ids(d1) == ["1", "2", "3"]
+    assert deleted_step.target_ids(d1) == ["1", "2"]
 
 
 def test_gone_posts_move_to_delete_once(d1, monkeypatch):
     monkeypatch.setattr(deleted_step.time, "sleep", lambda s: None)
-    for pid, state in (("1", None), ("2", "checking"), ("3", "hold"), ("4", None)):
+    for pid, state in (("1", None), ("2", "checking"), ("3", None), ("4", None)):
         add_case(d1, pid, state)
     lines = deleted_step.run(d1, CONFIG, True, "k", session=FakeSession({"1", "4"}), now_ts=1000)
     assert "4件を確かめ" in lines[1] and "2件を削除予定" in lines[1]
