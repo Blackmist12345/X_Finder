@@ -34,15 +34,46 @@ def items_from_tweets(tweets, decisions):
     return out[:MAX_PER_RUN]
 
 
-def items_from_db(d1):
+TREE_WAIT_HOURS = 3  # 遡りが失敗し続けても、この時間たったポストはツリーなしで判定する
+
+
+def tree_items(d1, ids_by_post, authors):
+    """{post_id: [{text, relation, by_client}]}(古い順)。relation は 最初 / 返信 / 引用。"""
+    all_ids = sorted({i for ids in ids_by_post.values() for i in ids})
+    rows = {}
+    for i in range(0, len(all_ids), 90):
+        part = all_ids[i:i + 90]
+        for r in d1.query("SELECT id, text, author_id, reply_to_id, quoted_id FROM posts "
+                          f"WHERE id IN ({', '.join('?' for _ in part)})", part):
+            rows[r["id"]] = r
+    out = {}
+    for pid, ids in ids_by_post.items():
+        tree = []
+        for n, i in enumerate(i for i in ids if i in rows):
+            r = rows[i]
+            relation = "最初" if n == 0 else "返信" if r["reply_to_id"] else "引用" if r["quoted_id"] else "最初"
+            tree.append({"text": r["text"], "relation": relation, "by_client": r["author_id"] == authors.get(pid)})
+        out[pid] = tree
+    return out
+
+
+def items_from_db(d1, now=None):
+    """判定待ちのポスト。遡りが済んだもの(と、待ちすぎたもの)だけ。"""
     rows = d1.query(
-        "SELECT p.id, p.text, p.url, p.penalty_json, p.collected_at, p.created_at, q.text AS quoted_text, "
+        "SELECT p.id, p.text, p.url, p.penalty_json, p.collected_at, p.created_at, p.author_id, q.text AS quoted_text, "
         "u.location AS author_location, u.description AS author_description, "
-        "u.followers AS author_followers, u.following AS author_following "
+        "u.followers AS author_followers, u.following AS author_following, t.ids_json AS tree_ids "
         "FROM posts p LEFT JOIN posts q ON q.id = p.quoted_id LEFT JOIN users u ON u.id = p.author_id "
-        "WHERE p.status = 'new' ORDER BY p.collected_at, p.id LIMIT ?", [MAX_PER_RUN])
+        "LEFT JOIN post_trees t ON t.post_id = p.id "
+        "WHERE p.status = 'new' AND (t.post_id IS NOT NULL OR p.collected_at < ?) "
+        "ORDER BY p.collected_at, p.id LIMIT ?",
+        [((now or datetime.now(timezone.utc)) - timedelta(hours=TREE_WAIT_HOURS)).replace(microsecond=0).isoformat(), MAX_PER_RUN])
+    ids_by_post = {r["id"]: json.loads(r["tree_ids"]) for r in rows if r.get("tree_ids")}
+    trees = tree_items(d1, ids_by_post, {r["id"]: r["author_id"] for r in rows}) if ids_by_post else {}
     for r in rows:
         r["penalties"] = json.loads(r.pop("penalty_json") or "[]")
+        r.pop("tree_ids", None)
+        r["tree"] = trees.get(r["id"], [])
     return rows
 
 

@@ -1,7 +1,8 @@
 -- X Finderのデータベース(Cloudflare D1)。N12 データ保存 / N15 ユーザー台帳。
 -- 何度実行しても壊れないように IF NOT EXISTS で作る。
 
--- 収集したポスト。検索で見つけたもの(source=search)と、引用元として一緒に届いたもの(source=quoted)。
+-- 収集したポスト。検索で見つけたもの(source=search)と、引用元として一緒に届いたもの(source=quoted)、
+-- 返信元・引用元を root まで遡って取ったもの(source=tree)。
 CREATE TABLE IF NOT EXISTS posts (
   id TEXT PRIMARY KEY,
   author_id TEXT NOT NULL,
@@ -164,4 +165,19 @@ CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT,
   updated_at TEXT
+);
+
+-- 遡り: N3 を通ったポストの、返信元・引用元を root まで(最大 10 段)たどった結果。
+-- ids_json は遡ったポストの ID を古い順(root が先頭)に並べたもの。親がなければ []。
+-- 行があるポストは遡りが済んでいる(判定はこれを待つ)。
+CREATE TABLE IF NOT EXISTS post_trees (
+  post_id TEXT PRIMARY KEY,
+  ids_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- 遡りで取りに行ったが見られなかったポスト(削除・非公開)。二度と取りに行かない。
+CREATE TABLE IF NOT EXISTS missing_posts (
+  id TEXT PRIMARY KEY,
+  checked_at TEXT NOT NULL
 );

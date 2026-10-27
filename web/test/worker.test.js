@@ -294,6 +294,20 @@ test("詳細は画像・点数の内訳・関係するアカウントを含む",
   assert.equal(await getCase(db, "999"), null);
 });
 
+test("詳細はツリーを古い順に、返信・引用と依頼主本人かを付けて返す", async () => {
+  assert.deepEqual((await getCase(db, "1")).tree, []);
+  const run = (sql, ...a) => db.raw.prepare(sql).run(...a);
+  run(`INSERT INTO posts (id, author_id, source, text, created_at, quoted_id, media_json, status, collected_at)
+       VALUES ('20', '300', 'tree', '11/3 ビッグサイトで併せ', 'a', NULL, '["https://pbs.twimg.com/t.jpg"]', 'context', 'x'),
+              ('30', '100', 'tree', '撮ってくれる方を探します', 'b', '20', '[]', 'context', 'x')`);
+  run(`UPDATE posts SET reply_to_id = '30' WHERE id = '1'`);
+  run(`INSERT INTO post_trees (post_id, ids_json, updated_at) VALUES ('1', '["20","30","404"]', 'x')`);
+  const tree = (await getCase(db, "1")).tree;
+  assert.deepEqual(tree.map((t) => [t.id, t.relation, t.by_client, t.username]), [["20", "root", false, "friend"], ["30", "quote", true, "client"]]);
+  assert.deepEqual(tree[0].media, ["https://pbs.twimg.com/t.jpg"]);
+  assert.equal(tree[0].author_id, undefined);
+});
+
 test("画像から読んだアカウントも関係するアカウントに並べる", async () => {
   db.raw.prepare(`INSERT INTO image_reads (post_id, read_at, images, accounts_json) VALUES ('1', 'x', 1, ?)`).run(
     JSON.stringify([{ handle: "Friend", name: "" }, { handle: "cos_new", name: "新しい人" }, { handle: "client", name: "" }, { handle: "bad id", name: "" }]));

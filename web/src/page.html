@@ -360,6 +360,25 @@ header.top.slim .tab .c{font-size:17px}
 .post + .post{margin-top:8px}
 .post .from{display:block;font-size:11.5px;color:var(--muted);margin-bottom:4px}
 .media{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;margin-top:8px}
+/* ツリー: 遡った返信元・引用元を古い順に。左の縦線でつなぎ、いちばん下が検索で見つけた募集ポスト */
+.tree{list-style:none;margin:0;padding:0}
+.tree>li{position:relative;padding-left:22px;padding-bottom:10px;min-width:0}
+.tree>li::before{content:"";position:absolute;left:6px;top:14px;bottom:-4px;width:2px;background:var(--line)}
+.tree>li:last-child::before{display:none}
+.tree>li::after{content:"";position:absolute;left:1px;top:9px;width:8px;height:8px;border-radius:50%;background:var(--surface);border:2px solid var(--muted)}
+.tree>li.root::after{background:var(--muted)}
+.tree>li.self::after{background:var(--accent);border-color:var(--accent)}
+.tree .rel{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:11.5px;color:var(--muted);margin-bottom:4px}
+.tree .rel b{font-weight:500;color:var(--fg)}
+.tree .tag{border-radius:6px;padding:0 6px;font-size:11px}
+.tree .tag.client{background:var(--ok-soft);color:var(--ok);font-weight:500}
+.tree .tag.other{background:var(--surface-2);color:var(--muted)}
+.tree .tag.hit{background:var(--accent-soft);color:var(--accent);font-weight:500}
+.tree .self .post{background:var(--accent-soft)}
+.tree .media{grid-template-columns:repeat(auto-fill,minmax(80px,1fr))}
+.tree-fold{display:block;width:100%;text-align:left;font:inherit;font-size:13px;color:var(--accent);background:none;border:1px dashed var(--line);border-radius:10px;padding:8px 12px;cursor:pointer}
+.tree-fold:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sec h3 .n{letter-spacing:0;margin-left:6px}
 .media button{border:0;padding:0;background:var(--surface-2);cursor:zoom-in;border-radius:10px;display:block;aspect-ratio:1;overflow:hidden;position:relative}
 /* 画像の場所は枠(button)で先に取る。画像は届いたら枠いっぱいに出す(高さが変わらない) */
 .media img{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;opacity:0;transition:opacity .2s}
@@ -617,8 +636,8 @@ function render(){
 const shootKnown=c=>!!c.prefecture&&c.prefecture!=="不明"&&c.prefecture_source!=="プロフィール";
 function place(c){return shootKnown(c)?c.prefecture:"場所不明"}
 // 都道府県をどこから判断したか。本文以外は、カードでも分かるように短く付ける
-const PLACE_FROM={"本文":"本文から","イベント表":"イベント表から","イベント推定":"イベントの開催地をAIが推定","画像":"画像から"};
-const PLACE_TAG={"イベント表":"イベント","イベント推定":"推定","画像":"画像"};
+const PLACE_FROM={"本文":"本文から","ツリー":"ツリーのポストから","イベント表":"イベント表から","イベント推定":"イベントの開催地をAIが推定","画像":"画像から"};
+const PLACE_TAG={"ツリー":"ツリー","イベント表":"イベント","イベント推定":"推定","画像":"画像"};
 function placeShort(c){const k=shootKnown(c)?c.prefecture_source:"";return PLACE_TAG[k]?`${place(c)}・${PLACE_TAG[k]}`:place(c)}
 function placeFrom(c){const k=shootKnown(c)?c.prefecture_source:"";return PLACE_FROM[k]?`(${PLACE_FROM[k]})`:""}
 // プロフィールから読み取った年齢と活動地域(依頼主の名前の横に小さく出す)
@@ -726,8 +745,30 @@ function fetchDetail(id){
   return p;
 }
 function prefetchDetail(card){const id=card&&card.dataset.id;if(id)fetchDetail(id).catch(()=>{})}
+function mediaHtml(urls,start){
+  return urls.length?`<div class="media">${urls.map((u,i)=>`<button type="button" data-img="${start+i}" aria-label="画像 ${start+i+1} を大きく見る"><img data-src="${esc(u)}" alt="添付画像" decoding="async" referrerpolicy="no-referrer"></button>`).join("")}</div>`:"";
+}
+// ツリー: 遡った返信元・引用元を古い順に並べ、いちばん下に検索で見つけた募集ポストを出す。
+// 4 件をこえたら、最初と最後の 1 件だけ見せて、途中はたたむ。画像は画像ビューアで続けて見られるように currentMedia に足す
+const TREE_REL={root:"最初",reply:"返信",quote:"引用"};
+function treeNode(t,cls,extra){
+  const urls=(t.media||[]).map(safeImg).filter(Boolean);const start=currentMedia.length;currentMedia.push(...urls);
+  return `<li class="${cls}"><div class="rel"><b>${esc(TREE_REL[t.relation]||"")}</b><span class="tag ${t.by_client?"client":"other"}">${t.by_client?"依頼主":"別の人"}</span>${extra||""}<span>${esc(ago(t.created_at))}</span></div>
+   ${postBox(t.text||"",safeX(t.url),t.id)}${mediaHtml(urls,start)}</li>`;
+}
+function treeHtml(c,xurl,media){
+  const tree=c.tree;const fold=tree.length>3?tree.slice(1,-1):[];const shown=fold.length?[tree[0],tree[tree.length-1]]:tree;
+  const node=(t,i)=>treeNode(t,i===0?"root":"");
+  const head=node(shown[0],0);
+  const mid=fold.length?`<li><button type="button" class="tree-fold" data-tree-fold aria-expanded="false">途中の ${fold.length}件を表示</button>
+    <ol class="tree" hidden style="margin-top:8px">${fold.map(t=>node(t,1)).join("")}</ol></li>`:"";
+  const rest=shown.slice(1).map(t=>node(t,1)).join("");
+  const self=`<li class="self"><div class="rel"><b>${c.reply_to_id?"返信":c.quoted_id?"引用":""}</b><span class="tag client">依頼主</span><span class="tag hit">検索で見つけた募集ポスト</span><span>${esc(ago(c.created_at))}</span></div>
+   ${postBox(c.text,xurl,c.id)}${mediaHtml(media,0)}</li>`;
+  return `<div class="sec"><h3>ツリー<span class="n">古い順に ${tree.length+1}件</span></h3><ol class="tree">${head}${mid}${rest}${self}</ol></div>`;
+}
 function sheetHtml(c,full){
-  const xurl=safeX(c.url);const media=(c.media||[]).map(safeImg).filter(Boolean);currentMedia=media;
+  const xurl=safeX(c.url);const media=(c.media||[]).map(safeImg).filter(Boolean);currentMedia=media.slice();
   const cu=safeUser(c.username);
   const detail=c.score_detail||[];
   return `<div class="grab"></div>
@@ -735,9 +776,9 @@ function sheetHtml(c,full){
    <h2>${esc(c.summary||"(要約なし)")}</h2>
    <dl class="facts"><dt>日程</dt><dd>${esc(c.dates||"不明")}</dd>${calDetail(c)}<dt>場所</dt><dd>${esc(c.place||"")}${c.place?" ・ ":""}${esc(place(c))}${esc(placeFrom(c))}</dd>
     ${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}${c.critical_reason?`<dt>REC</dt><dd>${esc(c.critical_reason)}</dd>`:""}</dl>
-   <div class="sec"><h3>募集ポスト</h3>${postBox(c.text,xurl,c.id)}
+   ${(c.tree||[]).length?treeHtml(c,xurl,media):`<div class="sec"><h3>募集ポスト</h3>${postBox(c.text,xurl,c.id)}
     ${c.quoted_text?postBox(c.quoted_text,safeX(c.quoted_url),c.quoted_id,"引用元のポスト"):""}
-    ${media.length?`<div class="media">${media.map((u,i)=>`<button type="button" data-img="${i}" aria-label="画像 ${i+1} を大きく見る"><img data-src="${esc(u)}" alt="添付画像" decoding="async" referrerpolicy="no-referrer"></button>`).join("")}</div>`:""}</div>
+    ${mediaHtml(media,0)}</div>`}
    ${detail.length?`<div class="sec"><h3>点数の内訳</h3><dl class="breakdown">${detail.map(d=>`<dt>${esc(d.label)}</dt><dd>${d.points>0?"+":""}${Math.round(d.points)}</dd>`).join("")}<dt class="total">合計</dt><dd class="total">${Math.round(c.score)}</dd></dl></div>`:""}
    <div class="sec"><h3>クライアント</h3><div class="people"><${cu?`a class="person link" href="https://x.com/${cu}" data-xuser="${cu}"`:'div class="person"'}>${ava(c)}<div class="who"><div>${esc(c.name||"")}</div>
     <div class="id">@${esc(c.username||"")} ・ フォロワー <span class="num">${fmt(c.followers)}</span> ・ フォロー <span class="num">${fmt(c.following)}</span> ・ FF率 <span class="num">${ffText(c)}</span></div>
@@ -1251,6 +1292,7 @@ document.addEventListener("click",ev=>{
   const xu=ev.target.closest("[data-xuser]");if(xu){ev.preventDefault();openInX(`twitter://user?screen_name=${xu.dataset.xuser}`,xu.href);return}
   const xp=ev.target.closest("[data-xpost]");if(xp&&/^\d+$/.test(xp.dataset.xpost)){ev.preventDefault();openInX(`twitter://status?id=${xp.dataset.xpost}`,xp.href);return}
   const im=ev.target.closest("[data-img]");if(im){openViewer(Number(im.dataset.img));return}
+  const tf=ev.target.closest("[data-tree-fold]");if(tf){const list=tf.nextElementSibling;const open=list.hidden;list.hidden=!open;tf.setAttribute("aria-expanded",String(open));tf.textContent=open?"途中をたたむ":`途中の ${list.children.length}件を表示`;if(open)loadSheetImages(list);return}
   const dy=ev.target.closest("[data-days]");if(dy){statsDays=Number(dy.dataset.days);renderStats();return}
   const cd=ev.target.closest("[data-cal-day]");if(cd){state.day=cd.dataset.calDay;closeSheet();window.scrollTo({top:0});return}
   const cm=ev.target.closest("[data-cal-move]");if(cm){const [yy,mm]=cm.dataset.calMove.split("-").map(Number);calView={y:yy,m:mm};renderCalendar();return}

@@ -17,11 +17,11 @@ USER_PARTIAL_UPSERT = (
     "ON CONFLICT(id) DO UPDATE SET username = COALESCE(excluded.username, users.username), "
     "name = COALESCE(excluded.name, users.name), last_seen_at = excluded.last_seen_at"
 )
-# 引用元として先に保存されたポストが、あとで検索にかかったときだけ「検索で見つけたポスト」に格上げする。
+# 引用元や遡りで先に保存されたポストが、あとで検索にかかったときだけ「検索で見つけたポスト」に格上げする。
 POST_UPSERT = (
     "ON CONFLICT(id) DO UPDATE SET source = 'search', status = excluded.status, "
     "skip_reason = excluded.skip_reason, penalty_json = excluded.penalty_json "
-    "WHERE posts.source = 'quoted' AND excluded.source = 'search'"
+    "WHERE posts.source IN ('quoted', 'tree') AND excluded.source = 'search'"
 )
 POST_COLUMNS = ["id", "author_id", "source", "text", "url", "created_at", "quoted_id", "reply_to_id",
                 "conversation_id", "media_json", "penalty_json", "status", "skip_reason", "collected_at"]
@@ -221,8 +221,11 @@ def purge_deleted(d1, now=None):
     for i in range(0, len(ids), 90):
         part = ids[i:i + 90]
         marks = ", ".join("?" for _ in part)
-        for table, col in (("post_users", "post_id"), ("image_reads", "post_id"), ("post_checks", "post_id"), ("judgments", "post_id"), ("reviews", "post_id"), ("posts", "id")):
+        for table, col in (("post_users", "post_id"), ("image_reads", "post_id"), ("post_checks", "post_id"), ("judgments", "post_id"), ("reviews", "post_id"), ("post_trees", "post_id"), ("posts", "id")):
             d1.query(f"DELETE FROM {table} WHERE {col} IN ({marks})", part)
+    # 遡りで取ったポストは、どのポストのツリーにも入らなくなったら消す
+    d1.query("DELETE FROM posts WHERE source = 'tree' AND collected_at < ? "
+             "AND id NOT IN (SELECT j.value FROM post_trees t, json_each(t.ids_json) j)", [cutoff])
     return len(ids)
 
 
