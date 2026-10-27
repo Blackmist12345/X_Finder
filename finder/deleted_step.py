@@ -1,6 +1,7 @@
 """削除ポスト確認: X Finderに出ているカードの元のポストが、まだ見られるかを TwitterAPI.io にまとめて問い合わせる。
 
-対象は新着・確認中・保留のカード(受注中と削除予定は確かめない)。
+対象は新着・確認中のカード(連絡中・受注中・削除予定は確かめない。自分で動いている案件が勝手に移らないように)。
+画面の名前は 連絡中=accepted、受注中=hold。
 1 回でも返ってこなかったポストは、元のポストが見られない印(post_checks.gone_at)を付けて削除予定へ移す。
 印の付いたカードは二度と確かめない(あとから自分で新着などに戻したら、そのまま残る)。
 間隔は【5】期間と頻度の「削除確認の頻度(時間)」。0 なら確かめない。
@@ -24,12 +25,12 @@ class CheckError(Exception):
 
 
 def target_ids(d1, now=None):
-    """X Finderの一覧に出ている、新着・確認中・保留のカードのポスト ID。"""
+    """X Finderの一覧に出ている、新着・確認中のカードのポスト ID。"""
     rows = d1.query(
         "SELECT p.id FROM posts p JOIN judgments j ON j.post_id = p.id LEFT JOIN reviews r ON r.post_id = p.id "
         "WHERE p.status = 'judged' "
-        "AND (r.state IS NULL OR r.state NOT IN ('accepted', 'delete')) "
-        "AND (p.collected_at >= ? OR r.state = 'hold') "
+        "AND (r.state IS NULL OR r.state NOT IN ('accepted', 'hold', 'delete')) "
+        "AND p.collected_at >= ? "
         "AND NOT EXISTS (SELECT 1 FROM blacklist b WHERE b.user_id = p.author_id) "
         "AND NOT EXISTS (SELECT 1 FROM post_checks pc WHERE pc.post_id = p.id AND pc.gone_at IS NOT NULL) "
         "ORDER BY p.id",
