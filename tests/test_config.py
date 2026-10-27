@@ -53,10 +53,13 @@ def good_tables():
         "keywords": [row(単語=title("カメラマン"), グループ=sel("撮影者(A)"), 有効=chk()), row(単語=title("募集"), グループ=sel("募集語(B)"), 有効=chk()),
                      row(単語=title("無効語"), グループ=sel("募集語(B)"), 有効=chk(False))],
         "search_excludes": [row(単語=title("時給"), カテゴリ=sel("求人・バイト"), 有効=chk(), **{"観測スコア(件/日)": num(3)})],
-        "penalty_words": [row(単語=title("大阪"), カテゴリ=sel("地方・都市名"), 減点=num(30), 有効=chk()), row(単語=title("栄"), 減点=num(None), 有効=chk())],
-        "excluded_works": [row(**{"作品名 / 略称": title("呪術廻戦"), "有効": chk()})],
-        "scores": [row(条件=title("コスプレ撮影"), 区分=sel("種類"), 点数=num(50), 有効=chk())],
-        "critical": [row(名前=title("基準点"), 種類=sel("基準点"), 値=rt("70"), 有効=chk())],
+        "points": [row(条件=title("コスプレ撮影"), 区分=sel("種類"), 点数=num(50), 有効=chk()),
+                   row(条件=title("大阪"), 区分=sel("語"), カテゴリ=sel("地方・都市名"), 点数=num(-30), 有効=chk()),
+                   row(条件=title("栄"), 区分=sel("語"), 点数=num(None), 有効=chk()),
+                   row(条件=title("呪術廻戦, 呪術"), 区分=sel("作品"), 点数=num(-100), 有効=chk()),
+                   row(条件=title("ブルーアーカイブ、ブルアカ"), 区分=sel("作品"), 点数=num(300), 有効=chk()),
+                   row(条件=title("なぞ"), 区分=sel("なにか"), 点数=num(5), 有効=chk()),
+                   row(条件=title("無効"), 区分=sel("語"), 点数=num(5), 有効=chk(False))],
         "basic": kv_rows(BASIC),
         "periods": kv_rows(PERIODS),
         "emojis": [row(絵文字=title("🐑"), キャラ名=rt("ひつじ太郎"), グループ=rt("にじさんじ"), 有効=chk()),
@@ -74,12 +77,17 @@ def setup(d1, tables):
 def test_load_config_reads_all_tables(d1):
     cfg, warnings = config.load_config(setup(d1, good_tables()), d1)
     assert cfg["keywords"] == {"group_a": ["カメラマン"], "group_b": ["募集"]}
-    assert cfg["penalty_words"][0] == {"word": "大阪", "category": "地方・都市名", "points": -30.0}
-    assert cfg["penalty_words"][1]["points"] == -10
-    assert cfg["critical"]["threshold"] == 70
+    assert cfg["words"][0] == {"word": "大阪", "category": "地方・都市名", "points": -30.0}
+    assert cfg["words"][1] == {"word": "栄", "category": "その他", "points": 0}  # 点数が空欄は 0
+    works = [r for r in cfg["points"] if r["kind"] == "作品"]
+    assert works[0]["names"] == ["呪術廻戦", "呪術"] and works[0]["condition"] == "呪術廻戦"
+    assert works[1]["points"] == 100  # +100 を超えた分は +100 にそろえる
+    assert len(cfg["points"]) == 5  # 区分が分からない行・無効の行は使わない
     assert cfg["basic"]["最小フォロワー数"] == 0
     assert cfg["periods"]["自動削除までの日数"] == 14
     assert any("栄" in w for w in warnings)
+    assert any("ブルーアーカイブ" in w and "100" in w for w in warnings)
+    assert any("なにか" in w for w in warnings)
 
 
 def test_bad_value_falls_back_to_last_good(d1):

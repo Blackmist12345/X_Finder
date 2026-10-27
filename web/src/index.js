@@ -112,18 +112,25 @@ function daysAgoIso(days) {
 
 const CASE_COLUMNS = `
   p.id, p.text, p.url, p.created_at, p.collected_at, p.status, p.skip_reason, p.quoted_id, p.reply_to_id,
-  j.case_type, j.works, j.prefecture, j.prefecture_source, j.place, j.dates, j.summary, j.score, j.critical, j.critical_reason, j.reject_reason,
+  j.case_type, j.works, j.prefecture, j.prefecture_source, j.place, j.dates, j.summary, j.score, j.reject_reason,
   p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, CASE WHEN r.state IN ('checking', 'accepted', 'hold', 'delete') THEN r.state ELSE 'new' END AS review, (r.opened_at IS NOT NULL) AS opened,
   (r.post_id IS NOT NULL AND NOT (r.state = 'new' AND r.opened_at IS r.updated_at)) AS touched,
   u.description, u.location, (SELECT ul.found_json FROM user_links ul WHERE ul.user_id = p.author_id) AS link_found,
   (SELECT pc.gone_at FROM post_checks pc WHERE pc.post_id = p.id) AS gone_at`;
+
+// 点数の内訳から、カードに出す作品の点(「作品: 〇〇」の行)だけを取り出す
+function workPoints(detail) {
+  return (Array.isArray(detail) ? detail : [])
+    .filter((d) => typeof d?.label === "string" && d.label.startsWith("作品: "))
+    .map((d) => ({ name: d.label.slice(4), points: d.points }));
+}
 
 export async function listCases(db, params) {
   const view = params.get("view") === "rejected" ? "rejected" : "judged";
   const days = Math.min(Math.max(Number(params.get("days")) || 14, 1), 60);
   const { results } = await db
     .prepare(
-      `SELECT ${CASE_COLUMNS}, p.media_json,
+      `SELECT ${CASE_COLUMNS}, p.media_json, j.score_json,
         (SELECT COUNT(*) FROM post_users pu WHERE pu.post_id = p.id AND pu.role IN ('mention', 'quoted')) AS others
        FROM posts p JOIN judgments j ON j.post_id = p.id LEFT JOIN users u ON u.id = p.author_id
        LEFT JOIN reviews r ON r.post_id = p.id
@@ -134,10 +141,10 @@ export async function listCases(db, params) {
     .all();
   // 添付画像の URL も返す(詳細を開いた瞬間から画像の場所を取っておき、あとから表示がずれないように)
   // 自己紹介は一覧では使わないので返さない(年齢と活動地域だけ読み取って付ける)
-  return results.map(({ media_json, description, location, link_found, ...r }) => ({
+  return results.map(({ media_json, score_json, description, location, link_found, ...r }) => ({
     ...r,
     ...profileInfo({ name: r.name, description, location, link: parseJson(link_found, null) }),
-    critical: !!r.critical,
+    work_points: workPoints(parseJson(score_json, [])),
     opened: !!r.opened,
     touched: !!r.touched,
     ...shootArea(r),
@@ -214,7 +221,6 @@ export async function getCase(db, id) {
   return {
     ...rest,
     ...profileInfo({ ...row, link: parseJson(link_found, null) }),
-    critical: !!row.critical,
     opened: !!row.opened,
     ...shootArea(row),
     media: parseJson(media_json, []),
@@ -388,7 +394,8 @@ export async function setReviews(db, body) {
 
 // 「仕分け」: チェックした値に当てはまる新着を削除予定にする。rule は { 項目: [チェックした値] }
 // 値は画面が案件から作る文字(「東京都」「記載なし」など)なので、ここでは形と長さだけ確かめる
-const SORT_FACETS = ["gender", "age", "area", "shoot", "plan", "crit", "type"];
+// score は「この点数以下」の数字を1つだけ入れる(["-50"] のような形)
+const SORT_FACETS = ["gender", "age", "area", "shoot", "plan", "score", "type"];
 const SORT_VALUES_MAX = 60;
 const PRESET_MAX = 20;
 function cleanRule(rule) {
@@ -510,11 +517,11 @@ export async function getStats(db, params) {
   const since = new Date(Date.now() - days * 864e5).toISOString().replace(/\.\d{3}Z$/, "+00:00");
   const all = async (sql, ...binds) => (await db.prepare(sql).bind(...binds).all()).results;
 
-  // 日ごと: 取得ポスト数(runs)、判定数・対象・クリティカル(judgments)、費用(costs)
+  // 日ごと: 取得ポスト数(runs)、判定数・対象(judgments)、費用(costs)
   const fetched = await all(`SELECT ${JST_DAY("started_at")} AS d, SUM(fetched) AS fetched, SUM(new_posts) AS new_posts, COUNT(*) AS runs
     FROM runs WHERE started_at >= ? AND status = 'ok' GROUP BY d`, since);
   const judged = await all(`SELECT ${JST_DAY("j.judged_at")} AS d, COUNT(*) AS judged,
-      SUM(CASE WHEN j.reject_reason IS NULL THEN 1 ELSE 0 END) AS target, SUM(j.critical) AS critical
+      SUM(CASE WHEN j.reject_reason IS NULL THEN 1 ELSE 0 END) AS target
     FROM judgments j WHERE j.judged_at >= ? GROUP BY d`, since);
   const costs = await all(`SELECT ${JST_DAY("at")} AS d,
       SUM(CASE WHEN service = 'twitterapi.io' THEN usd ELSE 0 END) AS collect_usd,
@@ -523,10 +530,10 @@ export async function getStats(db, params) {
   const byDay = new Map();
   for (let i = days - 1; i >= 0; i--) {
     const d = jstDay(i);
-    byDay.set(d, { date: d, fetched: 0, new_posts: 0, judged: 0, target: 0, critical: 0, collect_yen: 0, ai_yen: 0 });
+    byDay.set(d, { date: d, fetched: 0, new_posts: 0, judged: 0, target: 0, collect_yen: 0, ai_yen: 0 });
   }
   for (const r of fetched) if (byDay.has(r.d)) Object.assign(byDay.get(r.d), { fetched: r.fetched || 0, new_posts: r.new_posts || 0 });
-  for (const r of judged) if (byDay.has(r.d)) Object.assign(byDay.get(r.d), { judged: r.judged || 0, target: r.target || 0, critical: r.critical || 0 });
+  for (const r of judged) if (byDay.has(r.d)) Object.assign(byDay.get(r.d), { judged: r.judged || 0, target: r.target || 0 });
   for (const r of costs) if (byDay.has(r.d)) Object.assign(byDay.get(r.d), { collect_yen: (r.collect_usd || 0) * rate, ai_yen: (r.ai_usd || 0) * rate });
   const daily = [...byDay.values()].map((d) => ({ ...d, collect_yen: Math.round(d.collect_yen * 100) / 100, ai_yen: Math.round(d.ai_yen * 100) / 100 }));
 
@@ -536,7 +543,6 @@ export async function getStats(db, params) {
       (SELECT COUNT(*) FROM posts WHERE status = 'skipped') AS skipped,
       (SELECT COUNT(*) FROM judgments) AS judged,
       (SELECT COUNT(*) FROM judgments WHERE reject_reason IS NULL) AS target,
-      (SELECT COUNT(*) FROM judgments WHERE critical = 1) AS critical,
       (SELECT COALESCE(SUM(usd), 0) FROM costs) AS usd,
       (SELECT MIN(started_at) FROM runs) AS first_run`).first();
   const reviews = await all("SELECT state, COUNT(*) AS n FROM reviews GROUP BY state");
@@ -546,7 +552,6 @@ export async function getStats(db, params) {
       (SELECT COALESCE(SUM(fetched), 0) FROM runs WHERE started_at >= ?1 AND started_at < ?2) AS fetched,
       (SELECT COUNT(*) FROM judgments WHERE judged_at >= ?1 AND judged_at < ?2) AS judged,
       (SELECT COUNT(*) FROM judgments WHERE judged_at >= ?1 AND judged_at < ?2 AND reject_reason IS NULL) AS target,
-      (SELECT COUNT(*) FROM judgments WHERE judged_at >= ?1 AND judged_at < ?2 AND critical = 1) AS critical,
       (SELECT COALESCE(SUM(usd), 0) FROM costs WHERE at >= ?1 AND at < ?2) AS usd`).bind(from, to).first();
   const now = new Date();
   const thisStart = jstMonthStartIso(0);

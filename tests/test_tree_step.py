@@ -7,7 +7,7 @@ from finder import judge, judge_step, store, tree_step
 CONFIG = {
     "basic": {"為替レート(円/ドル)": 150},
     "search_excludes": [{"word": "時給", "score": 3}, {"word": "モデル募集", "score": 1}],
-    "penalty_words": [{"word": "大阪", "category": "地方・都市名", "points": -30}],
+    "words": [{"word": "大阪", "category": "地方・都市名", "points": -30}],
 }
 
 

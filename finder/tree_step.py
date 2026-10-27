@@ -6,7 +6,7 @@ D1 にもうあるポストと、前に見られなかったポスト(missing_po
 
 2 回目の N3:
   - 除外語(検索に入れた語も、入りきらなかった語も全部)をツリーの文章にかけ、当たれば対象外にする
-  - 減点語はツリー全体で数え、同じ語は何度出てきても 1 回
+  - 点数表の区分「語」はツリー全体で数え、同じ語は何度出てきても 1 回
   - フォロワー数とブラックリストは、最初に収集したポストだけで判定済みなので、ここでは見ない
 
 遡りが済んだポストには post_trees の行を作る。判定(judge_step)はこの行があるポストから判定する。
@@ -174,13 +174,13 @@ def ancestors(post_id, nodes):
     return [n["id"] for n in sorted(found, key=lambda n: (n["created_at"], n["id"]))]
 
 
-def recheck(row, tree_text, exclude_words, penalty_words):
-    """2 回目の N3。(対象外の理由 or None, 減点語の当たり) を返す。"""
+def recheck(row, tree_text, exclude_words, words):
+    """2 回目の N3。(対象外の理由 or None, 点数表の語の当たり) を返す。"""
     hits = filters.find_words(tree_text, exclude_words)
     if hits:
         return f"{TREE_SKIP}: " + "、".join(hits), json.loads(row.get("penalty_json") or "[]")
-    # 本文とツリーをまとめて照合する(penalty_hits は 1 語につき 1 回しか数えない)
-    return None, filters.penalty_hits((row.get("text") or "") + "\n" + tree_text, penalty_words)
+    # 本文とツリーをまとめて照合する(word_hits は 1 語につき 1 回しか数えない)
+    return None, filters.word_hits((row.get("text") or "") + "\n" + tree_text, words)
 
 
 def pending(d1):
@@ -205,7 +205,7 @@ def run(d1, config, production, api_key, session=None):
         return lines + [f"- ⚠️ 遡りをやめました(次の収集でもう一度遡ります): {e}"]
 
     exclude_words = [e["word"] for e in config.get("search_excludes", []) if e.get("word")]
-    penalty_words = config.get("penalty_words", [])
+    words = config.get("words", [])
     now = store.now_iso()
     trees, skipped, depths = [], [], []
     for row in starts:
@@ -219,7 +219,7 @@ def run(d1, config, production, api_key, session=None):
         if not ids:
             continue
         tree_text = "\n".join(nodes[i]["text"] for i in ids)
-        reason, hits = recheck(row, tree_text, exclude_words, penalty_words)
+        reason, hits = recheck(row, tree_text, exclude_words, words)
         if reason:
             skipped.append(reason)
             d1.query("UPDATE posts SET status = 'skipped', skip_reason = ? WHERE id = ?", [reason, row["id"]])

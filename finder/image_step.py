@@ -143,15 +143,15 @@ def apply_place(d1, post_id, found, config):
     result.update(prefecture=pref, prefecture_source=judge.IMAGE_SOURCE)
     if not result.get("place") and label:
         result["place"] = label
-    categories = {p["word"]: p.get("category") for p in config.get("penalty_words", [])}
+    categories = {w["word"]: w.get("category") for w in config.get("words", [])}
     penalties = json.loads(row["penalty_json"] or "[]")
     for p in penalties:
         p.setdefault("category", categories.get(p["word"], "その他"))
-    total, detail, critical, why = score(result, penalties, row["text"], config)
-    d1.query("UPDATE judgments SET prefecture = ?, prefecture_source = ?, place = ?, score = ?, score_json = ?, critical = ?, "
-             "critical_reason = ?, raw_json = ? WHERE post_id = ?",
-             [pref, judge.IMAGE_SOURCE, result.get("place"), total, json.dumps(detail, ensure_ascii=False), int(critical),
-              why or None, json.dumps(result, ensure_ascii=False), post_id])
+    total, detail = score(result, penalties, row["text"], config)
+    d1.query("UPDATE judgments SET prefecture = ?, prefecture_source = ?, place = ?, score = ?, score_json = ?, critical = 0, "
+             "critical_reason = NULL, raw_json = ? WHERE post_id = ?",
+             [pref, judge.IMAGE_SOURCE, result.get("place"), total, json.dumps(detail, ensure_ascii=False),
+              json.dumps(result, ensure_ascii=False), post_id])
     return True
 
 
@@ -188,7 +188,7 @@ def run(d1, config, production, api_keys, session=None):
                 accounts = clean(raw, p.get("author_username"))
                 where = place_from_image(place, config.get("events"))
                 try:
-                    if where and "scores" in config and apply_place(d1, p["id"], where, config):
+                    if where and "points" in config and apply_place(d1, p["id"], where, config):
                         placed += 1
                 except Exception as e:  # 場所の置き換えに失敗しても、アカウントは保存する
                     lines.append(f"- ⚠️ 画像の場所で採点し直せませんでした({p['id']}): {e}")

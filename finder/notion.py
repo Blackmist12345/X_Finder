@@ -52,6 +52,9 @@ class Notion:
         }
         return self._request("POST", "/databases", payload)["id"]
 
+    def rename_database(self, database_id, title):
+        self._request("PATCH", f"/databases/{database_id}", {"title": [{"type": "text", "text": {"content": title}}]})
+
     def update_page(self, page_id, properties):
         self._request("PATCH", f"/pages/{page_id}", {"properties": properties})
         time.sleep(0.35)

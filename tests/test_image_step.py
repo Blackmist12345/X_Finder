@@ -81,11 +81,10 @@ def add_judgment(d1, pid, pref, source, place=""):
              "VALUES (?, 'x', 'm', 'コスプレ撮影', ?, ?, ?, 0, ?)", [pid, pref, source, place, json.dumps(raw, ensure_ascii=False)])
 
 
-SCORE_CONFIG = dict(CONFIG, penalty_words=[], events=[
+SCORE_CONFIG = dict(CONFIG, words=[], events=[
     {"aliases": ["ストフェス"], "name": "日本橋ストリートフェスタ", "venue": "日本橋", "prefecture": "大阪府"}],
-    scores=[{"condition": "コスプレ撮影", "kind": "種類", "points": 50}, {"condition": "東京都", "kind": "都道府県", "points": 0},
-            {"condition": "その他の道府県", "kind": "都道府県", "points": -30}, {"condition": "場所不明", "kind": "都道府県", "points": 0}],
-    critical={"threshold": 70, "conditions": []})
+    points=[{"condition": c, "names": [c], "kind": k, "points": p} for c, k, p in (
+        ("コスプレ撮影", "種類", 50), ("東京都", "都道府県", 0), ("その他の道府県", "都道府県", -30), ("場所不明", "都道府県", 0))])
 
 
 def test_image_place_replaces_unknown_or_profile_place(d1):

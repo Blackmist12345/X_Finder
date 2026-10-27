@@ -130,7 +130,6 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .note.warn{color:var(--warn);background:var(--warn-soft)}
 .list{display:grid;gap:12px;margin-top:12px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:14px;cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:4px 12px;text-align:left;color:inherit;font:inherit;width:100%}
-.card.crit{border-color:color-mix(in srgb,var(--rec) 45%,var(--line))}
 .meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:0}
 .pill{font-size:11.5px;border-radius:6px;padding:2px 7px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
 .pill.type{background:var(--accent-soft);color:var(--accent);font-weight:500}
@@ -215,8 +214,11 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .sort-foot .actions .btn{padding:12px 6px;white-space:nowrap}
 .sort-foot .actions [data-close]{flex:0 0 5.5em}
 .btn.del.fill{background:var(--rec);border-color:var(--rec);color:#fff}
-.rec{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-num);font-weight:700;letter-spacing:.08em;font-size:12px;color:var(--rec);background:var(--rec-soft);border-radius:6px;padding:1px 7px}
-.rec::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--rec)}
+.wpt{font-family:var(--font-num);font-size:12px;font-weight:600;margin-left:4px}
+.wpt.minus{color:var(--rec)} .wpt.plus{color:var(--ok)}
+.score-max{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.score-max input{width:84px;font:inherit;font-family:var(--font-num);font-size:16px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg)}
+.score-max input:focus{outline:2px solid var(--accent);outline-offset:1px}
 .score{grid-row:1 / span 2;grid-column:2;text-align:right;line-height:1}
 .score .n{font-family:var(--font-num);font-weight:700;font-size:36px;font-variant-numeric:tabular-nums}
 .score .l{display:block;font-size:10.5px;color:var(--muted);letter-spacing:.08em;margin-top:2px}
@@ -454,10 +456,14 @@ const SORT_FACETS=[
   {k:"area",g:"依頼主",t:"活動地域",v:c=>(c.areas||[]).length?c.areas:["記載なし"],all:true},
   {k:"shoot",g:"案件",t:"撮影場所",v:c=>c.shoot_pref||"不明"},
   {k:"plan",g:"案件",t:"撮影日の予定",v:c=>{const k=calCheck(c);return !k?"日付不明":k.busy?"予定あり":k.off?"休み":"空き"},show:()=>cal.configured&&!cal.error},
-  {k:"crit",g:"案件",t:"クリティカル",v:c=>c.critical?"クリティカル":"クリティカルでない"},
+  // 点数は「この点数以下」の数字を1つだけ入れる(rule.score は ["-50"] の形)。値のチェックではなく数字の欄で選ぶ
+  {k:"score",g:"案件",t:"点数",num:true,v:()=>[]},
   {k:"type",g:"案件",t:"種類",v:c=>c.case_type||"その他"},
 ];
 const NA_VALUES=["記載なし","不明","日付不明"];
+// 点数表の作品に当たったときの点(カードの「作品」の行の後ろに小さく出す。マイナスは赤、プラスは緑)
+// 作品名が「作品」の行にすでに書いてあれば点だけ、書いてなければ点数表の名前と点を出す
+const workTags=c=>(c.work_points||[]).map(w=>`<span class="wpt ${w.points<0?"minus":"plus"}" title="点数表の作品「${esc(w.name)}」">${(c.works||"").includes(w.name)?"":esc(w.name)+" "}${w.points>0?"+":""}${Math.round(w.points)}</span>`).join("");
 const AGE_RANGES=[[18,19],[20,24],[25,29],[30,34],[35,39],[40,44],[45,49],[50,99]];
 const AGE_BUCKETS=AGE_RANGES.map(([a,b])=>b>=99?`${a}以上`:`${a}〜${b}`);
 const AGE_ADULT="成人(年齢不明)";
@@ -474,7 +480,7 @@ function ageValues(c){
 }
 const TYPES=["コスプレ撮影","コスパフォ","踊ってみた","ポートレート","イベント","その他"];
 // 値の並び。ここにない値は件数の多い順、記載なし・不明は最後
-const SORT_ORDER={gender:["女性","男性"],plan:["空き","休み","予定あり"],crit:["クリティカル","クリティカルでない"],type:TYPES};
+const SORT_ORDER={gender:["女性","男性"],plan:["空き","休み","予定あり"],type:TYPES};
 const ROLE={mention:"メンション",quoted:"引用元の投稿者",reply_to:"リプライ先",image:"画像から"};
 // カードの状態。新着=集めた案件が最初に入る(開いても変わらない) / 確認中=一度見て、まだ決めていない案件(自分で移したときだけ)
 // 受注中=引き受けた案件(2週間を過ぎても残る) / 保留=ピン留め(2週間を過ぎても残る) / 削除予定=投稿日から14日で消える
@@ -621,8 +627,7 @@ function filtered(){
 function render(){
   renderControls();
   const a=filtered();
-  const crit=cases.filter(c=>c.critical).length;
-  $("count").textContent=state.rejected?`対象外 ${cases.length}件(直近2週間)`:`直近2週間 ${cases.length}件 ・ クリティカル ${crit}件`;
+  $("count").textContent=state.rejected?`対象外 ${cases.length}件(直近2週間)`:`直近2週間 ${cases.length}件`;
   const emptyMsg={new:"新着の案件はありません。",checking:"確認中の案件はありません。<br>見たけれどまだ決めていない案件は、詳細の「確認中にする」でここに移せます。",accepted:"受注中の案件はありません。<br>引き受けた案件は、詳細の「受注中にする」でここに移せます。",hold:"保留の案件はありません。<br>あとで見直したい案件は、詳細の「保留にする」でここに残せます。",
     delete:`削除予定の案件はありません。<br>削除予定にした案件は、投稿日から${DELETE_DAYS}日で消えます。`}[state.tab];
   const rb=$("rejBar");rb.hidden=!state.rejected;
@@ -658,12 +663,12 @@ function areaFact(c){
 }
 function card(c){
   const rejected=state.rejected;
-  return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card ${c.critical?"crit":""}" data-id="${esc(c.id)}">
-   <div class="meta">${reviewPill(c)}${gonePill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(placeShort(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
+  return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card" data-id="${esc(c.id)}">
+   <div class="meta">${reviewPill(c)}${gonePill(c)}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(placeShort(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
    <div class="score">${rejected?"":`<span class="n">${c.score==null?"—":Math.round(c.score)}</span><span class="l">点</span>`}</div>
    <div class="title">${esc(c.summary||"(要約なし)")}</div>
    <p class="excerpt">${esc((c.text||"").replace(/\s+/g," "))}</p>
-   <dl class="facts">${c.dates?`<dt>日程</dt><dd>${esc(c.dates)}${calBadge(c)}</dd>`:""}${c.place?`<dt>場所</dt><dd>${esc(c.place)}</dd>`:""}${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}${areaFact(c)}</dl>
+   <dl class="facts">${c.dates?`<dt>日程</dt><dd>${esc(c.dates)}${calBadge(c)}</dd>`:""}${c.place?`<dt>場所</dt><dd>${esc(c.place)}</dd>`:""}${c.works||workTags(c)?`<dt>作品</dt><dd>${esc(c.works||"")}${workTags(c)}</dd>`:""}${areaFact(c)}</dl>
    <div class="client">${ava(c)}
     <span class="who">${esc(c.name||"")}${clientTags(c)} <span class="sub">@${esc(c.username||"")}</span>${c.others?` <span class="sub">ほか${c.others}人</span>`:""}</span>
     <span class="ff"><span class="num">${ffText(c)}</span><small>FF率</small></span></div>
@@ -772,10 +777,10 @@ function sheetHtml(c,full){
   const cu=safeUser(c.username);
   const detail=c.score_detail||[];
   return `<div class="grab"></div>
-   <div class="meta" id="sheetMeta">${reviewPill(c)}${gonePill(c)}${c.critical?'<span class="rec">REC</span>':""}<span class="pill type">${esc(c.case_type||"その他")}</span>${c.score!=null?`<span class="pill">${Math.round(c.score)}点</span>`:""}<span class="pill">${ago(c.created_at)}に投稿</span>${c.reject_reason?`<span class="pill warn">${esc(c.reject_reason)}</span>`:""}</div>
+   <div class="meta" id="sheetMeta">${reviewPill(c)}${gonePill(c)}<span class="pill type">${esc(c.case_type||"その他")}</span>${c.score!=null?`<span class="pill">${Math.round(c.score)}点</span>`:""}<span class="pill">${ago(c.created_at)}に投稿</span>${c.reject_reason?`<span class="pill warn">${esc(c.reject_reason)}</span>`:""}</div>
    <h2>${esc(c.summary||"(要約なし)")}</h2>
    <dl class="facts"><dt>日程</dt><dd>${esc(c.dates||"不明")}</dd>${calDetail(c)}<dt>場所</dt><dd>${esc(c.place||"")}${c.place?" ・ ":""}${esc(place(c))}${esc(placeFrom(c))}</dd>
-    ${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}${c.critical_reason?`<dt>REC</dt><dd>${esc(c.critical_reason)}</dd>`:""}</dl>
+    ${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}</dl>
    ${(c.tree||[]).length?treeHtml(c,xurl,media):`<div class="sec"><h3>募集ポスト</h3>${postBox(c.text,xurl,c.id)}
     ${c.quoted_text?postBox(c.quoted_text,safeX(c.quoted_url),c.quoted_id,"引用元のポスト"):""}
     ${mediaHtml(media,0)}</div>`}
@@ -994,13 +999,14 @@ const HELP=[
   <li><b>受注中</b>: 引き受けた案件です。2週間を過ぎても残り、撮影日が過ぎると「撮影日を過ぎました」と出ます。</li>
   <li><b>保留</b>: あとで見直したい案件です。2週間を過ぎても残ります。</li>
   <li><b>削除予定</b>: 投稿日から14日で消えます。</li></ul>
-  <p>新着・確認中・保留のカードは、元のポストが消されていないかを決まった間隔で確かめます(Notion【8】の「削除確認の頻度(時間)」、0 で確かめない)。見られなくなっていたら「元のポストが見られません」の印を付けて削除予定に移します。印の付いたカードを自分で戻したときは、もう確かめません。受注中と削除予定は確かめません。</p>
-  <p>点数は Notion の「点数表」(種類・都道府県)と減点語で決まり、プラスの点のときは依頼主の FF率(フォロワー数÷フォロー数)を倍率として掛けます(0.5〜1.5倍。幅は【7】基本設定で変えられる)。内訳は詳細で見られます。</p>
-  <p><b>REC</b> はクリティカル(合計点が基準以上か、Notion の「クリティカル条件」に当たった案件)の印で、カードの枠も赤くなります。日程の横の「予定あり / 空き / 休み」は Google カレンダーとの照合です。依頼主の名前の横には、プロフィールから読んだ性別・年齢が出ます(未成年は赤)。活動地域はカードの「活動地域」の行に出ます(書いていない人は「記載なし」)。</p>
+  <p>新着・確認中・保留のカードは、元のポストが消されていないかを決まった間隔で確かめます(Notion【5】の「削除確認の頻度(時間)」、0 で確かめない)。見られなくなっていたら「元のポストが見られません」の印を付けて削除予定に移します。印の付いたカードを自分で戻したときは、もう確かめません。受注中と削除予定は確かめません。</p>
+  <p>点数は Notion の【3】点数表だけで決まります。区分ごとに、種類・撮影場所の都道府県(読めなければ本文の地名)・本文に出てくる語・作品・イベントに当たった行の点を足し、プラスの点のときは依頼主の FF率(フォロワー数÷フォロー数)を倍率として掛けます(0.5〜1.5倍。幅は【4】基本設定で変えられる)。点数は −100〜+100 で、内訳は詳細で見られます。点数表に当たった作品は、カードの「作品」の行に点が出ます(マイナスは赤)。点数表を変えると、そのあとに取得したポストから新しい点数になります。</p>
+  <p>日程の横の「予定あり / 空き / 休み」は Google カレンダーとの照合です。依頼主の名前の横には、プロフィールから読んだ性別・年齢が出ます(未成年は赤)。活動地域はカードの「活動地域」の行に出ます(書いていない人は「記載なし」)。</p>
   <p>一番上で下に引っぱると再読み込みします。下へスクロールすると上部がたたまれます。</p>`],
  ["仕分け",`<p>ホームの「仕分け」から、要らない案件をまとめて削除予定に移せます。チェックした値に1つでも当てはまる新着が移ります(確認中・受注中・保留は動かしません)。</p>
-  <ul><li><b>項目と値</b>: 依頼主(性別・年齢・活動地域)と案件(撮影場所・撮影日の予定・クリティカル・種類)ごとに、今の案件にある値を件数つきで並べます。件数は新着で数えます。書いていない・分からない案件は「記載なし」「不明」「日付不明」という1つの値になっていて、これもチェックできます。</li>
+  <ul><li><b>項目と値</b>: 依頼主(性別・年齢・活動地域)と案件(撮影場所・撮影日の予定・種類)ごとに、今の案件にある値を件数つきで並べます。件数は新着で数えます。書いていない・分からない案件は「記載なし」「不明」「日付不明」という1つの値になっていて、これもチェックできます。</li>
   <li><b>活動地域</b>: 読み取れる地域を最初から全部並べています。地方(関西・東海など)、都道府県(地方ごとの行)、都市(名古屋・神戸・仙台など)の3つで、市の名前で書いている人はその市の値になります(名古屋の人は「愛知」ではなく「名古屋」)。今の新着にいない地域は薄い字です。「たたむ」で今の新着にある値とチェックした値だけになり、「すべて出す」で戻ります。いくつも書いてある人は、その全部にチェックが付いたときだけ当てはまります(東京と大阪の人は、大阪だけのチェックでは移りません)。</li>
+  <li><b>点数</b>: 数字を入れると、その点数以下(ちょうどその点数も含む)の新着が当てはまります(例: −50)。空欄なら使いません。対象外にしたい作品は点数表で大きなマイナスにしておくと、ここで削除予定に回せます。</li>
   <li><b>年齢</b>: 未成年と5歳刻み(18〜19、20〜24 … 50以上)、「成人済み」とだけ書いている人の「成人(年齢不明)」、記載なしを並べています。「20代」「30↑」のように幅がある人は、当てはまる刻みの全部にチェックが付いたときだけ当てはまります(20代の人は 20〜24 と 25〜29 の両方)。</li>
   <li><b>撮影場所</b>はスタジオや会場の都道府県(本文・イベントの一覧・画像から)です。イベントの一覧にないイベントは、AIが知っている開催地を使い(カードに「推定」)、そのイベントを一覧に足します。間違いは Notion の一覧で直すと次から使われます。47都道府県を地方ごとの行で最初から全部並べ、分からない案件は「不明」です。「たたむ」で今ある値だけになります。<b>撮影日の予定</b>は Google カレンダーとの照合で、つながっているときだけ出ます(休みの予定は「休み」)。</li>
   <li><b>開いたときに自動で仕分ける</b>: オンにすると、アプリを開くたび(引っぱって再読み込みしたときも)、当てはまる新着を削除予定に移し、件数を下に出します。「元に戻す」で戻した案件や、一度でも状態を変えた案件は、次からは自動では移しません。</li>
@@ -1077,6 +1083,7 @@ const usedFacets=()=>SORT_FACETS.filter(f=>!f.show||f.show());
 // 仕分けに当てはまるか(チェックした値のどれか1つ。活動地域だけは全部にチェックがあるとき)
 function sortHit(c,rule=settings.sort_rule){
   return usedFacets().some(f=>{const on=rule[f.k];if(!on||!on.length)return false;
+    if(f.num){const max=parseFloat(on[0]);return Number.isFinite(max)&&c.score!=null&&c.score<=max}
     const vals=facetVals(f,c);return f.all?vals.every(v=>on.includes(v)):vals.some(v=>on.includes(v))});
 }
 const checkedCount=()=>usedFacets().reduce((n,f)=>n+(settings.sort_rule[f.k]||[]).length,0);
@@ -1116,6 +1123,19 @@ function fullItem(f,{sections,na}){
     ${sections.map(s=>`${s.title?`<div class="asub">${s.title}</div>`:""}${s.rows.map(([l,vals])=>row(l,vals)).join("")}`).join("")}
     ${rest.length?`${sections.length>1?'<div class="asub">その他</div>':""}${row(sections.length>1?"":"その他",rest)}`:""}</div>`;
 }
+// 点数の項目: 数字を入れると、その点数以下の新着が当てはまる。空欄なら使わない
+function scoreItem(f,news){
+  const v=(settings.sort_rule[f.k]||[])[0]??"",max=parseFloat(v);
+  const n=Number.isFinite(max)?news.filter(c=>c.score!=null&&c.score<=max).length:0;
+  return `<div class="sort-item"><h3>${f.t}</h3><label class="score-max"><input type="number" inputmode="numeric" step="1" min="-999" max="999" data-score-max="${f.k}" value="${esc(v)}" placeholder="例: -50" aria-label="この点数以下の新着を削除予定にする">点以下
+    <span class="sub">${Number.isFinite(max)?`今の新着で ${n}件`:"空欄なら使いません"}</span></label></div>`;
+}
+function setScoreMax(k,raw){
+  const t=String(raw).trim(),n=parseFloat(t),rule={...settings.sort_rule};
+  if(t===""||!Number.isFinite(n))delete rule[k];else rule[k]=[String(Math.round(n))];
+  if(ruleKey(rule)===ruleKey(settings.sort_rule)){renderSort();return}
+  saveSort({sort_rule:rule,sort_active:null}); // 数字を変えたら、プリセットを使っていない状態になる
+}
 function openSort(){
   presentSheet(`<div class="grab"></div><h2>仕分け</h2><p class="sub" style="margin:0">チェックした値に1つでも当てはまる新着は、削除予定に移ります</p><div id="sortBody"></div>`,"仕分け");
   renderSort();
@@ -1129,7 +1149,7 @@ function renderSort(){
   const act=activePreset();
   body.innerHTML=`<div class="sort-presets">${settings.sort_presets.map((p,i)=>`<span class="preset${p===act?" on":""}"><button type="button" class="chip" data-preset="${i}" aria-pressed="${p===act}">${esc(p.name)}</button><button type="button" class="pdel" data-preset-del="${i}" aria-label="${esc(p.name)}を消す">×</button></span>`).join("")}
      ${act?"":`<button type="button" class="chip add" data-preset-save="1">＋ ${settings.sort_presets.length?"新しいプリセットとして保存":"今のチェックを保存"}</button>`}</div>
-   ${["依頼主","案件"].map(g=>`<div class="sort-grp">${g}</div>${usedFacets().filter(f=>f.g===g).map(f=>{const fs=fullSections(f.k);return fs?fullItem(f,fs):item(f)}).join("")}`).join("")}
+   ${["依頼主","案件"].map(g=>`<div class="sort-grp">${g}</div>${usedFacets().filter(f=>f.g===g).map(f=>{if(f.num)return scoreItem(f,news);const fs=fullSections(f.k);return fs?fullItem(f,fs):item(f)}).join("")}`).join("")}
    <div class="sort-auto" data-sort-auto="1"><span>開いたときに自動で仕分ける</span><button type="button" class="switch" role="switch" aria-checked="${!!settings.sort_auto}" aria-label="開いたときに自動で仕分ける"></button></div>
    <div class="sort-foot"><p class="sum">今の新着 ${news.length}件のうち <b>${hits}件</b> が当てはまります</p>
     <div class="actions"><button class="btn" data-close="1">閉じる</button><button type="button" class="btn del fill" data-sort-run="1" ${hits?"":"disabled"}>今すぐ削除予定にする(${hits}件)</button></div></div>`;
@@ -1263,7 +1283,7 @@ async function renderStats(){
   sheet.innerHTML=`<div class="grab"></div><h2>サマリー</h2>
    <div class="seg" role="group" aria-label="期間">${[7,30,90].map(k=>`<button data-days="${k}" aria-pressed="${statsDays===k}">${k}日</button>`).join("")}</div>
    <div class="kpis">
-    <div class="kpi"><div class="k">これまでに判定した案件</div><div class="v">${fmt(st.totals.judged)}<small>件</small></div><div class="s">対象 ${fmt(st.totals.target)} ・ REC ${fmt(st.totals.critical)}</div></div>
+    <div class="kpi"><div class="k">これまでに判定した案件</div><div class="v">${fmt(st.totals.judged)}<small>件</small></div><div class="s">対象 ${fmt(st.totals.target)}</div></div>
     <div class="kpi"><div class="k">1日平均の取得ポスト(${statsDays}日)</div><div class="v">${fmt(Math.round(sum("fetched")/n))}<small>件</small></div><div class="s">判定 ${fmt(Math.round(sum("judged")/n))}件/日</div></div>
     <div class="kpi"><div class="k">1日平均の費用(${statsDays}日)</div><div class="v">${yen2(cost/n)}</div><div class="s">月にすると約 ${yen(cost/n*30)}</div></div>
     <div class="kpi"><div class="k">対象 1件あたりの費用</div><div class="v">${target?yen2(cost/target):"—"}</div><div class="s">${statsDays}日で対象 ${fmt(target)}件</div></div>
@@ -1271,7 +1291,7 @@ async function renderStats(){
    <div class="sec"><h3>日ごとの取得ポストと判定</h3>${barChart(d,[{key:"target",label:"対象",color:"var(--accent)"},{key:"rest",label:"そのほか取得",color:"var(--line)"}])}</div>
    <div class="sec"><h3>日ごとの費用</h3>${barChart(d,[{key:"collect_yen",label:"収集(TwitterAPI.io)",color:"var(--muted)"},{key:"ai_yen",label:"AI 判定",color:"var(--accent)"}],{fmt:v=>yen2(v),goal:goal?goal/30:null})}</div>
    <div class="sec"><h3>今月と先月</h3><table class="cmp"><tr><th></th><th>今月</th><th>先月の同じ時点</th><th>増減</th><th>先月全体</th></tr>
-    ${row("取得ポスト","fetched")}${row("判定","judged")}${row("対象","target")}${row("REC","critical")}${row("費用","yen",v=>yen(v),true)}</table></div>
+    ${row("取得ポスト","fetched")}${row("判定","judged")}${row("対象","target")}${row("費用","yen",v=>yen(v),true)}</table></div>
    <div class="sec"><h3>対象の案件の種類(${statsDays}日)</h3>${hbars(st.types)}</div>
    <div class="sec"><h3>対象の案件の都道府県(${statsDays}日)</h3>${hbars(st.prefectures)}</div>
    <div class="sec"><h3>対象外の理由(${statsDays}日)</h3>${hbars(st.reject_reasons)}</div>
@@ -1359,6 +1379,7 @@ $("viewer").addEventListener("touchend",ev=>{
 });
 $("viewer").addEventListener("touchcancel",()=>{vdrag=null;resetViewerDrag()});
 $("sort").addEventListener("change",e=>{state.sort=e.target.value;save();render()});
+document.addEventListener("change",e=>{const i=e.target.closest&&e.target.closest("[data-score-max]");if(i)setScoreMax(i.dataset.scoreMax,i.value)});
 // ---- スクロールの向きで上部をたたむ・広げる ----
 // たたむと上部が低くなってページの位置がずれるので、切り替えたあとの動きが落ち着くまでは向きを見ない(行ったり来たりしないように)
 let lastY=window.scrollY,moved=0,slimHold=0;

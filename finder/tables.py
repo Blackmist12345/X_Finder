@@ -13,6 +13,18 @@ _cat = {"select": {"options": [{"name": n, "color": c} for n, c in CATEGORIES]}}
 
 TYPES = ["コスプレ撮影", "コスパフォ", "踊ってみた", "ポートレート", "イベント", "その他"]
 
+# 点数表の区分。種類と都道府県は AI の読み取り、語は本文の文字、作品は AI、イベントは AI が読んだ名前とイベントの一覧で当てる。
+POINT_KINDS = [("種類", "blue"), ("都道府県", "orange"), ("語", "green"), ("作品", "purple"), ("イベント", "pink")]
+POINT_MIN, POINT_MAX = -100, 100
+OTHER_PREFECTURES = "その他の道府県"
+UNKNOWN_PLACE_ROW = "場所不明"
+TYPE_POINTS = {"コスプレ撮影": 20, "ポートレート": 10}
+PREFECTURE_POINTS = [("東京都", 0), ("神奈川県", -5), ("埼玉県", -5), ("千葉県", -5), (OTHER_PREFECTURES, -20), (UNKNOWN_PLACE_ROW, 0)]
+POINT_SEED = (
+    [(t, "種類", TYPE_POINTS.get(t, 0), "") for t in TYPES]
+    + [(p, "都道府県", pts, "上の行にない道府県すべて" if p == OTHER_PREFECTURES else "") for p, pts in PREFECTURE_POINTS]
+)
+
 # key は D1 の meta に保存する ID の名前。順番が Notion 上の並び順になる。
 TABLES = [
     {
@@ -35,73 +47,32 @@ TABLES = [
         },
     },
     {
-        "key": "penalty_words", "title": "【3】減点語",
+        # 点数の付け方をこの1つの表にまとめる(旧【3】減点語・【4】除外作品・【5】点数表・【6】クリティカル条件)。
+        "key": "points", "title": "【3】点数表",
         "props": {
-            "単語": {"title": {}},
-            "カテゴリ": _cat,
-            "減点": {"number": {"format": "number"}},
-            "有効": {"checkbox": {}},
-            "備考": {"rich_text": {}},
-        },
-    },
-    {
-        "key": "excluded_works", "title": "【4】除外作品",
-        "props": {
-            "作品名 / 略称": {"title": {}},
-            "有効": {"checkbox": {}},
-            "備考": {"rich_text": {}},
-        },
-    },
-    {
-        "key": "scores", "title": "【5】点数表",
-        "props": {
-            "条件": {"title": {}},
-            "区分": {"select": {"options": [{"name": "種類", "color": "blue"}, {"name": "都道府県", "color": "orange"}, {"name": "その他", "color": "default"}]}},
+            "条件": {"title": {}},  # 作品・イベントは略称をカンマ区切りで並べてよい
+            "区分": {"select": {"options": [{"name": n, "color": c} for n, c in POINT_KINDS]}},
             "点数": {"number": {"format": "number"}},
+            "カテゴリ": _cat,  # 区分「語」だけ使う
             "有効": {"checkbox": {}},
-            "説明": {"rich_text": {}},
+            "備考": {"rich_text": {}},
         },
-        "seed": (
-            [(t, "種類", {"コスプレ撮影": 50, "ポートレート": 30}.get(t, 0), "仮の値") for t in TYPES]
-            + [
-                ("東京都", "都道府県", 0, "仮の値"),
-                ("神奈川県", "都道府県", -5, "仮の値"),
-                ("埼玉県", "都道府県", -5, "仮の値"),
-                ("千葉県", "都道府県", -5, "仮の値"),
-                ("その他の道府県", "都道府県", -30, "上の行にない道府県すべて。仮の値"),
-                ("場所不明", "都道府県", 0, "開催場所が分からない案件。点数は変えず「場所不明」と表示"),
-            ]
-        ),
-        "seed_props": lambda r: {"条件": p_title(r[0]), "区分": p_select(r[1]), "点数": p_number(r[2]), "有効": p_check(True), "説明": p_text(r[3])},
+        "seed": POINT_SEED,
+        "seed_props": lambda r: {"条件": p_title(r[0]), "区分": p_select(r[1]), "点数": p_number(r[2]), "有効": p_check(True), "備考": p_text(r[3])},
     },
     {
-        "key": "critical", "title": "【6】クリティカル条件",
-        "props": {
-            "名前": {"title": {}},
-            "種類": {"select": {"options": [{"name": "基準点", "color": "red"}, {"name": "条件", "color": "purple"}]}},
-            "値": {"rich_text": {}},
-            "有効": {"checkbox": {}},
-            "説明": {"rich_text": {}},
-        },
-        "seed": [
-            ("クリティカルの基準点", "基準点", "70", True, "合計点がこれ以上ならクリティカル。仮の値"),
-            ("例: 特定の作品", "条件", "", False, "値に書いた語が本文・作品名・場所に含まれていれば、点数に関係なくクリティカルにする"),
-        ],
-        "seed_props": lambda r: {"名前": p_title(r[0]), "種類": p_select(r[1]), "値": p_text(r[2]), "有効": p_check(r[3]), "説明": p_text(r[4])},
-    },
-    {
-        "key": "basic", "title": "【7】基本設定",
+        "key": "basic", "title": "【4】基本設定",
         "props": {"項目": {"title": {}}, "値": {"rich_text": {}}, "説明": {"rich_text": {}}},
         "seed": "BASIC",
     },
     {
-        "key": "periods", "title": "【8】期間と頻度",
+        "key": "periods", "title": "【5】期間と頻度",
         "props": {"項目": {"title": {}}, "値": {"rich_text": {}}, "説明": {"rich_text": {}}},
         "seed": "PERIODS",
     },
     {
         # VTuber などは、キャラ名の代わりに決まった絵文字(推しマーク)で書かれることがある。判定のときに読み替える。
-        "key": "emojis", "title": "【9】絵文字の一覧",
+        "key": "emojis", "title": "【6】絵文字の一覧",
         "optional": True,  # あとから足した表。まだ作っていなくても設定は読める
         "props": {
             "絵文字": {"title": {}},
@@ -114,7 +85,7 @@ TABLES = [
     },
     {
         # イベントは略称で書かれることが多い。判定のときに、略称から開催地を補う。
-        "key": "events", "title": "【10】イベントの一覧",
+        "key": "events", "title": "【7】イベントの一覧",
         "optional": True,
         "props": {
             "略称": {"title": {}},  # 何通りもあるときはカンマ区切り
