@@ -1,8 +1,10 @@
-"""N4 AI 判定: ポストの文字だけを、まとめて AI(Claude または Gemini)に読ませる。
+"""N4 AI 判定: ポストを、まとめて AI(Claude または Gemini)に読ませる。
 
-画像は読まない(費用を抑えるため。画像は対象になった案件だけ、あとで image_step.py が読む)。
+画像のないポストは文字だけを 20 件ずつ(まとめて判定する件数)、画像のあるポストは画像込みで 5 件ずつ読ませる。
+渡す画像は 1 件あたり、本文の画像 4 枚と、ツリー(遡った返信元・引用元)の画像を root に近い方から 4 枚まで。
 AI には事実の読み取りだけを頼み、対象外にするかどうかは reject_reason() がルールで決める。
 """
+import base64
 import json
 import re
 import time
@@ -48,10 +50,10 @@ PREFECTURES = [
 UNKNOWN_PLACE = "不明"
 EVENT_SOURCE = "イベント表"
 EVENT_GUESS_SOURCE = "イベント推定"  # イベントの一覧にないイベントの開催地を、AI が知っている範囲で補ったとき
-IMAGE_SOURCE = "画像"  # 判定のあとに image_step.py が画像から読んだとき
+IMAGE_SOURCE = "画像"  # 本文・ツリーの添付画像から読んだとき(判定のときと、判定のあとに image_step.py が読んだとき)
 TREE_SOURCE = "ツリー"  # 本文ではなく、遡った返信元・引用元(ツリー)のポストから読んだとき
 PROFILE_SOURCE = "プロフィール"  # 前の判定の分だけ。撮影場所はプロフィールから決めない(活動地域は画面で別に読む)
-PLACE_SOURCES = ["本文", TREE_SOURCE, EVENT_SOURCE, EVENT_GUESS_SOURCE, UNKNOWN_PLACE]
+PLACE_SOURCES = ["本文", TREE_SOURCE, IMAGE_SOURCE, EVENT_SOURCE, EVENT_GUESS_SOURCE, UNKNOWN_PLACE]
 
 SCHEMA = {
     "type": "ARRAY",
@@ -87,6 +89,9 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
   撮影の場所・会場・イベント・日程・作品は、ツリーの最初のポストにだけ書かれていることがあるので、ツリーも読む。
   ただし募集かどうか(wants_photographer)は、本文の投稿者(依頼主)が撮影者を探しているかで決める。
   「別の人」のポストは、依頼主の募集の中身(場所・イベント・日程)として使えるときだけ使う。
+- 画像: ポストに画像が付いていれば、「本文の画像」「ツリー・最初の画像」のような名前のあとに続く。
+  募集の詳細(日程・場所・会場・イベント・作品・キャラクター・募集の条件)は、メモのスクショや募集テンプレートの画像に
+  書かれていることが多いので、画像の文字も読み、本文と同じように使う。どのポストの画像かは、名前のあとの id で分かる。
 - wants_photographer: 投稿者(引用ポストなら引用元の募集者を含む)が、撮影してくれるカメラマン・撮影者を探していれば true。
   被写体やモデルだけを募集している、カメラマン自身が被写体を探している、募集の締め切り報告・お礼・雑談なら false。
   他人の募集への返信や質問(「まだ募集していますか」「立候補します」など)も false。
@@ -108,13 +113,14 @@ RULES = """あなたは、カメラマンを探している X(旧Twitter)のポ�
 - matched_works: 撮影する作品(works・本文・絵文字の意味から判断。略称・キャラクター名からの判断も含む)が、下の「点数を付ける作品」の
   どれかに当たれば、その作品の名前を一覧の行頭の名前のとおりに書いて並べる。何作品でもよい。当たらなければ空の配列。
 - prefecture: 撮影する場所(スタジオ・会場・イベントの開催地)の都道府県。次の順で判断する。
-  1. 本文・引用元の本文・ツリーのポストに書かれた地名・会場名・駅名
+  1. 本文・引用元の本文・ツリーのポスト・画像に書かれた地名・会場名・駅名
   2. ポストに「イベントの意味」が付いていれば、そこに書かれた開催地(「回ごとにちがう」なら本文から判断する)
   3. 「イベントの意味」が付いていないイベントで撮影するなら、下の event_prefecture(そのイベントの開催地として知っている都道府県)
   どれでも分からなければ「不明」。投稿者プロフィールの地域・自己紹介は依頼主の活動地域で、撮影場所とは別なので使わない。
   全国のポストが混ざっているので、推測で東京などにしないこと。
-- prefecture_source: prefecture をどこから判断したか(本文 / ツリー / イベント表 / イベント推定 / 不明)。
-  1 のうち本文・引用元の本文なら「本文」、ツリーのポストから決めたら「ツリー」、上の 3 で決めたら「イベント推定」。
+- prefecture_source: prefecture をどこから判断したか(本文 / ツリー / 画像 / イベント表 / イベント推定 / 不明)。
+  1 のうち本文・引用元の本文なら「本文」、ツリーのポストの文章から決めたら「ツリー」、画像から決めたら「画像」、
+  上の 3 で決めたら「イベント推定」。
 - place: 会場名やイベント名・地域(本文に書かれていれば。イベント表から分かった会場や、event_venue でもよい。なければ空文字)。
 - event: 撮影するイベント(即売会・コスプレイベント・ライブ・展示会など)の名前を、本文に書かれているとおりに(略称でもよい)。
   「イベント」「併せ」「撮影会」のような一般的な言葉だけなら空文字。イベントでないなら空文字。
@@ -212,10 +218,54 @@ def works_lines(works):
     return lines
 
 
-def build_prompt(items, works, emojis=None, events=None):
+IMAGE_BATCH = 5  # 画像のあるポストを 1 回にまとめる件数
+MAX_POST_IMAGES = 4  # 本文の画像(X の 1 ポストの上限)
+MAX_TREE_IMAGES = 4  # ツリーの画像(root に近い方から)
+MAX_IMAGE_BYTES = 4_500_000  # Claude に渡せる 1 枚の大きさ(5MB)より少し小さく
+MAX_REQUEST_BYTES = 20_000_000  # 1 回の呼び出しに載せる画像の合計(上限 32MB より小さく)
+MEDIA_TYPES = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif"}
+
+
+def large_url(url):
+    """pbs.twimg.com の画像は ?name=large で大きい版になる(小さい文字を読むため)。"""
+    if "pbs.twimg.com/media/" in url and "?" not in url:
+        return url + "?name=large"
+    return url
+
+
+def fetch_image(s, url):
+    """画像を取ってくる。(media_type, base64 の文字列) か、取れなければ None。"""
+    try:
+        res = s.get(large_url(url), timeout=30)
+    except requests.RequestException:
+        return None
+    if res.status_code != 200 or not res.content or len(res.content) > MAX_IMAGE_BYTES:
+        return None
+    kind = (res.headers.get("content-type") or "").split(";")[0].strip()
+    if kind not in MEDIA_TYPES.values():
+        kind = MEDIA_TYPES.get(url.rsplit(".", 1)[-1].split("?")[0].lower(), "image/jpeg")
+    return kind, base64.b64encode(res.content).decode()
+
+
+def image_list(it):
+    """ポストに付ける画像を [(名前, URL)] で返す。本文の画像のあとに、ツリーの画像を root に近い方から。"""
+    out = [(f"本文の画像{n}", u) for n, u in enumerate((it.get("media") or [])[:MAX_POST_IMAGES], 1)]
+    tree = []
+    for t in it.get("tree") or []:
+        tree += [(f"ツリー・{t['relation']}の画像{n}", u) for n, u in enumerate(t.get("media") or [], 1)]
+    return out + tree[:MAX_TREE_IMAGES]
+
+
+def build_prompt(items, works, emojis=None, events=None, images=None):
+    """指示文を作る。images({id: [(名前, media_type, base64)]})があれば、画像を挟んだ部品の配列を返す。
+
+    部品は ("text", 文字) と ("image", 名前, media_type, base64)。images がなければ 1 つの文字列を返す(今までどおり)。
+    """
+    parts = []
     lines = [RULES] + works_lines(works) + [""]
     index = emoji_index(emojis)
     for it in items:
+        pics = (images or {}).get(it["id"]) or []
         lines.append(f"### id: {it['id']}")
         posted = posted_label(it.get("created_at"))
         if posted:
@@ -237,8 +287,20 @@ def build_prompt(items, works, emojis=None, events=None):
         hints = event_hints(body, events)
         if hints:
             lines.append("イベントの意味: " + "、".join(hints))
+        if pics:
+            lines.append("画像: " + "、".join(name for name, *_ in pics) + "(この下に続く)")
+            parts.append(("text", "\n".join(lines)))
+            lines = []
+            for name, kind, data in pics:
+                parts.append(("text", f"{name}(id: {it['id']}):"))
+                parts.append(("image", name, kind, data))
+            continue
         lines.append("")
-    return "\n".join(lines)
+    if not images:
+        return "\n".join(lines)
+    if lines:
+        parts.append(("text", "\n".join(lines)))
+    return parts
 
 
 def cost_usd(model, prompt_tokens, output_tokens):
@@ -277,9 +339,22 @@ def json_schema(schema):
     return out
 
 
+def _gemini_parts(prompt):
+    if isinstance(prompt, str):
+        return [{"text": prompt}]
+    return [{"text": p[1]} if p[0] == "text" else {"inline_data": {"mime_type": p[2], "data": p[3]}} for p in prompt]
+
+
+def _claude_content(prompt):
+    if isinstance(prompt, str):
+        return prompt
+    return [{"type": "text", "text": p[1]} if p[0] == "text"
+            else {"type": "image", "source": {"type": "base64", "media_type": p[2], "data": p[3]}} for p in prompt]
+
+
 def _call_gemini(s, api_key, model, prompt):
     body = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "contents": [{"role": "user", "parts": _gemini_parts(prompt)}],
         "generationConfig": {"responseMimeType": "application/json", "responseSchema": SCHEMA, "temperature": 0},
     }
     data = _post(s, GEMINI_API.format(model=model), {"x-goog-api-key": api_key}, body)
@@ -297,7 +372,7 @@ def _call_claude(s, api_key, model, prompt):
             "input_schema": {"type": "object", "properties": {"results": json_schema(SCHEMA)}, "required": ["results"]}}
     body = {"model": model, "max_tokens": 16000, "tools": [tool],  # temperature はこの機種では使えない
             "tool_choice": {"type": "tool", "name": "submit_results"},
-            "messages": [{"role": "user", "content": prompt}]}
+            "messages": [{"role": "user", "content": _claude_content(prompt)}]}
     headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
     data = _post(s, CLAUDE_API, headers, body)
     usage = data.get("usage") or {}
@@ -308,7 +383,7 @@ def _call_claude(s, api_key, model, prompt):
 
 
 def call(api_key, model, prompt, session=None):
-    """AI を 1 回呼ぶ。(結果の配列, 入力トークン, 出力トークン) を返す。"""
+    """AI を 1 回呼ぶ。prompt は文字列か、build_prompt が返す部品の配列。(結果の配列, 入力トークン, 出力トークン) を返す。"""
     s = session or requests
     fn = _call_claude if provider(model) == "claude" else _call_gemini
     result, tokens_in, tokens_out = fn(s, api_key, model, prompt)
@@ -320,23 +395,49 @@ def call(api_key, model, prompt, session=None):
 def judge(items, api_key, model, works, batch_size, session=None, emojis=None, events=None):
     """items をまとめて判定する。(結果 {id: 判定}, 入力トークン, 出力トークン, 呼び出し回数) を返す。
 
+    画像のないポストは batch_size 件ずつ、画像のあるポストは画像を取ってきて IMAGE_BATCH 件ずつ(画像の合計が
+    MAX_REQUEST_BYTES を超えるならもっと少なく)判定する。取れなかった画像は外す。
     AI が返し忘れたポストは 1 件ずつ聞き直す。それでも返らなければ結果に入れない。
     """
+    s = session or requests
     results, tokens_in, tokens_out, calls = {}, 0, 0, 0
 
-    def run(batch):
+    def run(batch, images=None):
         nonlocal tokens_in, tokens_out, calls
-        out, t_in, t_out = call(api_key, model, build_prompt(batch, works, emojis, events), session)
+        out, t_in, t_out = call(api_key, model, build_prompt(batch, works, emojis, events, images), s)
         tokens_in, tokens_out, calls = tokens_in + t_in, tokens_out + t_out, calls + 1
         wanted = {it["id"] for it in batch}
         for r in out:
             if isinstance(r, dict) and str(r.get("id")) in wanted:
                 results[str(r["id"])] = normalize(r)
 
-    for i in range(0, len(items), batch_size):
-        run(items[i:i + batch_size])
+    def load(it):
+        pics, size = [], 0
+        for name, url in image_list(it):
+            got = fetch_image(s, url)
+            if got and size + len(got[1]) <= MAX_REQUEST_BYTES:
+                pics.append((name, *got))
+                size += len(got[1])
+        return pics
+
+    plain = [it for it in items if not image_list(it)]
+    with_images = [it for it in items if image_list(it)]
+    for i in range(0, len(plain), batch_size):
+        run(plain[i:i + batch_size])
+    batch, images, size = [], {}, 0
+    for it in with_images:
+        pics = load(it)
+        bytes_ = sum(len(p[2]) for p in pics)
+        if batch and (len(batch) >= IMAGE_BATCH or size + bytes_ > MAX_REQUEST_BYTES):
+            run(batch, images)
+            batch, images, size = [], {}, 0
+        batch.append(it)
+        images[it["id"]] = pics
+        size += bytes_
+    if batch:
+        run(batch, images)
     for it in [it for it in items if it["id"] not in results]:
-        run([it])
+        run([it], {it["id"]: load(it)} if image_list(it) else None)
     return results, tokens_in, tokens_out, calls
 
 
