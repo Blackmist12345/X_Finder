@@ -1,12 +1,11 @@
 """N7 参加者情報(の一部): 対象になった案件の添付画像から、メンバー表などに載っている X のアカウントを AI で読む。
 同じ呼び出しで、画像に書かれた開催場所(都道府県・会場・イベント名)も読む。
 
-判定(N4)で対象になったポストだけを読む(画像は文字より高いので、絞り込んだあとに行う)。
+判定(N4)で対象になったポストだけを読む。判定でも画像は読む(募集の中身のため)が、アカウントはここで読む。
 読んだポストは image_reads に 1 行残し、二度は読まない。失敗しても収集・判定は止めない。
 判定で場所が本文からもイベント表からも分からなかった(プロフィールから推定・不明)案件は、
 画像から分かった都道府県に置き換えて、点数を計算し直す。
 """
-import base64
 import json
 import re
 
@@ -17,8 +16,6 @@ from finder.score import score
 
 MAX_POSTS_PER_RUN = 30  # 1 回の実行で読むポストの上限(たまっていた分で費用が跳ねないように)
 MAX_IMAGES = 4  # X の 1 ポストの画像の上限
-MAX_IMAGE_BYTES = 4_500_000  # Claude に渡せる 1 枚の大きさ(5MB)より少し小さく
-MEDIA_TYPES = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif"}
 HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 
 PROMPT = """これは X(旧Twitter)の撮影募集ポストに添付された画像です。
@@ -63,25 +60,12 @@ def candidates(d1, limit=MAX_POSTS_PER_RUN):
         "ORDER BY p.collected_at DESC, p.id DESC LIMIT ?", [limit])
 
 
-def large_url(url):
-    """pbs.twimg.com の画像は ?name=large で大きい版になる(小さい文字を読むため)。"""
-    if "pbs.twimg.com/media/" in url and "?" not in url:
-        return url + "?name=large"
-    return url
-
-
 def fetch_image(s, url):
     """画像を取ってきて Claude に渡す形にする。取れなければ None。"""
-    try:
-        res = s.get(large_url(url), timeout=30)
-    except requests.RequestException:
+    got = judge.fetch_image(s, url)
+    if not got:
         return None
-    if res.status_code != 200 or not res.content or len(res.content) > MAX_IMAGE_BYTES:
-        return None
-    kind = (res.headers.get("content-type") or "").split(";")[0].strip()
-    if kind not in MEDIA_TYPES.values():
-        kind = MEDIA_TYPES.get(url.rsplit(".", 1)[-1].split("?")[0].lower(), "image/jpeg")
-    return {"type": "image", "source": {"type": "base64", "media_type": kind, "data": base64.b64encode(res.content).decode()}}
+    return {"type": "image", "source": {"type": "base64", "media_type": got[0], "data": got[1]}}
 
 
 def clean(accounts, author_username=None):
