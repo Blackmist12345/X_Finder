@@ -65,7 +65,7 @@ beforeEach(() => {
   seed(db);
 });
 
-test("一覧は対象の案件を点数順に、直近の分だけ返す", async () => {
+test("一覧は対象の案件を新しい順に、直近の分だけ返す(点数順に並べるのは画面)", async () => {
   const cases = await listCases(db, new URLSearchParams());
   assert.deepEqual(cases.map((c) => c.id), ["2", "1"]);
   assert.equal(cases[0].critical, undefined); // クリティカルは点数に一本化したので返さない
@@ -75,6 +75,22 @@ test("一覧は対象の案件を点数順に、直近の分だけ返す", async
   assert.equal(cases[1].shoot_pref, "東京都");
   assert.equal(cases[1].others, 1);
   assert.equal(cases[1].username, "client");
+});
+
+test("一覧の枠は新しい案件から埋め、点の高い古い案件や削除予定で新しい案件が押し出されない", async () => {
+  const run = (sql, ...a) => db.raw.prepare(sql).run(...a);
+  const at = (min) => new Date(Date.now() - min * 6e4).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+  for (let i = 0; i < 600; i++) {
+    const id = `old${i}`;
+    run(`INSERT INTO posts (id, author_id, source, text, url, created_at, status, collected_at) VALUES (?, '100', 'search', 't', 'u', ?, 'judged', ?)`, id, at(600 + i), at(600 + i));
+    run(`INSERT INTO judgments (post_id, judged_at, case_type, score) VALUES (?, ?, 'コスプレ撮影', 90)`, id, at(600 + i));
+    if (i < 280) run(`INSERT INTO reviews (post_id, state, updated_at) VALUES (?, 'delete', ?)`, id, at(1));
+  }
+  const cases = await listCases(db, new URLSearchParams());
+  assert.equal(cases.length, 300);
+  assert.ok(cases.some((c) => c.id === "1") && cases.some((c) => c.id === "2")); // 点の低い新しい案件も入る
+  assert.ok(cases.every((c) => c.review !== "delete"));
+  assert.equal((await listCases(db, new URLSearchParams("group=deleted"))).length, 280);
 });
 
 test("撮影場所は依頼主のプロフィールから推定した都道府県を数えない(活動地域とは別)", async () => {
@@ -106,7 +122,8 @@ test("カードの状態: 開いても新着のまま(青い点だけ消える)�
   assert.equal(await setReview(db, "2", { opened: true }), "delete"); // 開いても削除予定のまま
   assert.equal(await setReview(db, "4", { state: "accepted" }), "accepted"); // 30 日前の案件
   cases = await listCases(db, new URLSearchParams());
-  assert.deepEqual(cases.map((c) => [c.id, c.review, c.opened]), [["4", "accepted", false], ["2", "delete", true], ["1", "new", true]]);
+  assert.deepEqual(cases.map((c) => [c.id, c.review, c.opened]), [["4", "accepted", false], ["1", "new", true]]); // 削除予定は別に取る
+  assert.deepEqual((await listCases(db, new URLSearchParams("group=deleted"))).map((c) => [c.id, c.review, c.opened]), [["2", "delete", true]]);
   assert.equal(await setReview(db, "4", { state: "hold" }), "hold");
   assert.equal((await getCase(db, "4")).review, "hold");
   assert.equal(await setReview(db, "999", { state: "hold" }), null);
@@ -269,7 +286,8 @@ test("一覧にも添付画像の URL が入る(詳細を開いた瞬間から�
 test("まとめて状態を変えられる(見つからない ID は飛ばし、新着に戻すこともできる)", async () => {
   const r = await setReviews(db, { ids: ["1", "2", "999"], state: "delete" });
   assert.deepEqual(r, { updated: ["1", "2"], state: "delete" });
-  const states = async () => Object.fromEntries((await listCases(db, new URLSearchParams())).map((c) => [c.id, c.review]));
+  const all = async () => [...(await listCases(db, new URLSearchParams())), ...(await listCases(db, new URLSearchParams("group=deleted")))];
+  const states = async () => Object.fromEntries((await all()).map((c) => [c.id, c.review]));
   assert.deepEqual(await states(), { "1": "delete", "2": "delete" });
   await setReviews(db, { ids: ["1"], state: "new" });
   assert.equal((await states())["1"], "new");

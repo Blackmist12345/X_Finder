@@ -125,17 +125,21 @@ function workPoints(detail) {
     .map((d) => ({ name: d.label.slice(4), points: d.points }));
 }
 
+// 一覧は新しい順に MAX_LIST 件まで取る(点数順に並べるのは画面)。点数順で打ち切ると、点の低い新しい案件が入らなくなるため。
+// 削除予定は数が多く枠を埋めてしまうので別に取る(group=deleted で削除予定だけ、ふだんは削除予定以外)。
+// 2週間を過ぎても残す状態(受注中・保留)は、枠からはみ出ないよう先に取る
 export async function listCases(db, params) {
   const view = params.get("view") === "rejected" ? "rejected" : "judged";
   const days = Math.min(Math.max(Number(params.get("days")) || 14, 1), 60);
+  const group = view === "rejected" ? "" : params.get("group") === "deleted" ? "AND r.state = 'delete'" : "AND (r.state IS NULL OR r.state != 'delete')";
   const { results } = await db
     .prepare(
       `SELECT ${CASE_COLUMNS}, p.media_json, j.score_json,
         (SELECT COUNT(*) FROM post_users pu WHERE pu.post_id = p.id AND pu.role IN ('mention', 'quoted')) AS others
        FROM posts p JOIN judgments j ON j.post_id = p.id LEFT JOIN users u ON u.id = p.author_id
        LEFT JOIN reviews r ON r.post_id = p.id
-       WHERE p.status = ? AND (p.collected_at >= ? OR r.state IN ${KEEP_STATES}) AND ${NOT_BLACKLISTED}
-       ORDER BY j.score DESC, p.created_at DESC LIMIT ?`,
+       WHERE p.status = ? AND (p.collected_at >= ? OR r.state IN ${KEEP_STATES}) AND ${NOT_BLACKLISTED} ${group}
+       ORDER BY (r.state IN ${KEEP_STATES}) DESC, p.collected_at DESC, p.created_at DESC, p.id DESC LIMIT ?`,
     )
     .bind(view, daysAgoIso(days), MAX_LIST)
     .all();

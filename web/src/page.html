@@ -592,9 +592,10 @@ async function load(){
   detailCache.clear();
   $("count").textContent="読み込み中…";
   try{
-    const [list,sum,set,calr]=await Promise.all([api(`/api/cases?view=${view}`),api("/api/summary"),api("/api/settings").catch(()=>null),
-      api(`/api/calendar?from=${jstDay(0)}&to=${jstDay(120)}`).catch(()=>null)]);
-    cases=list.cases;loadedView=view;if(list.area_choices)areaChoices=list.area_choices;if(set)settings=set;if(calr)cal=calr;
+    // 削除予定は別に取る(数が多く、ほかの案件の枠を埋めてしまうため)
+    const [list,del,sum,set,calr]=await Promise.all([api(`/api/cases?view=${view}`),view==="judged"?api("/api/cases?view=judged&group=deleted"):null,
+      api("/api/summary"),api("/api/settings").catch(()=>null),api(`/api/calendar?from=${jstDay(0)}&to=${jstDay(120)}`).catch(()=>null)]);
+    cases=del?[...list.cases,...del.cases]:list.cases;loadedView=view;if(list.area_choices)areaChoices=list.area_choices;if(set)settings=set;if(calr)cal=calr;
     $("cost").innerHTML=`今月 <b>¥${fmt(sum.month_cost_yen)}</b> / ¥${fmt(sum.goal_yen)}`;$("cost").dataset.goal=sum.goal_yen||0;
     const st=$("status");
     const parts=[];
