@@ -69,6 +69,28 @@ class Notion:
                 out.append({"id": db["id"], "parent": (db.get("parent") or {}).get("page_id", "").replace("-", "")})
         return out
 
+    def move_database(self, database_id, parent_page_id):
+        """表を別のページの下へ移す(移した先のいちばん下に付く)。親を変えられるのは 2025-09-03 版の API から。"""
+        headers = {**self.headers, "Notion-Version": "2025-09-03"}
+        res = requests.patch(f"{API}/databases/{database_id}", headers=headers, timeout=30,
+                             json={"parent": {"type": "page_id", "page_id": parent_page_id}})
+        if res.status_code != 200:
+            raise NotionError(f"PATCH /databases/{database_id} が失敗しました ({res.status_code}): {res.text[:300]}")
+
+    def child_databases(self, page_id):
+        """ページの下にある表の [(ID, 名前)] を、画面に並んでいる順で返す。"""
+        out, cursor = [], None
+        while True:
+            data = self._request("GET", f"/blocks/{page_id}/children?page_size=100" + (f"&start_cursor={cursor}" if cursor else ""))
+            out += [(b["id"], b["child_database"]["title"]) for b in data.get("results", []) if b.get("type") == "child_database"]
+            if not data.get("has_more"):
+                return out
+            cursor = data.get("next_cursor")
+
+    def create_child_page(self, parent_page_id, title):
+        payload = {"parent": {"page_id": parent_page_id}, "properties": {"title": {"title": [{"text": {"content": title}}]}}}
+        return self._request("POST", "/pages", payload)["id"]
+
     def archive_page(self, page_id):
         self._request("PATCH", f"/pages/{page_id}", {"archived": True})
         time.sleep(0.35)

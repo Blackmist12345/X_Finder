@@ -16,6 +16,8 @@ on:
           - 'points_merge_preview'  # 減点語・除外作品・点数表・クリティカル条件を【3】点数表にまとめる案を見る(書き込まない)
           - 'points_merge_apply'    # 案のとおりに【3】点数表を作り、表の番号を振り直す
           - 'old_tables_rename'     # 使わなくなった表の名前を【91】からの番号に付け直す
+          - 'tables_sort_preview'   # Notion のページで表を番号の順に並べ直す案を見る(動かさない)
+          - 'tables_sort_apply'     # 表を番号の順に並べ直す
 
 concurrency:
   group: finder-setup
@@ -54,4 +56,6 @@ jobs:
             points_merge_preview) MODE=preview python -u scripts/merge_points.py ;;
             points_merge_apply)   MODE=apply python -u scripts/merge_points.py ;;
             old_tables_rename)    python -u scripts/rename_old_tables.py ;;
+            tables_sort_preview)  MODE=preview python -u scripts/sort_tables.py ;;
+            tables_sort_apply)    MODE=apply python -u scripts/sort_tables.py ;;
           esac
