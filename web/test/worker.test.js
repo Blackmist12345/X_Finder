@@ -259,6 +259,17 @@ test("仕分けのチェック・自動・プリセットを保存でき、お�
   assert.equal((await getSettings(db)).sort_active, "B");
 });
 
+test("絞り込みの条件は仕分けとは別に保存され、収集日の項目も持てる", async () => {
+  const before = await getSettings(db);
+  const saved = await saveSettings(db, { view_rule: { shoot: ["東京都", "東京都"], score: ["20"], within: ["3"], before: ["7"], zzz: ["x"] } });
+  assert.deepEqual(saved.view_rule, { shoot: ["東京都"], score: ["20"], within: ["3"], before: ["7"] });
+  assert.deepEqual(saved.sort_rule, before.sort_rule); // 仕分けのチェックは変わらない
+  assert.deepEqual((await getSettings(db)).view_rule, saved.view_rule);
+  assert.deepEqual((await saveSettings(db, { sort_rule: { within: ["3"] } })).sort_rule, {}); // 収集日は仕分けにはない
+  await assert.rejects(saveSettings(db, { view_rule: ["東京都"] }), RangeError);
+  assert.deepEqual((await saveSettings(db, { view_rule: {} })).view_rule, {});
+});
+
 test("前の「まとめて」のプリセットは読み飛ばす", async () => {
   await db.prepare("INSERT OR REPLACE INTO meta (key, value, updated_at) VALUES ('finder_settings', ?, '2026-10-01')")
     .bind(JSON.stringify({ swipe_right: "none", bulk_presets: [{ name: "ブルアカ", conds: [], q: "ブルアカ", mode: "and" }], presets_seeded: true })).run();
