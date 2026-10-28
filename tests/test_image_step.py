@@ -59,6 +59,35 @@ def test_reads_accounts_from_images_once(d1):
     assert len(s.posts) == 1
 
 
+def add_tree(d1, pid, tree):
+    """tree: [(id, media)] を root から順に。"""
+    for tid, media in tree:
+        d1.query("INSERT INTO posts (id, author_id, source, text, created_at, status, collected_at, media_json) VALUES (?, '100', 'tree', 't', 'x', 'context', 'x', ?)",
+                 [tid, json.dumps(list(media))])
+    d1.query("INSERT INTO post_trees (post_id, ids_json, updated_at) VALUES (?, ?, 'x')", [pid, json.dumps([t for t, _ in tree])])
+
+
+def test_reads_tree_images_too(d1):
+    add_post(d1, "1")
+    add_tree(d1, "1", [("20", [f"https://pbs.twimg.com/media/r{n}.jpg" for n in range(3)]), ("30", ["https://pbs.twimg.com/media/q0.jpg", "https://pbs.twimg.com/media/q1.jpg"])])
+    add_post(d1, "2", media=())  # 本文に画像がなくても、ツリーにあれば読む
+    add_tree(d1, "2", [("40", ["https://pbs.twimg.com/media/z.jpg"])])
+    add_post(d1, "3", media=())  # どちらにもなければ読まない
+    add_tree(d1, "3", [("50", [])])
+    s = FakeSession([{"handle": "tree_only", "name": "", "from": "ツリー"}, {"handle": "both", "name": "", "from": "ツリー"},
+                     {"handle": "both", "name": "B", "from": "本文"}, {"handle": "body", "name": ""}])
+    image_step.run(d1, CONFIG, True, {"ANTHROPIC_API_KEY": "k"}, session=s)
+    # 本文の画像 → ツリーの画像(root に近い方から 4 枚まで)の順に、名前を付けて渡す
+    labels = [c["text"] for c in s.posts[1]["messages"][0]["content"][:-1] if c["type"] == "text"]
+    assert labels == ["本文の画像1", "ツリーの画像1", "ツリーの画像2", "ツリーの画像3", "ツリーの画像4"]
+    assert [u.split("/")[-1] for u in s.gets[1:]] == ["a.jpg?name=large", "r0.jpg?name=large", "r1.jpg?name=large", "r2.jpg?name=large", "q0.jpg?name=large"]
+    rows = {r["post_id"]: r for r in d1.query("SELECT post_id, images, accounts_json FROM image_reads")}
+    assert set(rows) == {"1", "2"}
+    assert rows["1"]["images"] == 5 and rows["2"]["images"] == 1
+    assert json.loads(rows["1"]["accounts_json"]) == [
+        {"handle": "both", "name": "B"}, {"handle": "body", "name": ""}, {"handle": "tree_only", "name": "", "from": "tree"}]
+
+
 def test_unreachable_image_is_recorded_and_not_retried(d1):
     add_post(d1, "1", media=("https://pbs.twimg.com/media/gone.jpg",))
     s = FakeSession([], broken=["gone"])

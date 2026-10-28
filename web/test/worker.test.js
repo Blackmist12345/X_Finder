@@ -338,9 +338,11 @@ test("詳細はツリーを古い順に、返信・引用と依頼主本人か�
 
 test("画像から読んだアカウントも関係するアカウントに並べる", async () => {
   db.raw.prepare(`INSERT INTO image_reads (post_id, read_at, images, accounts_json) VALUES ('1', 'x', 1, ?)`).run(
-    JSON.stringify([{ handle: "Friend", name: "" }, { handle: "cos_new", name: "新しい人" }, { handle: "client", name: "" }, { handle: "bad id", name: "" }]));
+    JSON.stringify([{ handle: "Friend", name: "" }, { handle: "cos_new", name: "新しい人" }, { handle: "client", name: "" }, { handle: "bad id", name: "" },
+      { handle: "tree_cos", name: "", from: "tree" }]));
   const c = await getCase(db, "1");
-  assert.deepEqual(c.people.map((p) => [p.username, p.name, p.roles]), [["friend", "友達", ["mention", "image"]], ["cos_new", "新しい人", ["image"]]]);
+  assert.deepEqual(c.people.map((p) => [p.username, p.name, p.roles]), [
+    ["friend", "友達", ["mention", "image"]], ["cos_new", "新しい人", ["image"]], ["tree_cos", null, ["image_tree"]]]);
   assert.equal(c.people[1].id, null);
   // 画像を読んでいない案件は今まで通り
   assert.deepEqual((await getCase(db, "2")).people, []);
