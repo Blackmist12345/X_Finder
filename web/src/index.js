@@ -373,7 +373,7 @@ export async function setReview(db, id, { state, opened }) {
   return REVIEW_STATES.includes(row?.state) ? row.state : "new";
 }
 
-// まとめて状態を変える(ホームの「仕分け」から)。ids は 300 件まで。見つからない ID は飛ばす。
+// まとめて状態を変える(ホームの「仕分け」と、絞り込みの「まとめて選ぶ」から)。ids は 300 件まで。見つからない ID は飛ばす。
 const BULK_MAX = 300;
 export async function setReviews(db, body) {
   const ids = [...new Set(Array.isArray(body.ids) ? body.ids.map(String) : [])];
@@ -400,12 +400,15 @@ export async function setReviews(db, body) {
 // 値は画面が案件から作る文字(「東京都」「記載なし」など)なので、ここでは形と長さだけ確かめる
 // score は「この点数以下」の数字を1つだけ入れる(["-50"] のような形)
 const SORT_FACETS = ["gender", "age", "area", "shoot", "plan", "score", "type"];
+// 「絞り込み」: チェックした値に当てはまるカードだけを一覧に出す(状態は変えない)。仕分けと同じ項目に、収集日を足す
+// score は「この点数以上」、within は「収集から◯日以内」、before は「収集から◯日以上前」の数字を1つだけ入れる
+const VIEW_FACETS = [...SORT_FACETS, "within", "before"];
 const SORT_VALUES_MAX = 60;
 const PRESET_MAX = 20;
-function cleanRule(rule) {
+function cleanRule(rule, keys = SORT_FACETS) {
   if (!rule || typeof rule !== "object" || Array.isArray(rule)) return null;
   const out = {};
-  for (const k of SORT_FACETS) {
+  for (const k of keys) {
     if (rule[k] === undefined) continue;
     if (!Array.isArray(rule[k])) return null;
     const vals = [...new Set(rule[k].map((v) => String(v ?? "").trim().slice(0, 30)).filter(Boolean))].slice(0, SORT_VALUES_MAX);
@@ -438,6 +441,7 @@ export async function getSettings(db) {
   }));
   out.sort_rule = cleanRule(saved.sort_rule) || {};
   out.sort_auto = saved.sort_auto === true;
+  out.view_rule = cleanRule(saved.view_rule, VIEW_FACETS) || {};
   out.sort_presets = cleanSortPresets(saved.sort_presets) || [];
   // 選んでいるプリセットは1つだけ。消したプリセットの名前は残さない
   // まだ一度も選んでいない(この項目ができる前の)保存は、今のチェックと同じプリセットを選んでいることにする
@@ -471,6 +475,11 @@ export async function saveSettings(db, body) {
     const rule = cleanRule(body.sort_rule);
     if (!rule) throw new RangeError("sort_rule");
     next.sort_rule = rule;
+  }
+  if (body.view_rule !== undefined) {
+    const rule = cleanRule(body.view_rule, VIEW_FACETS);
+    if (!rule) throw new RangeError("view_rule");
+    next.view_rule = rule;
   }
   if (body.sort_auto !== undefined) {
     if (typeof body.sort_auto !== "boolean") throw new RangeError("sort_auto");

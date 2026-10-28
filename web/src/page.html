@@ -166,6 +166,21 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .cd .cm{font-size:9.5px;color:var(--muted);padding-left:2px}
 /* 仕分け(チェックした値に当てはまる新着を削除予定にする) */
 .sortbtn[hidden]{display:none}
+.daybar .bar-btns{display:flex;gap:6px;flex:none}
+.sort-foot .sum b.ok{color:var(--accent)}
+.card .pickmark{flex:none;width:20px;height:20px;border-radius:50%;border:2px solid var(--line);background:var(--surface);box-sizing:border-box}
+.card.picked{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+.card.picked .pickmark{border-color:var(--accent);background:var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/14px no-repeat}
+.pickbar[hidden]{display:none}
+.pickbar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -4px 16px rgba(0,0,0,.12);padding:10px 16px calc(12px + env(safe-area-inset-bottom,0px))}
+.pickbar .pick-head{display:flex;align-items:center;gap:8px;max-width:640px;margin:0 auto 8px}
+.pickbar .pick-head b{flex:1;font-size:14px}
+.pickbar .pick-moves{display:flex;flex-wrap:wrap;gap:6px;max-width:640px;margin:0 auto}
+.pickbar .pick-moves .btn{flex:1 1 calc(25% - 6px);min-width:5.5em;padding:10px 4px;font-size:13px;white-space:nowrap}
+.pickbar .btn:disabled{opacity:.45}
+.pickbar .st-delete{color:var(--rec)} .pickbar .st-accepted{color:var(--ok)} .pickbar .st-hold{color:var(--warn)} .pickbar .st-checking{color:var(--chk)} .pickbar .st-new{color:var(--accent)}
+body.picking .list{padding-bottom:140px}
+body.picking .toast{bottom:calc(130px + env(safe-area-inset-bottom,0px))}
 .sortbtn{flex:1;min-width:0;display:flex;justify-content:space-between;align-items:center;gap:6px;font-weight:700;font-size:14px}
 .sortbtn .lbl{display:flex;flex-direction:column;align-items:flex-start;min-width:0;line-height:1.25;white-space:nowrap}
 .sortbtn .ps{max-width:100%;font-weight:600;font-size:11px;color:var(--accent);overflow:hidden;text-overflow:ellipsis}
@@ -203,6 +218,10 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .v[aria-pressed="true"] small{color:var(--rec)}
 .v[aria-pressed="true"] i{background:var(--rec);border-color:var(--rec)}
 .v[aria-pressed="true"] i::after{content:"✓";position:absolute;inset:0;color:#fff;font-size:11px;line-height:12px;text-align:center}
+/* 絞り込みは「出すもの」を選ぶので、チェックは青(仕分けの「外すもの」は赤) */
+#viewBody .v[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+#viewBody .v[aria-pressed="true"] small{color:var(--accent)}
+#viewBody .v[aria-pressed="true"] i{background:var(--accent);border-color:var(--accent)}
 .sort-auto{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:18px;padding:10px 12px;background:var(--surface-2);border-radius:12px;font-size:14px;cursor:pointer}
 .switch{flex:none;width:44px;height:26px;border-radius:999px;border:0;background:var(--line);position:relative;cursor:pointer;transition:background .15s}
 .switch::after{content:"";position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:left .15s}
@@ -422,6 +441,7 @@ header.top.slim .tab .c{font-size:17px}
     <div class="filters" id="filters"><div>
     <div class="row2">
       <button class="icon-btn sortbtn" id="openSort" aria-label="仕分け">仕分け</button>
+      <button class="icon-btn sortbtn" id="openView" aria-label="絞り込み">絞り込み</button>
       <select id="sort" aria-label="並び順">
         <option value="score">点数順</option>
         <option value="new">新着順</option>
@@ -436,9 +456,11 @@ header.top.slim .tab .c{font-size:17px}
   <p class="note" id="status" hidden></p>
   <div class="daybar" id="rejBar" hidden></div>
   <div class="daybar" id="dayBar" hidden></div>
+  <div class="daybar" id="viewBar" hidden></div>
   <div class="list" id="list"></div>
 </div>
 <div id="sheetRoot" hidden></div>
+<div class="pickbar" id="pickBar" hidden></div>
 <div class="toast" id="toast" role="status" hidden></div>
 <div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="画像" hidden>
   <div class="vbar"><span id="vcount"></span><span class="vhint">上下にスワイプで閉じる</span><button class="vclose" id="vclose" aria-label="閉じる">×</button></div>
@@ -489,8 +511,8 @@ const TABS=[{k:"new",t:"新着"},{k:"checking",t:"確認中"},{k:"accepted",t:"�
 const DELETE_DAYS=14;
 // 左右のスワイプで付ける状態(左上の「X Finder」から開く設定で変えられる。保存先は D1 なので、どの端末でも同じ)
 const SWIPE_LABEL={new:"新着に戻す",checking:"確認中",accepted:"連絡中",hold:"受注中",delete:"削除予定",none:"何もしない"};
-let settings={swipe_right:"hold",swipe_left:"delete",swipe_tabs:{},sort_rule:{},sort_auto:false,sort_presets:[],sort_active:null};
-let state={rejected:false,sort:"score",tab:"new",day:null}; // day(カレンダーで選んだ撮影日)は保存しない
+let settings={swipe_right:"hold",swipe_left:"delete",swipe_tabs:{},sort_rule:{},sort_auto:false,sort_presets:[],sort_active:null,view_rule:{}};
+let state={rejected:false,sort:"score",tab:"new",day:null,picking:false,picked:new Set()}; // day(カレンダーで選んだ撮影日)と、まとめて選んでいるカードは保存しない
 let cases=[],loadedView=null,areaChoices=null;
 try{const s=JSON.parse(localStorage.getItem("finder-ui")||"null");if(s){state.sort=s.sort||"score";state.tab=TABS.some(t=>t.k===s.tab)?s.tab:"new"}}catch(e){}
 const save=()=>{try{localStorage.setItem("finder-ui",JSON.stringify({v:3,sort:state.sort,tab:state.tab}))}catch(e){}};
@@ -616,10 +638,14 @@ function renderControls(){
   const act=activePreset(),auto=k&&settings.sort_auto,ps=k?(act?act.name:"プリセットなし"):"";
   b.innerHTML=`<span class="lbl">仕分け${ps?`<span class="ps${act?"":" none"}">${esc(ps)}</span>`:""}</span>${k?`<span class="mode${auto?" auto":""}">${auto?"自動":"手動"}</span>`:""}`;
   b.setAttribute("aria-label",k?`仕分け(${ps}、${auto?"開いたときに自動で削除予定へ移す":"自動では移さない"})`:"仕分け");
+  const vn=viewOn()?viewCount():0,vb=$("openView");vb.hidden=state.rejected;
+  vb.innerHTML=`<span class="lbl">絞り込み<span class="ps${vn?"":" none"}">${vn?`条件 ${vn}つ`:"なし"}</span></span>`;
+  vb.setAttribute("aria-label",vn?`絞り込み(条件 ${vn}つ)`:"絞り込み");
   $("sort").value=state.sort;
 }
-// 一覧に出す案件(カレンダーで日付を選んでいるときは、その日が撮影日の案件だけ)
-const matching=()=>cases.filter(c=>!state.day||caseDates(c).includes(state.day));
+// 一覧に出す案件(カレンダーで日付を選んでいるときは、その日が撮影日の案件だけ。絞り込みの条件があるときは、当てはまる案件だけ)
+const dayOk=c=>!state.day||caseDates(c).includes(state.day);
+const matching=()=>{const v=viewOn();return cases.filter(c=>dayOk(c)&&(!v||viewHit(c)))};
 function filtered(){
   const a=matching().filter(c=>c.review===state.tab);
   const by={score:(x,y)=>(y.score??-1e9)-(x.score??-1e9),new:(x,y)=>(y.created_at||"").localeCompare(x.created_at||""),
@@ -636,7 +662,10 @@ function render(){
   rb.innerHTML=state.rejected?`<span>AI が募集ではないと判断したポスト(対象外)を表示中</span><button type="button" class="chip" data-rejected="0">戻る</button>`:"";
   const db=$("dayBar");db.hidden=!state.day;
   db.innerHTML=state.day?`<span><b>${dayLabel(state.day)}</b> が撮影日の案件だけ表示中</span><button type="button" class="chip" data-day-clear="1">解除</button>`:"";
-  $("list").innerHTML=a.length?a.map(card).join(""):`<div class="empty">${state.day?`${dayLabel(state.day)} が撮影日の案件は、このタブにはありません。`:emptyMsg}</div>`;
+  const vb=$("viewBar");vb.hidden=!viewOn()||state.picking;
+  vb.innerHTML=viewOn()&&!state.picking?`<span><b>絞り込み中</b>(条件 ${viewCount()}つ・${a.length}件)</span><span class="bar-btns">${a.length?'<button type="button" class="chip" data-pick-start="1">まとめて選ぶ</button>':""}<button type="button" class="chip" data-view-clear="1">解除</button></span>`:"";
+  $("list").innerHTML=a.length?a.map(card).join(""):`<div class="empty">${state.day?`${dayLabel(state.day)} が撮影日の案件は、このタブにはありません。`:viewOn()?"絞り込みの条件に当てはまるカードは、このタブにはありません。":emptyMsg}</div>`;
+  renderPickBar();
   prefetchTop(a);
 }
 // 撮影場所。前の判定で依頼主のプロフィールから推定した都道府県は、撮影場所としては「場所不明」にする
@@ -665,8 +694,9 @@ function areaFact(c){
 }
 function card(c){
   const rejected=state.rejected;
-  return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card" data-id="${esc(c.id)}">
-   <div class="meta">${reviewPill(c)}${gonePill(c)}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(placeShort(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
+  const pk=state.picking,on=pk&&state.picked.has(c.id);
+  return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card${pk?" pickable":""}${on?" picked":""}" data-id="${esc(c.id)}"${pk?` aria-pressed="${on}"`:""}>
+   <div class="meta">${pk?'<span class="pickmark" aria-hidden="true"></span>':""}${reviewPill(c)}${gonePill(c)}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(placeShort(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
    <div class="score">${rejected?"":`<span class="n">${c.score==null?"—":Math.round(c.score)}</span><span class="l">点</span>`}</div>
    <div class="title">${esc(c.summary||"(要約なし)")}</div>
    <p class="excerpt">${esc((c.text||"").replace(/\s+/g," "))}</p>
@@ -880,7 +910,7 @@ function swipeTarget(c,dir){
 // 横に決まったら画面のスクロールを止め、縦に決まったらスワイプはしない(斜めの動きで両方が動かないように)
 let drag=null,suppressClick=false;
 const LOCK=10;  // この距離(px)動いたら向きを決める
-function startDrag(card,x,y){drag={card,x,y,dx:0,axis:null}}
+function startDrag(card,x,y){drag=state.picking?null:{card,x,y,dx:0,axis:null}}
 function moveDrag(x,y){
   if(!drag)return false;
   const dx=x-drag.x,dy=y-drag.y;
@@ -1015,6 +1045,13 @@ const HELP=[
   <li><b>ホームの仕分けボタン</b>: チェックがあるとき、使っているプリセットの名前(なければ「プリセットなし」)と、開いたときに自動で移すなら赤い「自動」、移さないなら「手動」が出ます。</li>
   <li><b>今すぐ削除予定にする</b>: 今の新着で当てはまるものを全部移します。あとから「元に戻す」で戻せます。</li>
   <li><b>プリセット</b>: 選べるのは1つだけで、タップするとそのチェックに切り替わります。選んだあとにチェックを変えると「プリセットなし」になり、「＋ 新しいプリセットとして保存」で名前を付けて保存できます(同じ名前は上書き)。× で消せます。チェックとプリセットはどの端末でも同じです。</li></ul>`],
+ ["絞り込み",`<p>ホームの「絞り込み」(仕分けの隣)から、今開いているタブのカードを条件で絞って表示できます。仕分けと違い、カードの状態は変わりません。条件はすぐ保存され、開き直しても、どの端末でも同じです。</p>
+  <ul><li><b>項目</b>: 仕分けと同じ(性別・年齢・活動地域・撮影場所・撮影日の予定・点数・種類)に「収集日」を足しています。件数は今のタブのカードで数えます。</li>
+  <li><b>当てはまり方</b>: チェックした値のカードだけが出ます。同じ項目の中はどれか1つ(東京か神奈川)、項目同士は全部(撮影場所が東京か神奈川で、かつ女性)です。活動地域や年齢の幅のように値をいくつも持つカードは、どれか1つにチェックがあれば出ます。</li>
+  <li><b>点数</b>: 数字を入れると、その点数以上のカードだけが出ます。</li>
+  <li><b>収集日</b>: 集めてからの日数で絞ります。「3日以内」で最近3日に集めたもの、「7日以上前」で1週間以上たったものが出ます。両方入れるとその間です。</li>
+  <li><b>絞り込み中</b>: 一覧の上に帯が出ます。「解除」で条件をすべて外します。日付(カレンダー)の絞り込みとも一緒に使えます。</li>
+  <li><b>まとめて選ぶ</b>: 帯の「まとめて選ぶ」で、カードをタップして選べます(「全部選ぶ」もあります)。下のボタンで、選んだカードをまとめて別の状態に移します。移したあと「元に戻す」で戻せます。選んでいる間は詳細とスワイプは使いません。</li></ul>`],
  ["並び順・日付",`<ul><li><b>並び順</b>: 点数順・新着順・FF率順・フォロワー数順。</li>
   <li><b>日付</b>: 月のカレンダーが開き、日ごとに「その日が撮影日の案件の数」(青い数字、今のタブで数える)と Google カレンダーの予定(休みは緑)が出ます。日をタップすると、その日が撮影日の案件だけを一覧に出します。上の「解除」で戻ります。予定は今日から120日先まで出ます。</li></ul>`],
  ["案件の詳細",`<p>カードをタップすると詳細が開きます。本文をタップすると X アプリでそのポストが開きます。一番上で下に引っぱると閉じます。</p>
@@ -1090,10 +1127,13 @@ function sortHit(c,rule=settings.sort_rule){
 }
 const checkedCount=()=>usedFacets().reduce((n,f)=>n+(settings.sort_rule[f.k]||[]).length,0);
 const ruleKey=r=>JSON.stringify(SORT_FACETS.map(f=>[...(r[f.k]||[])].sort()));
-function facetValues(f){
+// 仕分けと絞り込みは同じ項目と値の並べ方を使う。違うのは、チェックの保存先・件数を数えるカード・押したときの印(data-sv / data-vv)
+const SORT_CTX={get rule(){return settings.sort_rule},pool:()=>cases.filter(c=>c.review==="new"),attr:"sv",none:"新着がありません"};
+const VIEW_CTX={get rule(){return settings.view_rule||{}},pool:()=>cases.filter(c=>c.review===state.tab&&dayOk(c)),attr:"vv",none:"このタブにカードがありません"};
+function facetValues(f,ctx=SORT_CTX){
   const n=new Map();
-  for(const c of cases)if(c.review==="new")for(const v of facetVals(f,c))n.set(v,(n.get(v)||0)+1);
-  for(const v of settings.sort_rule[f.k]||[])if(!n.has(v))n.set(v,0); // チェックした値は、今の新着になくても出す(外せるように)
+  for(const c of ctx.pool())for(const v of facetVals(f,c))n.set(v,(n.get(v)||0)+1);
+  for(const v of ctx.rule[f.k]||[])if(!n.has(v))n.set(v,0); // チェックした値は、今のカードになくても出す(外せるように)
   const ord=SORT_ORDER[f.k]||[],rank=v=>NA_VALUES.includes(v)?2:ord.includes(v)?0:1;
   return [...n].sort((a,b)=>rank(a[0])-rank(b[0])||ord.indexOf(a[0])-ord.indexOf(b[0])||b[1]-a[1]||a[0].localeCompare(b[0],"ja"));
 }
@@ -1111,19 +1151,24 @@ function fullSections(k){
   if(k==="shoot")return {sections:[{title:"",rows:prefs}],na:"不明"};
   return null;
 }
-function fullItem(f,{sections,na}){
-  const counts=new Map(facetValues(f)),on=settings.sort_rule[f.k]||[],fold=!!FOLD_KEYS[f.k],open=!fold||foldOpen(f.k);
+function fullItem(f,{sections,na},ctx=SORT_CTX){
+  const counts=new Map(facetValues(f,ctx)),on=ctx.rule[f.k]||[],fold=!!FOLD_KEYS[f.k],open=!fold||foldOpen(f.k);
   const prefSet=new Set((areaChoices?.blocks||[]).flatMap(b=>b[1]));
   const chip=v=>{const n=counts.get(v)||0;
-    return `<button type="button" class="v sm${n?"":" zero"}${NA_VALUES.includes(v)?" na":""}" data-sv="${f.k}" data-val="${esc(v)}" aria-pressed="${on.includes(v)}" aria-label="${esc(v)} ${n}件"><i></i>${esc(prefSet.has(v)?prefShort(v):v)}${n?`<small>${n}</small>`:""}</button>`};
+    return `<button type="button" class="v sm${n?"":" zero"}${NA_VALUES.includes(v)?" na":""}" data-${ctx.attr}="${f.k}" data-val="${esc(v)}" aria-pressed="${on.includes(v)}" aria-label="${esc(v)} ${n}件"><i></i>${esc(prefSet.has(v)?prefShort(v):v)}${n?`<small>${n}</small>`:""}</button>`};
   const head=`<div class="sort-ihead"><h3>${f.t}</h3>${fold?`<button type="button" class="linkbtn" data-fold="${f.k}">${open?"たたむ":"すべて出す"}</button>`:""}</div>`;
-  if(!open)return `<div class="sort-item">${head}<div class="vals">${[...counts].map(([v])=>chip(v)).join("")||'<span class="sub">新着がありません</span>'}</div></div>`;
+  if(!open)return `<div class="sort-item">${head}<div class="vals">${[...counts].map(([v])=>chip(v)).join("")||`<span class="sub">${ctx.none}</span>`}</div></div>`;
   const known=new Set(sections.flatMap(s=>s.rows.flatMap(r=>r[1])));
   const row=(label,vals)=>`<div class="arow"><span class="alabel">${label}</span><div class="vals">${vals.map(chip).join("")}</div></div>`;
   const rest=[...new Set([...counts.keys(),na])].filter(v=>!known.has(v));
   return `<div class="sort-item">${head}
     ${sections.map(s=>`${s.title?`<div class="asub">${s.title}</div>`:""}${s.rows.map(([l,vals])=>row(l,vals)).join("")}`).join("")}
     ${rest.length?`${sections.length>1?'<div class="asub">その他</div>':""}${row(sections.length>1?"":"その他",rest)}`:""}</div>`;
+}
+// 値を件数つきで並べる項目(性別・撮影日の予定・種類)
+function valueItem(f,ctx=SORT_CTX){
+  const vals=facetValues(f,ctx),on=ctx.rule[f.k]||[];
+  return `<div class="sort-item"><h3>${f.t}</h3><div class="vals">${vals.length?vals.map(([v,n])=>`<button type="button" class="v${NA_VALUES.includes(v)?" na":""}" data-${ctx.attr}="${f.k}" data-val="${esc(v)}" aria-pressed="${on.includes(v)}"><i></i>${esc(v)}<small>${n}</small></button>`).join(""):`<span class="sub">${ctx.none}</span>`}</div></div>`;
 }
 // 点数の項目: 数字を入れると、その点数以下の新着が当てはまる。空欄なら使わない
 function scoreItem(f,news){
@@ -1146,12 +1191,10 @@ function renderSort(){
   const body=$("sortBody");if(!body)return;
   const rule=settings.sort_rule;
   const news=cases.filter(c=>c.review==="new"),hits=news.filter(c=>sortHit(c)).length;
-  const item=f=>{const vals=facetValues(f),on=rule[f.k]||[];
-    return `<div class="sort-item"><h3>${f.t}</h3><div class="vals">${vals.length?vals.map(([v,n])=>`<button type="button" class="v${NA_VALUES.includes(v)?" na":""}" data-sv="${f.k}" data-val="${esc(v)}" aria-pressed="${on.includes(v)}"><i></i>${esc(v)}<small>${n}</small></button>`).join(""):'<span class="sub">新着がありません</span>'}</div></div>`};
   const act=activePreset();
   body.innerHTML=`<div class="sort-presets">${settings.sort_presets.map((p,i)=>`<span class="preset${p===act?" on":""}"><button type="button" class="chip" data-preset="${i}" aria-pressed="${p===act}">${esc(p.name)}</button><button type="button" class="pdel" data-preset-del="${i}" aria-label="${esc(p.name)}を消す">×</button></span>`).join("")}
      ${act?"":`<button type="button" class="chip add" data-preset-save="1">＋ ${settings.sort_presets.length?"新しいプリセットとして保存":"今のチェックを保存"}</button>`}</div>
-   ${["依頼主","案件"].map(g=>`<div class="sort-grp">${g}</div>${usedFacets().filter(f=>f.g===g).map(f=>{if(f.num)return scoreItem(f,news);const fs=fullSections(f.k);return fs?fullItem(f,fs):item(f)}).join("")}`).join("")}
+   ${["依頼主","案件"].map(g=>`<div class="sort-grp">${g}</div>${usedFacets().filter(f=>f.g===g).map(f=>{if(f.num)return scoreItem(f,news);const fs=fullSections(f.k);return fs?fullItem(f,fs):valueItem(f)}).join("")}`).join("")}
    <div class="sort-auto" data-sort-auto="1"><span>開いたときに自動で仕分ける</span><button type="button" class="switch" role="switch" aria-checked="${!!settings.sort_auto}" aria-label="開いたときに自動で仕分ける"></button></div>
    <div class="sort-foot"><p class="sum">今の新着 ${news.length}件のうち <b>${hits}件</b> が当てはまります</p>
     <div class="actions"><button class="btn" data-close="1">閉じる</button><button type="button" class="btn del fill" data-sort-run="1" ${hits?"":"disabled"}>今すぐ削除予定にする(${hits}件)</button></div></div>`;
@@ -1209,6 +1252,90 @@ async function autoSort(){
   const ids=cases.filter(c=>c.review==="new"&&!c.touched&&sortHit(c)).map(c=>c.id);if(!ids.length)return;
   autoBusy=true;
   try{await moveToDelete(ids,`開いたので ${ids.length}件を削除予定にしました`)}finally{autoBusy=false}
+}
+// ---- 絞り込み ----
+// 今開いているタブのうち、チェックした値に当てはまるカードだけを一覧に出す(状態は変えない)。条件はすぐ保存する(どの端末でも同じ)
+// 項目同士は全部満たすとき(AND)、同じ項目の中はどれか1つに当てはまるとき(OR)。活動地域・年齢のように値をいくつも持つカードは、どれか1つにチェックがあれば当てはまる
+// 数字の項目: 点数は「この点数以上」、収集日は「集めてから◯日以内」「◯日以上前」(両方入れると、その間)
+const VIEW_NUMS={score:{t:"点以上",ph:"例: 20"},within:{t:"日以内",ph:"例: 3"},before:{t:"日以上前",ph:"例: 7"}};
+const collectedDays=c=>{const t=Date.parse(c.collected_at||c.created_at||"");return Number.isFinite(t)?(Date.now()-t)/864e5:null};
+const viewNum=(k,rule=settings.view_rule||{})=>{const n=parseFloat((rule[k]||[])[0]);return Number.isFinite(n)?n:null};
+function viewHit(c,rule=settings.view_rule||{}){
+  for(const f of usedFacets()){
+    if(f.num){const min=viewNum(f.k,rule);if(min!=null&&!(c.score!=null&&c.score>=min))return false;continue}
+    const on=rule[f.k];if(!on||!on.length)continue;
+    if(!facetVals(f,c).some(v=>on.includes(v)))return false;
+  }
+  const w=viewNum("within",rule),b=viewNum("before",rule);
+  if(w==null&&b==null)return true;
+  const d=collectedDays(c);if(d==null)return false;
+  return (w==null||d<=w)&&(b==null||d>=b);
+}
+// 使っている条件の数(項目ごとに1つと数える)
+const viewCount=()=>usedFacets().filter(f=>f.num?viewNum(f.k)!=null:(settings.view_rule?.[f.k]||[]).length).length+["within","before"].filter(k=>viewNum(k)!=null).length;
+const viewOn=()=>!state.rejected&&viewCount()>0;
+function numItem(title,keys,note){
+  const rule=settings.view_rule||{};
+  return `<div class="sort-item"><h3>${title}</h3>${keys.map(k=>`<label class="score-max"><input type="number" inputmode="numeric" step="1" ${k==="score"?'min="-999" max="999"':'min="0" max="60"'} data-view-num="${k}" value="${esc((rule[k]||[])[0]??"")}" placeholder="${VIEW_NUMS[k].ph}" aria-label="${title} ${VIEW_NUMS[k].t}">${VIEW_NUMS[k].t}</label>`).join("")}
+    <p class="sub" style="margin:4px 0 0">${note}</p></div>`;
+}
+function openView(){
+  presentSheet(`<div class="grab"></div><h2>絞り込み</h2><p class="sub" style="margin:0">今のタブのうち、チェックした値に当てはまるカードだけを出します。状態は変わりません</p><div id="viewBody"></div>`,"絞り込み");
+  renderView();
+}
+function renderView(){
+  const body=$("viewBody");if(!body)return;
+  const pool=VIEW_CTX.pool(),hits=pool.filter(c=>viewHit(c)).length,tab=TABS.find(t=>t.k===state.tab);
+  const item=f=>{if(f.num)return numItem(f.t,["score"],"空欄なら使いません");const fs=fullSections(f.k);return fs?fullItem(f,fs,VIEW_CTX):valueItem(f,VIEW_CTX)};
+  body.innerHTML=`${["依頼主","案件"].map(g=>`<div class="sort-grp">${g}</div>${usedFacets().filter(f=>f.g===g).map(item).join("")}`).join("")}
+   ${numItem("収集日",["within","before"],"集めてからの日数です。両方入れると、その間のカードが出ます。空欄なら使いません")}
+   <div class="sort-foot"><p class="sum">今の${tab.t} ${pool.length}件のうち <b class="ok">${hits}件</b> を出します</p>
+    <div class="actions"><button class="btn" data-close="1">閉じる</button><button type="button" class="btn" data-view-clear="1" ${viewCount()?"":"disabled"}>条件をすべて外す</button></div></div>`;
+}
+let viewSeq=0;
+async function saveView(rule){
+  const prev=settings,seq=++viewSeq;
+  settings={...settings,view_rule:rule};renderView();render();
+  try{const r=await postJson("/api/settings",{view_rule:rule});if(seq===viewSeq)settings=r}
+  catch(e){if(seq===viewSeq){settings=prev;renderView();render()}showToast(`保存できませんでした(${e.message})`)}
+}
+function toggleViewValue(k,v){
+  const rule={...(settings.view_rule||{})},on=new Set(rule[k]||[]);on.has(v)?on.delete(v):on.add(v);
+  if(on.size)rule[k]=[...on];else delete rule[k];
+  saveView(rule);
+}
+function setViewNum(k,raw){
+  const t=String(raw).trim(),n=parseFloat(t),rule={...(settings.view_rule||{})};
+  if(t===""||!Number.isFinite(n))delete rule[k];else rule[k]=[String(Math.round(n))];
+  if(JSON.stringify(rule[k]||null)===JSON.stringify((settings.view_rule||{})[k]||null)){renderView();return}
+  saveView(rule);
+}
+// まとめて選ぶ: 絞り込んだカードを選んで、まとめて状態を変える。選んでいる間は、カードをタップすると選ぶ/外す(詳細やスワイプは使わない)
+function startPick(){state.picking=true;state.picked=new Set();render()}
+function endPick(){state.picking=false;state.picked=new Set();render()}
+function togglePick(id){state.picked.has(id)?state.picked.delete(id):state.picked.add(id);render()}
+function pickAll(){const ids=filtered().map(c=>c.id),all=ids.length&&ids.every(id=>state.picked.has(id));state.picked=new Set(all?[]:ids);render()}
+async function setStates(ids,st){for(let i=0;i<ids.length;i+=300)await postJson("/api/reviews",{ids:ids.slice(i,i+300),state:st})}
+async function pickMove(st){
+  const shown=new Set(filtered().map(c=>c.id)),ids=[...state.picked].filter(id=>shown.has(id));if(!ids.length)return;
+  const prev=new Map(ids.map(id=>[id,cases.find(x=>x.id===id).review]));
+  document.querySelectorAll("[data-pick-move]").forEach(b=>b.disabled=true);
+  try{await setStates(ids,st)}
+  catch(e){document.querySelectorAll("[data-pick-move]").forEach(b=>b.disabled=false);showToast(`変えられませんでした(${e.message})`);load();return}
+  ids.forEach(id=>{const c=cases.find(x=>x.id===id);if(c){c.review=st;c.touched=true}});
+  endPick();
+  showToast(`${ids.length}件を${TABS.find(t=>t.k===st).t}にしました`,async()=>{
+    ids.forEach(id=>setLocalReview(id,prev.get(id)));render();
+    try{for(const p of new Set(prev.values()))await setStates(ids.filter(id=>prev.get(id)===p),p)}
+    catch(e){showToast(`元に戻せませんでした(${e.message})`);load()}
+  });
+}
+function renderPickBar(){
+  const bar=$("pickBar");bar.hidden=!state.picking;document.body.classList.toggle("picking",!!state.picking);
+  if(!state.picking){bar.innerHTML="";return}
+  const n=[...state.picked].length,shown=filtered(),all=shown.length&&shown.every(c=>state.picked.has(c.id));
+  bar.innerHTML=`<div class="pick-head"><b>${n}件を選択中</b><button type="button" class="chip" data-pick-all="1">${all?"全部外す":"全部選ぶ"}</button><button type="button" class="chip" data-pick-end="1">やめる</button></div>
+   <div class="pick-moves">${TABS.filter(t=>t.k!==state.tab).map(t=>`<button type="button" class="btn st-${t.k}" data-pick-move="${t.k}" ${n?"":"disabled"}>${t.k==="new"?"新着に戻す":t.t}</button>`).join("")}</div>`;
 }
 // ---- データベースの中身(見るだけ) ----
 const DB_LABEL={posts:"ポスト",judgments:"AI の判定と点数",reviews:"確認の状態",blacklist:"ブラックリスト",users:"ユーザー台帳",user_aliases:"読み間違いの別名",
@@ -1308,9 +1435,15 @@ function closeSheet(){if($("sheetRoot").hidden)return;$("sheetRoot").hidden=true
 document.addEventListener("click",ev=>{
   const rj=ev.target.closest("[data-rejected]");if(rj){state.rejected=rj.dataset.rejected==="1";if(!$("sheetRoot").hidden)closeSheet();load();window.scrollTo({top:0});return}
   const sv=ev.target.closest("[data-sv]");if(sv){toggleSortValue(sv.dataset.sv,sv.dataset.val);return}
+  const vv=ev.target.closest("[data-vv]");if(vv){toggleViewValue(vv.dataset.vv,vv.dataset.val);return}
+  if(ev.target.closest("[data-view-clear]")){if(confirm("絞り込みの条件をすべて外しますか")){state.picking=false;saveView({})}return}
+  if(ev.target.closest("[data-pick-start]")){startPick();return}
+  if(ev.target.closest("[data-pick-end]")){endPick();return}
+  if(ev.target.closest("[data-pick-all]")){pickAll();return}
+  const pm=ev.target.closest("[data-pick-move]");if(pm){pickMove(pm.dataset.pickMove);return}
   if(ev.target.closest("[data-sort-auto]")){saveSort({sort_auto:!settings.sort_auto});return}
   if(ev.target.closest("[data-sort-run]")){sortRun();return}
-  const fd=ev.target.closest("[data-fold]");if(fd){const k=fd.dataset.fold;try{localStorage.setItem(FOLD_KEYS[k],foldOpen(k)?"0":"1")}catch(e){}renderSort();return}
+  const fd=ev.target.closest("[data-fold]");if(fd){const k=fd.dataset.fold;try{localStorage.setItem(FOLD_KEYS[k],foldOpen(k)?"0":"1")}catch(e){}renderSort();renderView();return}
   const xu=ev.target.closest("[data-xuser]");if(xu){ev.preventDefault();openInX(`twitter://user?screen_name=${xu.dataset.xuser}`,xu.href);return}
   const xp=ev.target.closest("[data-xpost]");if(xp&&/^\d+$/.test(xp.dataset.xpost)){ev.preventDefault();openInX(`twitter://status?id=${xp.dataset.xpost}`,xp.href);return}
   const im=ev.target.closest("[data-img]");if(im){openViewer(Number(im.dataset.img));return}
@@ -1319,7 +1452,7 @@ document.addEventListener("click",ev=>{
   const cd=ev.target.closest("[data-cal-day]");if(cd){state.day=cd.dataset.calDay;closeSheet();window.scrollTo({top:0});return}
   const cm=ev.target.closest("[data-cal-move]");if(cm){const [yy,mm]=cm.dataset.calMove.split("-").map(Number);calView={y:yy,m:mm};renderCalendar();return}
   if(ev.target.closest("[data-day-clear]")){state.day=null;if(!$("sheetRoot").hidden)closeSheet();else render();return}
-  const tb=ev.target.closest("[data-tab]");if(tb){state.tab=tb.dataset.tab;save();render();window.scrollTo({top:0});return}
+  const tb=ev.target.closest("[data-tab]");if(tb){state.tab=tb.dataset.tab;state.picking=false;state.picked=new Set();save();render();window.scrollTo({top:0});return}
   const rv=ev.target.closest("[data-review]");if(rv){changeReview(rv);return}
   if(ev.target.closest("[data-black-open]")){$("blackBox").innerHTML=blackForm();$("blackForm").onsubmit=e=>{e.preventDefault();saveBlack(e.target)};
     $("blackBox").scrollIntoView({behavior:"smooth",block:"nearest"});return}
@@ -1336,7 +1469,7 @@ document.addEventListener("click",ev=>{
   const dbt=ev.target.closest("[data-dbt]");if(dbt){openTable(dbt.dataset.dbt);return}
   const dbm=ev.target.closest("[data-dbmore]");if(dbm){dbm.disabled=true;openTable(dbState.name,dbState.q,Number(dbm.dataset.dbmore));return}
   if(ev.target.closest("[data-close]")){closeSheet();return}
-  const c=ev.target.closest(".card");if(c&&!suppressClick)openSheet(c.dataset.id,c);
+  const c=ev.target.closest(".card");if(c&&!suppressClick){if(state.picking)togglePick(c.dataset.id);else openSheet(c.dataset.id,c)}
 });
 document.addEventListener("keydown",e=>{
   if(!$("viewer").hidden){const s=$("strip");
@@ -1382,6 +1515,7 @@ $("viewer").addEventListener("touchend",ev=>{
 $("viewer").addEventListener("touchcancel",()=>{vdrag=null;resetViewerDrag()});
 $("sort").addEventListener("change",e=>{state.sort=e.target.value;save();render()});
 document.addEventListener("change",e=>{const i=e.target.closest&&e.target.closest("[data-score-max]");if(i)setScoreMax(i.dataset.scoreMax,i.value)});
+document.addEventListener("change",e=>{const i=e.target.closest&&e.target.closest("[data-view-num]");if(i)setViewNum(i.dataset.viewNum,i.value)});
 // ---- スクロールの向きで上部をたたむ・広げる ----
 // たたむと上部が低くなってページの位置がずれるので、切り替えたあとの動きが落ち着くまでは向きを見ない(行ったり来たりしないように)
 let lastY=window.scrollY,moved=0,slimHold=0;
@@ -1481,6 +1615,7 @@ document.addEventListener("touchend",ptrEnd);
 document.addEventListener("touchcancel",()=>{ptr=null;ptrShow(0)});
 $("openSettings").addEventListener("click",openSettings);
 $("openSort").addEventListener("click",openSort);
+$("openView").addEventListener("click",openView);
 $("openCal").addEventListener("click",openCalendar);
 $("cost").addEventListener("click",openStats);
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&$("sheetRoot").hidden)load()});
