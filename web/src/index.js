@@ -33,7 +33,7 @@ const swipeFor = (tab, v) => (v === tab ? (tab === "new" ? "none" : "new") : v);
 const DEFAULT_SETTINGS = { swipe_right: "hold", swipe_left: "delete" };
 
 // ブラックリストの理由。spam=スパム / false=虚偽の申告 / photographer=被写体ではなくカメラマンだった / other=その他
-const ROLE_ORDER = ["reply_to", "quoted", "mention", "image"];
+const ROLE_ORDER = ["reply_to", "quoted", "mention", "image", "image_tree"];
 const BLACKLIST_REASONS = ["spam", "false", "photographer", "other"];
 const BLACKLIST_SKIP = "ブラックリスト"; // 判定前のポストに付ける除外理由(finder/store.py と同じ)
 const NOT_BLACKLISTED = "NOT EXISTS (SELECT 1 FROM blacklist b WHERE b.user_id = p.author_id)";
@@ -187,6 +187,7 @@ export async function getCase(db, id) {
     else merged.set(p.id, { ...p, roles: [p.role] });
   }
   // 添付画像(メンバー表など)から AI が読んだアカウント。台帳に同じ ID(username)の人がいればその人として出す
+  // ツリー(引用元・返信元)の画像から読んだ人は from: "tree" が付いていて、役割を image_tree にする
   const read = await db.prepare("SELECT accounts_json FROM image_reads WHERE post_id = ?").bind(id).first();
   const fromImage = parseJson(read && read.accounts_json, []).filter((a) => a && /^[A-Za-z0-9_]{1,15}$/.test(a.handle || ""));
   if (fromImage.length) {
@@ -202,15 +203,16 @@ export async function getCase(db, id) {
     const author = (row.username || "").toLowerCase();
     for (const a of fromImage) {
       const key = a.handle.toLowerCase();
+      const role = a.from === "tree" ? "image_tree" : "image";
       if (key === author) continue;
       const u = byName.get(key);
       const same = u ? merged.get(u.id) : [...merged.values()].find((m) => (m.username || "").toLowerCase() === key);
       if (same) {
-        if (!same.roles.includes("image")) same.roles.push("image");
+        if (!same.roles.includes(role)) same.roles.push(role);
         continue;
       }
       if (u && u.id === row.author_id) continue;
-      const entry = u ? { ...u, roles: ["image"] } : { id: null, username: a.handle, name: a.name || null, roles: ["image"] };
+      const entry = u ? { ...u, roles: [role] } : { id: null, username: a.handle, name: a.name || null, roles: [role] };
       merged.set(u ? u.id : `image:${key}`, entry);
     }
   }
