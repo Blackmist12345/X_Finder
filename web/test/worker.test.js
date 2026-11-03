@@ -348,6 +348,25 @@ test("画像から読んだアカウントも関係するアカウントに並�
   assert.deepEqual((await getCase(db, "2")).people, []);
 });
 
+test("画像から読んだ人は、調べたフォロワー数・アイコンや「見つかりません」を出す", async () => {
+  const sql = (q, ...a) => db.raw.prepare(q).run(...a);
+  sql(`INSERT OR REPLACE INTO image_reads (post_id, read_at, images, accounts_json) VALUES ('1', 'x', 1, ?)`,
+    JSON.stringify([{ handle: "Looked_Up", name: "" }, { handle: "typo_x", name: "読み違い" }, { handle: "frozen", name: "" }]));
+  sql(`INSERT INTO users (id, username, name, followers, following, profile_image, status, first_seen_at, last_seen_at)
+       VALUES ('900', 'looked_up', '調べた人', 443, 296, 'https://pbs.twimg.com/p.jpg', 'confirmed', 'x', 'x')`);
+  sql(`INSERT INTO handle_lookups (handle, looked_at, result, user_id) VALUES ('looked_up', 'x', 'ok', '900'), ('typo_x', 'x', 'not_found', NULL),
+       ('frozen', 'x', 'unavailable', NULL)`);
+  try {
+    const c = await getCase(db, "1");
+    assert.deepEqual(c.people.filter((p) => p.username !== "friend").map((p) => [p.username, p.followers ?? null, p.following ?? null, p.profile_image ?? null, p.lookup ?? null]), [
+      ["looked_up", 443, 296, "https://pbs.twimg.com/p.jpg", null], ["typo_x", null, null, null, "not_found"], ["frozen", null, null, null, "unavailable"]]);
+  } finally {
+    sql(`DELETE FROM image_reads WHERE post_id = '1'`);
+    sql(`DELETE FROM users WHERE id = '900'`);
+    sql(`DELETE FROM handle_lookups`);
+  }
+});
+
 test("関係するアカウントは同じ人を 1 回だけ出し、投稿者本人は出さない", async () => {
   const sql = (q) => db.raw.prepare(q).run();
   sql(`INSERT INTO post_users (post_id, user_id, role) VALUES ('1', '300', 'reply_to'), ('1', '100', 'reply_to'), ('1', '100', 'mention')`);

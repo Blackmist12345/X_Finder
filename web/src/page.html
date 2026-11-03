@@ -134,6 +134,7 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .pill{font-size:11.5px;border-radius:6px;padding:2px 7px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
 .pill.type{background:var(--accent-soft);color:var(--accent);font-weight:500}
 .pill.warn{background:var(--warn-soft);color:var(--warn)}
+.warn-text{color:var(--warn)}
 .pill.gone{background:var(--surface-2);color:var(--muted);border:1px dashed var(--muted)}
 .ctag{display:inline-block;font-size:11px;line-height:1.5;border-radius:5px;padding:0 5px;margin-left:4px;background:var(--surface-2);color:var(--muted);vertical-align:1px;white-space:nowrap}
 .ctag.minor{background:var(--rec-soft);color:var(--rec);font-weight:600}
@@ -419,6 +420,7 @@ header.top.slim .tab .c{font-size:17px}
 .person{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px;min-width:0}
 .person .who{min-width:0;flex:1}
 .person .id{color:var(--muted);font-size:12.5px;overflow-wrap:anywhere}
+.person .id .nw{white-space:nowrap}
 .breakdown{display:grid;grid-template-columns:1fr auto;gap:4px 10px;font-size:13px;margin:0}
 .breakdown dd{margin:0;text-align:right;font-family:var(--font-num);font-size:15px;font-variant-numeric:tabular-nums}
 .breakdown .total{border-top:1px solid var(--line);padding-top:4px;font-weight:700}
@@ -703,10 +705,12 @@ function card(c){
     <span class="ff"><span class="num">${ffText(c)}</span><small>FF率</small></span></div>
   </button></div>`;
 }
+// 画像から読んだ ID を調べた結果(finder/account_step.py)。いない ID は画像の読み違いのことが多い
+const PERSON_LOOKUP={not_found:"見つかりません",unavailable:"凍結など"};
 function person(p){
   const u=safeUser(p.username);
   return `<${u?`a class="person link" href="https://x.com/${u}" data-xuser="${u}"`:'div class="person"'}>${ava(p)}<div class="who"><div>${esc(p.name||p.username||"")} <span class="sub">${(p.roles||[p.role]).map(r=>ROLE[r]||"").filter(Boolean).join("・")}</span></div>
-    <div class="id">@${esc(p.username||"")}${p.followers!=null?` ・ フォロワー <span class="num">${fmt(p.followers)}</span> ・ FF率 <span class="num">${ffText(p)}</span>`:""}</div></div>${u?'<span class="go">X で開く ›</span>':""}</${u?"a":"div"}>`;
+    <div class="id">@${esc(p.username||"")}${p.followers!=null?` ・ <span class="nw">フォロワー <span class="num">${fmt(p.followers)}</span></span> ・ <span class="nw">フォロー <span class="num">${fmt(p.following)}</span></span> ・ <span class="nw">FF率 <span class="num">${ffText(p)}</span></span>`:p.lookup?` ・ <span class="warn-text">${PERSON_LOOKUP[p.lookup]||""}</span>`:""}</div></div>${u?'<span class="go">X で開く ›</span>':""}</${u?"a":"div"}>`;
 }
 // ---- ブラックリスト ----
 const BLACK_REASON={spam:"スパム",false:"虚偽の申告",photographer:"カメラマンだった",other:"その他"};
@@ -815,7 +819,7 @@ function sheetHtml(c,full){
     ${mediaHtml(media,0)}</div>`}
    ${detail.length?`<div class="sec"><h3>点数の内訳</h3><dl class="breakdown">${detail.map(d=>`<dt>${esc(d.label)}</dt><dd>${d.points>0?"+":""}${Math.round(d.points)}</dd>`).join("")}<dt class="total">合計</dt><dd class="total">${Math.round(c.score)}</dd></dl></div>`:""}
    <div class="sec"><h3>クライアント</h3><div class="people"><${cu?`a class="person link" href="https://x.com/${cu}" data-xuser="${cu}"`:'div class="person"'}>${ava(c)}<div class="who"><div>${esc(c.name||"")}</div>
-    <div class="id">@${esc(c.username||"")} ・ フォロワー <span class="num">${fmt(c.followers)}</span> ・ フォロー <span class="num">${fmt(c.following)}</span> ・ FF率 <span class="num">${ffText(c)}</span></div>
+    <div class="id">@${esc(c.username||"")} ・ <span class="nw">フォロワー <span class="num">${fmt(c.followers)}</span></span> ・ <span class="nw">フォロー <span class="num">${fmt(c.following)}</span></span> ・ <span class="nw">FF率 <span class="num">${ffText(c)}</span></span></div>
     ${c.age||c.gender||(c.areas||[]).length?`<div class="id">${c.gender?`性別: ${esc(c.gender)} ・ `:""}${c.age?`年齢: ${esc(c.age.label)}${c.age.minor===true?"(未成年)":c.age.minor===false?"(成人)":""}`:"年齢: 不明"} ・ 活動地域: ${(c.areas||[]).length?esc(c.areas.join("・")):"不明"}<span class="sub">(${profileFrom(c)})</span></div>`:""}
     ${c.location?`<div class="id">地域: ${esc(c.location)}</div>`:""}${c.description?`<div class="id">${esc(c.description)}</div>`:""}</div>${cu?'<span class="go">X で開く ›</span>':""}</${cu?"a":"div"}></div>
     ${c.blacklist?`<p class="sub" style="color:var(--rec)">🚫 ブラックリストに登録済み(${esc(BLACK_REASON[c.blacklist.reason]||"")})</p>`:""}</div>
@@ -1052,7 +1056,7 @@ const HELP=[
   <li><b>日付</b>: 月のカレンダーが開き、日ごとに「その日が撮影日の案件の数」(青い数字、今のタブで数える)と Google カレンダーの予定(休みは緑)が出ます。日をタップすると、その日が撮影日の案件だけを一覧に出します。上の「解除」で戻ります。予定は今日から120日先まで出ます。</li></ul>`],
  ["案件の詳細",`<p>カードをタップすると詳細が開きます。本文をタップすると X アプリでそのポストが開きます。一番上で下に引っぱると閉じます。</p>
   <p>下のボタンで「確認中」「連絡中」「受注中」「削除予定」にできます。その状態のときにもう一度押すと外れて新着に戻ります。スパム・虚偽の申告・カメラマンだった人などは「ブラックリストにいれる」で、これまでとこれからのポストを出さず、AI の判定にもかけません(設定の「ブラックリスト」から解除できます)。</p>
-  <p>場所(都道府県)は、本文 → Notion の「イベントの一覧」→ 添付画像 の順に判断し、本文以外から判断したときはカードに小さく出ます。依頼主のプロフィールからは決めません(分からないときは「場所不明」)。添付画像(メンバー表など)から読んだ X のアカウントは「関係するアカウント」に「画像から」と出ます。引用元・返信元(ツリー)の画像から読んだ人は「ツリーの画像から」です。</p>
+  <p>場所(都道府県)は、本文 → Notion の「イベントの一覧」→ 添付画像 の順に判断し、本文以外から判断したときはカードに小さく出ます。依頼主のプロフィールからは決めません(分からないときは「場所不明」)。添付画像(メンバー表など)から読んだ X のアカウントは「関係するアカウント」に「画像から」と出ます。引用元・返信元(ツリー)の画像から読んだ人は「ツリーの画像から」です。画像から読んだ人のフォロワー数・フォロー数・アイコンは、読んだあとの収集で TwitterAPI.io から取ります(1人 約0.03円、7日以内に取った人は取り直しません)。その ID の人がいないときは「見つかりません」(画像の読み違いのことが多い)、凍結などのときは「凍結など」と出ます。</p>
   <p>依頼主の年齢・活動地域・性別は、プロフィールに書いてある書き方(18↓、30↑、成人済み、関西、♀ など)から読みます。プロフィールに書いてないときは、プロフィールのリンク先(Litlink など)からも読み、「リンク先から」と出ます。</p>`],
  ["スワイプ",`<p>カードを左右にスワイプすると、設定で選んだ状態を付けられます。割り当ては状態タブごとに決められます(設定の「スワイプ(状態タブごと)」)。初期値は右=受注中、左=削除予定です(受注中のタブの右と、削除予定のタブの左は「新着に戻す」)。</p>
   <ul><li>そのタブの状態は選べません。代わりに「新着に戻す」を選べます(新着のタブにはありません)。</li>
