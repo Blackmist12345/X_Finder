@@ -125,6 +125,17 @@ CREATE TABLE IF NOT EXISTS image_reads (
   error TEXT
 );
 
+-- 画像から読んだ ID(handle)を TwitterAPI.io の Get User Info で調べた記録(finder/account_step.py)。1 ID = 1 行(小文字)。
+-- result = ok(台帳 users に保存した)/ not_found(その ID の人がいない。画像の読み違いのことが多い)/ unavailable(凍結など)。
+-- 調べてから 7 日たち、そのあと別の案件の画像にまた出てきたときだけ調べ直す。
+CREATE TABLE IF NOT EXISTS handle_lookups (
+  handle TEXT PRIMARY KEY,
+  looked_at TEXT NOT NULL,
+  result TEXT NOT NULL,
+  user_id TEXT,
+  note TEXT
+);
+
 -- どのポストに、誰が、どの立場で出てきたか(client / quoted / reply_to / mention)。
 CREATE TABLE IF NOT EXISTS post_users (
   post_id TEXT NOT NULL,

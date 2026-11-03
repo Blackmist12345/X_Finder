@@ -54,6 +54,8 @@ const TABLES_DDL = [
     user_id TEXT PRIMARY KEY, urls_json TEXT NOT NULL, updated_at TEXT NOT NULL, fetched_at TEXT, page_url TEXT, found_json TEXT, error TEXT)`,
   // 削除ポスト確認の結果(書くのは収集の方。元のポストが見られなくなったら gone_at が入る)
   `CREATE TABLE IF NOT EXISTS post_checks (post_id TEXT PRIMARY KEY, checked_at TEXT NOT NULL, gone_at TEXT)`,
+  // 画像から読んだ ID を調べた記録(書くのは収集の方。いない ID・凍結などを詳細に出す)
+  `CREATE TABLE IF NOT EXISTS handle_lookups (handle TEXT PRIMARY KEY, looked_at TEXT NOT NULL, result TEXT NOT NULL, user_id TEXT, note TEXT)`,
 ];
 let tablesReady = false;
 async function ensureTables(db) {
@@ -200,6 +202,16 @@ export async function getCase(db, id) {
       .bind(...handles)
       .all();
     const byName = new Map(known.map((u) => [u.username.toLowerCase(), u]));
+    // 台帳にいない人は、調べた結果(いない ID・凍結など)があれば出す(finder/account_step.py)
+    const { results: looked } = await db
+      .prepare(
+        `SELECT handle, result FROM handle_lookups
+         WHERE result IN ('not_found', 'unavailable') AND handle IN (${handles.map(() => "?").join(", ")})`,
+      )
+      .bind(...handles)
+      .all()
+      .catch(() => ({ results: [] }));
+    const lookup = new Map(looked.map((l) => [l.handle, l.result]));
     const author = (row.username || "").toLowerCase();
     for (const a of fromImage) {
       const key = a.handle.toLowerCase();
@@ -212,7 +224,9 @@ export async function getCase(db, id) {
         continue;
       }
       if (u && u.id === row.author_id) continue;
-      const entry = u ? { ...u, roles: [role] } : { id: null, username: a.handle, name: a.name || null, roles: [role] };
+      const entry = u
+        ? { ...u, name: a.name || u.name, roles: [role] } // 画像に書かれた名前(キャラ名など)があればそちらを出す
+        : { id: null, username: a.handle, name: a.name || null, roles: [role], lookup: lookup.get(key) || null };
       merged.set(u ? u.id : `image:${key}`, entry);
     }
   }
