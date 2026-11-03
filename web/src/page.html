@@ -422,13 +422,11 @@ header.top.slim .tab .c{font-size:17px}
 .person .id{color:var(--muted);font-size:12.5px;overflow-wrap:anywhere}
 .person .id .nw{white-space:nowrap}
 /* フォロワー・フォロー・FF率は、どの行でも同じ位置に縦にそろえる(数字は右寄せ、見出しは列の上に 1 回だけ) */
-.person .id.stats{display:grid;grid-template-columns:minmax(0,1fr) 4.4em 3.8em 3em;column-gap:6px;align-items:baseline;overflow-wrap:normal}
+.person .id.stats{display:grid;grid-template-columns:minmax(0,1fr) 4.4em 3.8em 3em;column-gap:6px;align-items:end;overflow-wrap:normal}
 .person .id.stats>span{white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
 .person .id.stats>span:first-child{text-align:left;overflow:hidden;text-overflow:ellipsis}
 .person .id.stats>.warn-text{grid-column:2 / -1}
-.person.colhead{border:0;padding:0 10px;margin-bottom:-4px}
-.person.colhead .ava,.person.colhead .go{visibility:hidden;height:0}
-.person.colhead .id.stats>span{font-size:11px}
+.person .id.stats small{display:block;font-size:10px;line-height:1.2;opacity:.8}
 .breakdown{display:grid;grid-template-columns:1fr auto;gap:4px 10px;font-size:13px;margin:0}
 .breakdown dd{margin:0;text-align:right;font-family:var(--font-num);font-size:15px;font-variant-numeric:tabular-nums}
 .breakdown .total{border-top:1px solid var(--line);padding-top:4px;font-weight:700}
@@ -715,12 +713,11 @@ function card(c){
 }
 // 画像から読んだ ID を調べた結果(finder/account_step.py)。いない ID は画像の読み違いのことが多い
 const PERSON_LOOKUP={not_found:"見つかりません",unavailable:"凍結など"};
-// @ID と、フォロワー・フォロー・FF率の列(colHead の見出しと同じ位置)。数字がない人は理由(見つかりません など)を列の場所に出す
+// @ID と、フォロワー・フォロー・FF率の列(どの行でも同じ位置。数字の上に小さく見出し)。数字がない人は理由(見つかりません など)を列の場所に出す
 function statsLine(username,u,lookup){
-  const cols=u?`<span class="num">${fmt(u.followers)}</span><span class="num">${fmt(u.following)}</span><span class="num">${ffText(u)}</span>`
+  const cols=u?`<span><small>フォロワー</small><span class="num">${fmt(u.followers)}</span></span><span><small>フォロー</small><span class="num">${fmt(u.following)}</span></span><span><small>FF率</small><span class="num">${ffText(u)}</span></span>`
     :`<span class="${lookup?"warn-text":""}">${lookup?PERSON_LOOKUP[lookup]||"":""}</span>`;
   return `<div class="id stats"><span>@${esc(username||"")}</span>${cols}</div>`}
-function colHead(){return `<div class="person colhead" aria-hidden="true"><span class="ava"></span><div class="who"><div class="id stats"><span></span><span>フォロワー</span><span>フォロー</span><span>FF率</span></div></div><span class="go">X で開く ›</span></div>`}
 function person(p){
   const u=safeUser(p.username);
   return `<${u?`a class="person link" href="https://x.com/${u}" data-xuser="${u}"`:'div class="person"'}>${ava(p)}<div class="who"><div>${esc(p.name||p.username||"")} <span class="sub">${(p.roles||[p.role]).map(r=>ROLE[r]||"").filter(Boolean).join("・")}</span></div>
@@ -832,12 +829,12 @@ function sheetHtml(c,full){
     ${c.quoted_text?postBox(c.quoted_text,safeX(c.quoted_url),c.quoted_id,"引用元のポスト"):""}
     ${mediaHtml(media,0)}</div>`}
    ${detail.length?`<div class="sec"><h3>点数の内訳</h3><dl class="breakdown">${detail.map(d=>`<dt>${esc(d.label)}</dt><dd>${d.points>0?"+":""}${Math.round(d.points)}</dd>`).join("")}<dt class="total">合計</dt><dd class="total">${Math.round(c.score)}</dd></dl></div>`:""}
-   <div class="sec"><h3>クライアント</h3><div class="people">${colHead()}<${cu?`a class="person link" href="https://x.com/${cu}" data-xuser="${cu}"`:'div class="person"'}>${ava(c)}<div class="who"><div>${esc(c.name||"")}</div>
+   <div class="sec"><h3>クライアント</h3><div class="people"><${cu?`a class="person link" href="https://x.com/${cu}" data-xuser="${cu}"`:'div class="person"'}>${ava(c)}<div class="who"><div>${esc(c.name||"")}</div>
     ${statsLine(c.username,c,null)}
     ${c.age||c.gender||(c.areas||[]).length?`<div class="id">${c.gender?`性別: ${esc(c.gender)} ・ `:""}${c.age?`年齢: ${esc(c.age.label)}${c.age.minor===true?"(未成年)":c.age.minor===false?"(成人)":""}`:"年齢: 不明"} ・ 活動地域: ${(c.areas||[]).length?esc(c.areas.join("・")):"不明"}<span class="sub">(${profileFrom(c)})</span></div>`:""}
     ${c.location?`<div class="id">地域: ${esc(c.location)}</div>`:""}${c.description?`<div class="id">${esc(c.description)}</div>`:""}</div>${cu?'<span class="go">X で開く ›</span>':""}</${cu?"a":"div"}></div>
     ${c.blacklist?`<p class="sub" style="color:var(--rec)">🚫 ブラックリストに登録済み(${esc(BLACK_REASON[c.blacklist.reason]||"")})</p>`:""}</div>
-   ${c.people&&c.people.length?`<div class="sec"><h3>関係するアカウント</h3><div class="people">${c.people.some(p=>p.followers!=null)?colHead():""}${c.people.map(person).join("")}</div></div>`:""}
+   ${c.people&&c.people.length?`<div class="sec"><h3>関係するアカウント</h3><div class="people">${c.people.map(person).join("")}</div></div>`:""}
    <div class="black" id="blackBox" data-uid="${esc(c.author_id||"")}" data-name="${esc(c.username?"@"+c.username:(c.name||"この人"))}"></div>
    ${full?"":'<p class="sub" id="sheetLoading" style="text-align:center">くわしい情報を読み込み中…</p>'}
    <div class="detail-actions" id="reviewActions" data-id="${esc(c.id)}">${reviewButtons(c.review,full?c:{...c,blacklist:null})}</div>`;
