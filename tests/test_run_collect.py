@@ -70,3 +70,36 @@ def test_blacklisted_author_is_skipped_before_judging(wired, monkeypatch, make_t
     assert posts["1"]["status"] == "new"
     assert posts["2"] == {"id": "2", "status": "skipped", "skip_reason": "ブラックリスト"}
     assert "ブラックリスト 1件" in summary.read_text()
+
+
+def test_zero_streak_warns_and_fails_once(wired, monkeypatch, make_tweet):
+    d1, summary = wired
+    monkeypatch.setenv("MODE", "production")
+    clock = {"now": 1_800_000_000}
+    monkeypatch.setattr(run_collect.time, "time", lambda: clock["now"])
+
+    def zero(*a, diag=None, **k):
+        if diag is not None:
+            diag.append("1ページ目: HTTP 200・tweets 0件・次のページ なし")
+        return [], 1
+
+    monkeypatch.setattr(collect, "fetch", zero)
+    run_collect.main()  # 1時間前から0件(初回)
+    assert "検索の返事: 1ページ目: HTTP 200・tweets 0件" in summary.read_text()
+    assert "1件も取れていません" not in summary.read_text()
+
+    clock["now"] += 6 * 3600
+    with pytest.raises(SystemExit):  # 6時間を超えたので1回だけ失敗にしてメールを出す
+        run_collect.main()
+    assert "1件も取れていません" in summary.read_text()
+    assert d1.query("SELECT status FROM runs ORDER BY id DESC LIMIT 1")[0]["status"] == "ok"
+    assert d1.get_meta(run_collect.WINDOW_KEY) is not None
+
+    clock["now"] += 600
+    run_collect.main()  # 2回目からは警告だけで成功
+
+    monkeypatch.setattr(collect, "fetch", lambda *a, **k: ([make_tweet("1", text="カメラマン募集")], 1))
+    clock["now"] += 600
+    run_collect.main()  # 取れたら数え直す
+    assert d1.get_meta(run_collect.ZERO_SINCE_KEY) is None
+    assert d1.get_meta(run_collect.ZERO_ALERTED_KEY) is False
