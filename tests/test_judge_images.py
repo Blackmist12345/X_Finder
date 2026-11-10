@@ -92,3 +92,55 @@ def test_items_from_db_carry_post_and_tree_images(d1, make_tweet, monkeypatch):
     assert item["media"] == [img("own")]
     assert item["tree"][0]["media"] == [img("root")]
     assert [u for _, u in judge.image_list(item)] == [img("own"), img("root")]
+
+
+def test_bad_batch_is_skipped_and_reported_as_failed(monkeypatch):
+    items = [{"id": str(i), "text": "募集"} for i in range(4)]
+    replies = iter([
+        judge.JudgeParseError("配列ではない", 100, 10),               # 1回目(4件まとめて)は形が読めない
+        ([{"id": "0"}], 5, 1), ([{"id": "1"}], 5, 1),                  # 1件ずつ聞き直し
+        ('[{"id": "2"}]', 5, 1),                                       # 文字列の配列も読める
+        judge.JudgeParseError("配列ではない", 5, 1),                    # 3 は聞き直しても読めない
+    ])
+
+    def fake_call(api_key, model, prompt, session=None):
+        r = next(replies)
+        if isinstance(r, Exception):
+            raise r
+        out, t_in, t_out = r
+        if isinstance(out, str):
+            out = __import__("json").loads(out)
+        return out, t_in, t_out
+
+    monkeypatch.setattr(judge, "call", fake_call)
+    failed = []
+    results, t_in, t_out, calls = judge.judge(items, "key", "claude-haiku-5-5", [], 20, failed=failed)
+    assert sorted(results) == ["0", "1", "2"] and failed == ["3"]
+    assert calls == 5 and t_in == 120 and t_out == 14
+
+
+def test_call_reads_results_given_as_json_text(monkeypatch):
+    monkeypatch.setattr(judge, "_call_claude", lambda s, k, m, p: ('[{"id": "1"}]', 3, 2))
+    assert judge.call("key", "claude-haiku-5-5", "p") == ([{"id": "1"}], 3, 2)
+    monkeypatch.setattr(judge, "_call_claude", lambda s, k, m, p: ("だめ", 3, 2))
+    try:
+        judge.call("key", "claude-haiku-5-5", "p")
+    except judge.JudgeParseError as e:
+        assert (e.tokens_in, e.tokens_out) == (3, 2)
+    else:
+        raise AssertionError("JudgeParseError が出るはず")
+
+
+def test_too_many_bad_batches_stop_asking(monkeypatch):
+    items = [{"id": str(i), "text": "募集"} for i in range(10)]
+    count = {"n": 0}
+
+    def always_bad(*a, **k):
+        count["n"] += 1
+        raise judge.JudgeParseError("配列ではない", 1, 1)
+
+    monkeypatch.setattr(judge, "call", always_bad)
+    failed = []
+    results, _, _, calls = judge.judge(items, "key", "claude-haiku-5-5", [], 2, failed=failed)
+    assert results == {} and sorted(failed, key=int) == [str(i) for i in range(10)]
+    assert count["n"] == judge.MAX_BATCH_ERRORS == calls

@@ -18,6 +18,17 @@ class JudgeError(Exception):
     pass
 
 
+class JudgeParseError(JudgeError):
+    """AI は答えたが、形が読めなかった(払ったトークン数を持つ)。その回だけ捨てて続けられる。"""
+
+    def __init__(self, message, tokens_in=0, tokens_out=0):
+        super().__init__(message)
+        self.tokens_in, self.tokens_out = tokens_in, tokens_out
+
+
+MAX_BATCH_ERRORS = 3  # 形の読めない返事がこれだけ続いたら、その回の残りは聞かない(費用が膨らまないように)
+
+
 GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 CLAUDE_API = "https://api.anthropic.com/v1/messages"
 DEFAULT_MODEL = "claude-haiku-5-5"
@@ -387,24 +398,44 @@ def call(api_key, model, prompt, session=None):
     s = session or requests
     fn = _call_claude if provider(model) == "claude" else _call_gemini
     result, tokens_in, tokens_out = fn(s, api_key, model, prompt)
+    if isinstance(result, str):  # 配列を JSON の文字列にして返してくることがある
+        try:
+            result = json.loads(result)
+        except ValueError:
+            pass
+    if isinstance(result, dict) and isinstance(result.get("results"), list):
+        result = result["results"]
     if not isinstance(result, list):
-        raise JudgeError("AI の返事が配列ではありませんでした")
+        raise JudgeParseError(f"AI の返事が配列ではありませんでした(入力 {tokens_in}・出力 {tokens_out} トークン)",
+                              tokens_in, tokens_out)
     return result, tokens_in, tokens_out
 
 
-def judge(items, api_key, model, works, batch_size, session=None, emojis=None, events=None):
+def judge(items, api_key, model, works, batch_size, session=None, emojis=None, events=None, failed=None):
     """items をまとめて判定する。(結果 {id: 判定}, 入力トークン, 出力トークン, 呼び出し回数) を返す。
 
     画像のないポストは batch_size 件ずつ、画像のあるポストは画像を取ってきて IMAGE_BATCH 件ずつ(画像の合計が
     MAX_REQUEST_BYTES を超えるならもっと少なく)判定する。取れなかった画像は外す。
     AI が返し忘れたポストは 1 件ずつ聞き直す。それでも返らなければ結果に入れない。
+    返事の形が読めなかった回のポストは結果に入れず、failed(リスト)に id を足す(呼び出し側は判定待ちのまま残す)。
     """
     s = session or requests
     results, tokens_in, tokens_out, calls = {}, 0, 0, 0
+    errors, bad = [], set()
 
     def run(batch, images=None):
         nonlocal tokens_in, tokens_out, calls
-        out, t_in, t_out = call(api_key, model, build_prompt(batch, works, emojis, events, images), s)
+        if len(errors) >= MAX_BATCH_ERRORS:
+            bad.update(it["id"] for it in batch)
+            return
+        try:
+            out, t_in, t_out = call(api_key, model, build_prompt(batch, works, emojis, events, images), s)
+        except JudgeParseError as e:
+            # 1 回分の失敗で全体を捨てない(払った分は費用に数え、そのポストはあとで 1 件ずつ聞き直す)
+            tokens_in, tokens_out, calls = tokens_in + e.tokens_in, tokens_out + e.tokens_out, calls + 1
+            errors.append(str(e))
+            bad.update(it["id"] for it in batch)
+            return
         tokens_in, tokens_out, calls = tokens_in + t_in, tokens_out + t_out, calls + 1
         wanted = {it["id"] for it in batch}
         for r in out:
@@ -437,7 +468,10 @@ def judge(items, api_key, model, works, batch_size, session=None, emojis=None, e
     if batch:
         run(batch, images)
     for it in [it for it in items if it["id"] not in results]:
+        bad.discard(it["id"])
         run([it], {it["id"]: load(it)} if image_list(it) else None)
+    if failed is not None:
+        failed.extend(i for i in bad if i not in results)
     return results, tokens_in, tokens_out, calls
 
 

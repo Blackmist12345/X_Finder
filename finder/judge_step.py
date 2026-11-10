@@ -228,14 +228,15 @@ def run(d1, config, production, api_keys, tweets=None, decisions=None, session=N
         return lines + [f"- 判定待ち {len(items)}件。{batch_size}件たまるか、いちばん古いポストが{max_wait}分待ったら判定します"]
 
     try:
+        failed = []
         results, t_in, t_out, calls = judge.judge(items, api_key, model, point_works(config), batch_size, session,
-                                                     config.get("emojis"), config.get("events"))
+                                                     config.get("emojis"), config.get("events"), failed=failed)
     except judge.JudgeError as e:
         return lines + [f"- ⚠️ 判定に失敗しました。ポストは判定待ちのまま、次の実行でもう一度判定します。{e}"]
 
     usd = judge.cost_usd(model, t_in, t_out)
     evaluated = evaluate(items, results, config)
-    missing = [it["id"] for it in items if it["id"] not in results]
+    missing = [it["id"] for it in items if it["id"] not in results and it["id"] not in failed]
     event_lines = []
     if production:
         save(d1, evaluated, missing, model)
@@ -247,7 +248,8 @@ def run(d1, config, production, api_keys, tweets=None, decisions=None, session=N
     rate = basic["為替レート(円/ドル)"]
     lines += [
         f"- 判定: {len(items)}件(対象 {len(kept)}件 / 対象外 {sum(reasons.values())}件"
-        + (f" / 返事なし {len(missing)}件" if missing else "") + ")",
+        + (f" / 返事なし {len(missing)}件" if missing else "")
+        + (f" / 返事の形が読めず判定待ちに戻した {len(failed)}件" if failed else "") + ")",
         f"- AI: {model}、呼び出し {calls}回、{t_in + t_out:,}トークン、費用 ${usd:.4f}(約{usd * rate:.2f}円)",
     ]
     if reasons:
