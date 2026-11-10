@@ -68,3 +68,34 @@ def test_fetch_error_raises_so_window_is_not_advanced(monkeypatch):
         assert "401" in str(e)
     else:
         raise AssertionError("CollectError が出るはず")
+
+
+def test_fetch_records_what_came_back(monkeypatch):
+    monkeypatch.setattr(collect.time, "sleep", lambda s: None)
+    s = FakeSession([FakeResponse(200, {"tweets": [], "has_next_page": False, "status": "success"})])
+    diag = []
+    tweets, calls = collect.fetch("key", "q", 0, 1, session=s, diag=diag)
+    assert tweets == [] and calls == 1
+    assert diag == ["1ページ目: HTTP 200・tweets 0件・次のページ なし・status=success"]
+
+
+def test_fetch_error_inside_200_raises(monkeypatch):
+    monkeypatch.setattr(collect.time, "sleep", lambda s: None)
+    for body in ({"status": "error", "msg": "query too long"}, {"msg": "account suspended"}):
+        s = FakeSession([FakeResponse(200, body)])
+        diag = []
+        try:
+            collect.fetch("key", "q", 0, 1, session=s, diag=diag)
+        except collect.CollectError as e:
+            assert body["msg"] in str(e)
+        else:
+            raise AssertionError("CollectError が出るはず")
+        assert body["msg"] in diag[0]
+
+
+def test_fetch_missing_tweets_without_message_is_zero(monkeypatch):
+    monkeypatch.setattr(collect.time, "sleep", lambda s: None)
+    s = FakeSession([FakeResponse(200, {"has_next_page": False})])
+    diag = []
+    assert collect.fetch("key", "q", 0, 1, session=s, diag=diag) == ([], 1)
+    assert "tweets なし" in diag[0] and "返事のキー: has_next_page" in diag[0]

@@ -18,6 +18,9 @@ from finder.notion import Notion
 OVERLAP_SECONDS = 180       # 前回の終わりから 3 分重ねて取る(取りこぼし防止。重なった分も課金されるので短めに)
 MAX_WINDOW_HOURS = 48       # 長く止まっていた場合の上限
 WINDOW_KEY = "last_window_end"
+ZERO_SINCE_KEY = "zero_fetch_since"   # 0件が続き始めた時刻(取れたら消す)
+ZERO_ALERTED_KEY = "zero_fetch_alerted"  # 0件が続いていることを知らせたか(1回だけ失敗にしてメールを出す)
+ZERO_ALERT_HOURS = 6        # 夜でもふつうはこの時間までに1件は取れる
 JST = timezone(timedelta(hours=9))
 
 
@@ -85,13 +88,17 @@ def main():
     head = [title, "", f"- 検索時間枠: {jst(since_ts)} 〜 {jst(until_ts)}(日本時間)",
             f"- 検索除外語: 検索に入れた {len(used)}語 / 入りきらず収集後に除いた {len(overflow)}語(クエリ {len(query)}文字)"]
 
+    diag = []
     try:
-        tweets, calls = collect.fetch(os.environ.get("TWITTERAPI_KEY"), query, since_ts, until_ts)
+        tweets, calls = collect.fetch(os.environ.get("TWITTERAPI_KEY"), query, since_ts, until_ts, diag=diag)
     except collect.CollectError as e:
         if production:
             d1.query("UPDATE runs SET finished_at = ?, status = 'failed', note = ? WHERE id = ?", [store.now_iso(), str(e), run_id])
-        write_summary(head + ["", f"**収集に失敗しました。検索時間枠は進めていません。** {e}"] + [f"- ⚠️ {w}" for w in warnings])
+        write_summary(head + ["", f"**収集に失敗しました。検索時間枠は進めていません。** {e}"]
+                      + [f"- 検索の返事: {d}" for d in diag] + [f"- ⚠️ {w}" for w in warnings])
         sys.exit(1)
+    head += [f"- 検索の返事: {d}" for d in diag[:3]]
+    alert_zero = production and zero_streak(d1, len(tweets), since_ts, until_ts, warnings)
 
     usd = collect.cost_usd(len(tweets), calls)
     existing = store.existing_post_ids(d1, [str(t.get("id")) for t in tweets])
@@ -163,6 +170,31 @@ def main():
         lines += ["", f"- ⚠️ 削除ポスト確認ができませんでした: {e}"]
     lines += month_cost_lines(d1, basic)
     write_summary(lines)
+    if alert_zero:
+        # 1回だけ失敗にして GitHub からメールを出す(次の回からは成功に戻る)
+        sys.exit(1)
+
+
+def zero_streak(d1, fetched, since_ts, until_ts, warnings):
+    """0件が続いた時間を数え、長く続いたら警告を足す。メールを出すべき回だけ True を返す。"""
+    if fetched:
+        if d1.get_meta(ZERO_SINCE_KEY) is not None:
+            d1.set_meta(ZERO_SINCE_KEY, None)
+            d1.set_meta(ZERO_ALERTED_KEY, False)
+        return False
+    start = d1.get_meta(ZERO_SINCE_KEY)
+    if start is None:
+        start = since_ts
+        d1.set_meta(ZERO_SINCE_KEY, start)
+    hours = (until_ts - start) / 3600
+    if hours < ZERO_ALERT_HOURS:
+        return False
+    warnings.append(f"{jst(start)} から約{hours:.0f}時間、ポストが1件も取れていません。"
+                    "Notion【1】の検索語と TwitterAPI.io の状態を確かめてください")
+    if d1.get_meta(ZERO_ALERTED_KEY):
+        return False
+    d1.set_meta(ZERO_ALERTED_KEY, True)
+    return True
 
 
 if __name__ == "__main__":

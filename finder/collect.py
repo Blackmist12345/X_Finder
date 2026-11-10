@@ -41,8 +41,41 @@ def cost_usd(tweets_returned, calls):
     return credits / CREDITS_PER_USD
 
 
-def fetch(api_key, query, since_ts, until_ts, session=None):
-    """時間枠 [since_ts, until_ts) のポストをすべて取る。返り値は (tweets, calls)。"""
+def describe_response(page, status_code, data):
+    """返事の中身を 1 行にまとめる(ログ用)。キーやクエリは入れない。"""
+    if not isinstance(data, dict):
+        return f"{page}ページ目: HTTP {status_code}・JSON がオブジェクトではありません({type(data).__name__})"
+    parts = [f"{page}ページ目: HTTP {status_code}"]
+    tweets = data.get("tweets")
+    parts.append(f"tweets {len(tweets)}件" if isinstance(tweets, list) else "tweets なし")
+    parts.append(f"次のページ {'あり' if data.get('has_next_page') else 'なし'}")
+    for key in ("status", "msg", "message", "error"):
+        if data.get(key) not in (None, ""):
+            parts.append(f"{key}={str(data[key])[:150]}")
+    if not isinstance(tweets, list):
+        parts.append("返事のキー: " + ", ".join(sorted(map(str, data.keys()))[:15]))
+    return "・".join(parts)
+
+
+def response_error(data):
+    """HTTP 200 でも中身がエラーなら、その説明を返す。問題なければ None。"""
+    if not isinstance(data, dict):
+        return "返事が JSON のオブジェクトではありません"
+    if str(data.get("status", "")).lower() == "error":
+        return str(data.get("msg") or data.get("message") or data.get("error") or "status=error")[:200]
+    if not isinstance(data.get("tweets"), list):
+        note = data.get("msg") or data.get("message") or data.get("error")
+        if note:  # tweets が無く説明の文だけがある → エラーとみなす
+            return f"tweets がなく、説明の文がありました: {str(note)[:200]}"
+    return None
+
+
+def fetch(api_key, query, since_ts, until_ts, session=None, diag=None):
+    """時間枠 [since_ts, until_ts) のポストをすべて取る。返り値は (tweets, calls)。
+
+    diag にリストを渡すと、各ページの返事の中身(HTTP 状態・件数・エラーの文)を 1 行ずつ足す。
+    HTTP 200 でも中身がエラーなら CollectError を投げる(0件として扱って時間枠を進めないため)。
+    """
     if not api_key:
         raise CollectError("TWITTERAPI_KEY が設定されていません")
     http = session or requests.Session()
@@ -65,7 +98,10 @@ def fetch(api_key, query, since_ts, until_ts, session=None):
                 time.sleep(2 ** (attempt + 1))
                 continue
             if res.status_code == 200:
-                data = res.json()
+                try:
+                    data = res.json()
+                except ValueError as e:
+                    raise CollectError(f"{page}ページ目の返事が JSON ではありません: {res.text[:200]}") from e
                 break
             if res.status_code == 429 or res.status_code >= 500:
                 time.sleep(2 ** (attempt + 1))
@@ -73,8 +109,13 @@ def fetch(api_key, query, since_ts, until_ts, session=None):
             raise CollectError(f"{page}ページ目で TwitterAPI.io がエラーを返しました ({res.status_code}): {res.text[:200]}")
         if data is None:
             raise CollectError(f"{page}ページ目が再試行後も取得できませんでした")
+        if diag is not None:
+            diag.append(describe_response(page, 200, data))
+        problem = response_error(data)
+        if problem:
+            raise CollectError(f"{page}ページ目で TwitterAPI.io が成功(200)の形でエラーを返しました: {problem}")
 
-        batch = data.get("tweets", []) if isinstance(data, dict) else []
+        batch = data.get("tweets") or []
         for tw in batch:
             tid = str(tw.get("id"))
             if tid not in seen:
