@@ -103,3 +103,24 @@ def test_zero_streak_warns_and_fails_once(wired, monkeypatch, make_tweet):
     run_collect.main()  # 取れたら数え直す
     assert d1.get_meta(run_collect.ZERO_SINCE_KEY) is None
     assert d1.get_meta(run_collect.ZERO_ALERTED_KEY) is False
+
+
+def test_backfill_refetches_from_hours_ago_and_saves(wired, monkeypatch, make_tweet):
+    d1, summary = wired
+    clock = {"now": 1_800_000_000}
+    monkeypatch.setattr(run_collect.time, "time", lambda: clock["now"])
+    d1.set_meta(run_collect.WINDOW_KEY, clock["now"] - 600)  # ふだんの収集は10分前まで進んでいる
+    seen = {}
+
+    def fetch(api_key, query, since_ts, until_ts, **k):
+        seen.update(since=since_ts, until=until_ts)
+        return [make_tweet("1", text="カメラマン募集")], 1
+
+    monkeypatch.setattr(collect, "fetch", fetch)
+    monkeypatch.setenv("MODE", "backfill")
+    monkeypatch.setenv("HOURS", "36")
+    run_collect.main()
+    assert seen["until"] - seen["since"] == 36 * 3600
+    assert d1.query("SELECT COUNT(*) AS n FROM posts")[0]["n"] == 1
+    assert d1.get_meta(run_collect.WINDOW_KEY) == seen["until"]
+    assert "取り直し: backfill" in summary.read_text()

@@ -10,16 +10,23 @@ from finder import collect, store
 SHORT_QUERY = '"カメラマン" "募集"'
 
 
-def probes(query, base, since_ts, until_ts):
-    """(名前, 検索式) の一覧。base は除外語を入れる前の式。"""
+EXCLUDE_COUNTS = (5, 10, 20, 30)
+
+
+def probes(query, base, since_ts, until_ts, excluded_queries=()):
+    """(名前, 検索式) の一覧。base は除外語を入れる前の式。
+
+    excluded_queries は (除外語の数, 検索式) の一覧で、時間の指定なしで投げる(何語まで入れても返るかを見る)。
+    """
     window = f" since_time:{int(since_ts)} until_time:{int(until_ts)}"
+    extra = [(f"⑥ 除外語{n}語入りの式・時間の指定なし", q) for n, q in excluded_queries]
     return [
         ("① 今の検索式+時間の指定(ふだんの収集と同じ)", query + window),
         ("② 除外語なしの検索式+時間の指定", base + window),
         ("③ 短い式「カメラマン 募集」+時間の指定", SHORT_QUERY + window),
         ("④ 今の検索式・時間の指定なし", query),
         ("⑤ 短い式「カメラマン 募集」・時間の指定なし", SHORT_QUERY),
-    ]
+    ] + extra
 
 
 def probe(api_key, full_query, session):
@@ -39,7 +46,7 @@ def probe(api_key, full_query, session):
     return len(tweets), (times[-1] if times else None), collect.describe_response(1, res.status_code, data), 1
 
 
-def run(api_key, query, base, since_ts, until_ts, jst, session=None):
+def run(api_key, query, base, since_ts, until_ts, jst, session=None, excluded_queries=()):
     """診断を行い、まとめ欄の行と費用(ドル)を返す。"""
     if not api_key:
         return ["## 検索の診断", "", "- TWITTERAPI_KEY が設定されていません"], 0.0
@@ -48,7 +55,7 @@ def run(api_key, query, base, since_ts, until_ts, jst, session=None):
              f"- 時間の指定: {jst(since_ts)} 〜 {jst(until_ts)}(日本時間)", "",
              "| 条件 | 件数 | いちばん新しいポスト(UTC) | 返事 |", "|---|---|---|---|"]
     total_tweets = total_calls = 0
-    for name, q in probes(query, base, since_ts, until_ts):
+    for name, q in probes(query, base, since_ts, until_ts, excluded_queries):
         count, newest, note, calls = probe(api_key, q, http)
         total_tweets += count
         total_calls += calls

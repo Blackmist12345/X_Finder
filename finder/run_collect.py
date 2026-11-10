@@ -1,7 +1,7 @@
 """収集の 1 回分: N1 設定読込 → N2 収集 → N3 一次フィルタ → N12/N15 保存 → 遡り・2 回目の N3 → N4 AI 判定 → N10 採点。
 
 環境変数:
-  MODE   production(保存して検索時間枠を進める)/ dry_run(何も保存しない試し)/ diagnose(検索の条件を変えて件数を比べる。何も保存しない)
+  MODE   production(保存して検索時間枠を進める)/ backfill(HOURS 時間前から取り直して保存する)/ dry_run(何も保存しない試し)/ diagnose(検索の条件を変えて件数を比べる。何も保存しない)
   HOURS  dry_run と初回の実行で、何時間さかのぼるか
 """
 import os
@@ -49,7 +49,8 @@ def month_cost_lines(d1, basic):
 def main():
     mode = os.environ.get("MODE", "production")
     hours = float(os.environ.get("HOURS") or 1)
-    production = mode == "production"
+    backfill = mode == "backfill"   # 保存はするが、前回の終わりではなく HOURS 時間前から取り直す(取りこぼしの回収)
+    production = mode == "production" or backfill
 
     d1 = D1.from_env()
     notion = Notion(os.environ.get("NOTION_API_KEY"))
@@ -61,11 +62,13 @@ def main():
 
     until_ts = time.time() - 30
     if mode == "diagnose":
+        excluded = [(n, collect.build_query(kw["group_a"], kw["group_b"], config["search_excludes"], max_excludes=n)[0])
+                    for n in search_diag.EXCLUDE_COUNTS]
         lines, _ = search_diag.run(os.environ.get("TWITTERAPI_KEY"), query, collect.base_query(kw["group_a"], kw["group_b"]),
-                                   until_ts - hours * 3600, until_ts, jst)
+                                   until_ts - hours * 3600, until_ts, jst, excluded_queries=excluded)
         write_summary(lines)
         return
-    last_end = d1.get_meta(WINDOW_KEY) if production else None
+    last_end = d1.get_meta(WINDOW_KEY) if production and not backfill else None
     since_ts = (last_end - OVERLAP_SECONDS) if last_end else until_ts - hours * 3600
     if until_ts - since_ts > MAX_WINDOW_HOURS * 3600:
         warnings.append(f"前回から{MAX_WINDOW_HOURS}時間以上空いていたので、直近{MAX_WINDOW_HOURS}時間だけ取りました")
@@ -89,7 +92,7 @@ def main():
             [started, datetime.fromtimestamp(since_ts, timezone.utc).isoformat(), datetime.fromtimestamp(until_ts, timezone.utc).isoformat()],
         )[0]["id"]
 
-    title = "## 収集の結果" + ("" if production else "(試し実行: 何も保存していません)")
+    title = "## 収集の結果" + ("(取り直し: backfill)" if backfill else "" if production else "(試し実行: 何も保存していません)")
     head = [title, "", f"- 検索時間枠: {jst(since_ts)} 〜 {jst(until_ts)}(日本時間)",
             f"- 検索除外語: 検索に入れた {len(used)}語 / 入りきらず収集後に除いた {len(overflow)}語(クエリ {len(query)}文字)"]
 

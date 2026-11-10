@@ -34,14 +34,23 @@ def test_diagnose_mode_saves_nothing(wired, monkeypatch):  # noqa: F811
     monkeypatch.setenv("TWITTERAPI_KEY", "k")
     seen = {}
 
-    def fake_run(api_key, query, base, since_ts, until_ts, jst, session=None):
-        seen.update(query=query, base=base, hours=(until_ts - since_ts) / 3600)
+    def fake_run(api_key, query, base, since_ts, until_ts, jst, session=None, excluded_queries=()):
+        seen.update(query=query, base=base, hours=(until_ts - since_ts) / 3600, excluded=excluded_queries)
         return ["## 検索の診断", "- ok"], 0.0
 
     monkeypatch.setattr(search_diag, "run", fake_run)
     monkeypatch.setattr(collect, "fetch", lambda *a, **k: (_ for _ in ()).throw(AssertionError("収集はしない")))
     run_collect.main()
     assert seen["hours"] == 1 and seen["query"].startswith(seen["base"])
+    assert [n for n, _ in seen["excluded"]] == list(search_diag.EXCLUDE_COUNTS)
+    assert all(q.startswith(seen["base"]) for _, q in seen["excluded"])
     assert d1.query("SELECT COUNT(*) AS n FROM runs")[0]["n"] == 0
     assert d1.get_meta(run_collect.WINDOW_KEY) is None
     assert "## 検索の診断" in summary.read_text()
+
+
+def test_diag_adds_rows_for_exclude_counts():
+    s = FakeSession([FakeResponse(200, {"tweets": [], "has_next_page": False}) for _ in range(7)])
+    lines, _ = search_diag.run("key", "Q", "B", 0, 1, jst, session=s, excluded_queries=[(5, "Q5"), (10, "Q10")])
+    assert [c["query"] for c in s.calls][-2:] == ["Q5", "Q10"]
+    assert any("除外語5語入り" in l for l in lines) and any("除外語10語入り" in l for l in lines)
