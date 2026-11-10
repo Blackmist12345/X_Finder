@@ -17,13 +17,18 @@ class CollectError(Exception):
     pass
 
 
+def base_query(group_a, group_b):
+    """除外語を入れる前の (撮影者語 OR ...) (募集語 OR ...)。"""
+    return "((" + " OR ".join(f'"{w}"' for w in group_a) + ") (" + " OR ".join(f'"{w}"' for w in group_b) + "))"
+
+
 def build_query(group_a, group_b, search_excludes, max_length=MAX_QUERY_LENGTH):
     """(撮影者語 OR ...) (募集語 OR ...) -"除外語" ... を組み立てる。
 
     除外語は観測スコアの高い順に、文字数の上限まで入れる。
     入りきらなかった語は返り値の overflow に入れ、収集後に同じ基準で取り除く。
     """
-    base = "((" + " OR ".join(f'"{w}"' for w in group_a) + ") (" + " OR ".join(f'"{w}"' for w in group_b) + "))"
+    base = base_query(group_a, group_b)
     query, used, overflow = base, [], []
     for item in sorted(search_excludes, key=lambda e: e.get("score", 0), reverse=True):
         candidate = f'{query} -"{item["word"]}"'
