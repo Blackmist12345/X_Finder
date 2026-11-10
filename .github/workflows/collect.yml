@@ -8,12 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'production=保存して検索時間枠を進める / dry_run=何も保存しない試し'
+        description: 'production=保存して検索時間枠を進める / dry_run=何も保存しない試し / diagnose=検索の条件を変えて件数を比べる(何も保存しない)'
         required: true
         type: choice
         default: 'dry_run'
         options:
           - 'dry_run'
+          - 'diagnose'
           - 'production'
       hours:
         description: '試し実行と初回の実行で、何時間さかのぼるか'

@@ -1,7 +1,7 @@
 """収集の 1 回分: N1 設定読込 → N2 収集 → N3 一次フィルタ → N12/N15 保存 → 遡り・2 回目の N3 → N4 AI 判定 → N10 採点。
 
 環境変数:
-  MODE   production(保存して検索時間枠を進める)/ dry_run(何も保存しない試し)
+  MODE   production(保存して検索時間枠を進める)/ dry_run(何も保存しない試し)/ diagnose(検索の条件を変えて件数を比べる。何も保存しない)
   HOURS  dry_run と初回の実行で、何時間さかのぼるか
 """
 import os
@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from finder import account_step, collect, deleted_step, filters, image_step, judge, judge_step, link_step, store, tree_step
+from finder import account_step, collect, deleted_step, filters, image_step, judge, judge_step, link_step, search_diag, store, tree_step
 from finder.config import load_config
 from finder.d1 import D1
 from finder.notion import Notion
@@ -60,6 +60,11 @@ def main():
     query, used, overflow = collect.build_query(kw["group_a"], kw["group_b"], config["search_excludes"])
 
     until_ts = time.time() - 30
+    if mode == "diagnose":
+        lines, _ = search_diag.run(os.environ.get("TWITTERAPI_KEY"), query, collect.base_query(kw["group_a"], kw["group_b"]),
+                                   until_ts - hours * 3600, until_ts, jst)
+        write_summary(lines)
+        return
     last_end = d1.get_meta(WINDOW_KEY) if production else None
     since_ts = (last_end - OVERLAP_SECONDS) if last_end else until_ts - hours * 3600
     if until_ts - since_ts > MAX_WINDOW_HOURS * 3600:
