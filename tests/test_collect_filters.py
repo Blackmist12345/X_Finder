@@ -3,11 +3,20 @@ from finder import collect, filters
 
 def test_build_query_fills_by_score_and_reports_overflow():
     excludes = [{"word": "時給", "score": 1}, {"word": "VRChat", "score": 9}, {"word": "とても長い除外語" * 30, "score": 5}]
-    query, used, overflow = collect.build_query(["カメラマン"], ["募集"], excludes, max_length=100)
+    query, used, overflow = collect.build_query(["カメラマン"], ["募集"], excludes, max_length=100, max_excludes=99)
     assert query.startswith('(("カメラマン") ("募集"))')
     assert used == ["VRChat", "時給"]
     assert overflow == ["とても長い除外語" * 30]
     assert len(query) <= 100
+
+
+def test_build_query_caps_number_of_excludes():
+    excludes = [{"word": "時給", "score": 1}, {"word": "VRChat", "score": 9}, {"word": "有償", "score": 5}]
+    query, used, overflow = collect.build_query(["カメラマン"], ["募集"], excludes, max_excludes=1)
+    assert used == ["VRChat"] and overflow == ["有償", "時給"]
+    # 既定(今は0語): 除外語はすべて収集後に取り除く
+    query, used, overflow = collect.build_query(["カメラマン"], ["募集"], excludes)
+    assert query == '(("カメラマン") ("募集"))' and used == [] and len(overflow) == 3
 
 
 def test_cost_uses_per_tweet_price_with_per_call_minimum():

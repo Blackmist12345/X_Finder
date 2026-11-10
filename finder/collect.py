@@ -8,7 +8,12 @@ import requests
 
 URL = "https://api.twitterapi.io/twitter/tweet/advanced_search"
 MAX_QUERY_LENGTH = 440
+# 検索式に入れる除外語の数の上限。2026-11-10 ごろから、除外語(-"語")を37語入れた式だと
+# TwitterAPI.io が時間の指定なしでも0件を返すようになった(診断モードで確認)。
+# 何語までなら返るか分かるまで 0 にして、除外語はすべて収集後に取り除く。
+MAX_QUERY_EXCLUDES = 0
 MAX_PAGES = 50
+BACKFILL_MAX_PAGES = 150  # 取り直しは時間枠が長いので多めに(最大3,000件、約69円)
 CREDITS_PER_TWEET = 15
 CREDITS_PER_USD = 100_000
 
@@ -22,17 +27,18 @@ def base_query(group_a, group_b):
     return "((" + " OR ".join(f'"{w}"' for w in group_a) + ") (" + " OR ".join(f'"{w}"' for w in group_b) + "))"
 
 
-def build_query(group_a, group_b, search_excludes, max_length=MAX_QUERY_LENGTH):
+def build_query(group_a, group_b, search_excludes, max_length=MAX_QUERY_LENGTH, max_excludes=None):
     """(撮影者語 OR ...) (募集語 OR ...) -"除外語" ... を組み立てる。
 
-    除外語は観測スコアの高い順に、文字数の上限まで入れる。
+    除外語は観測スコアの高い順に、文字数の上限と語数の上限(max_excludes、省略時は MAX_QUERY_EXCLUDES)まで入れる。
     入りきらなかった語は返り値の overflow に入れ、収集後に同じ基準で取り除く。
     """
+    limit = MAX_QUERY_EXCLUDES if max_excludes is None else max_excludes
     base = base_query(group_a, group_b)
     query, used, overflow = base, [], []
     for item in sorted(search_excludes, key=lambda e: e.get("score", 0), reverse=True):
         candidate = f'{query} -"{item["word"]}"'
-        if len(candidate) <= max_length:
+        if len(used) < limit and len(candidate) <= max_length:
             query = candidate
             used.append(item["word"])
         else:
@@ -75,7 +81,7 @@ def response_error(data):
     return None
 
 
-def fetch(api_key, query, since_ts, until_ts, session=None, diag=None):
+def fetch(api_key, query, since_ts, until_ts, session=None, diag=None, max_pages=MAX_PAGES):
     """時間枠 [since_ts, until_ts) のポストをすべて取る。返り値は (tweets, calls)。
 
     diag にリストを渡すと、各ページの返事の中身(HTTP 状態・件数・エラーの文)を 1 行ずつ足す。
@@ -88,7 +94,7 @@ def fetch(api_key, query, since_ts, until_ts, session=None, diag=None):
     full_query = f"{query} since_time:{int(since_ts)} until_time:{int(until_ts)}"
     tweets, seen, cursor, calls = [], set(), None, 0
 
-    for page in range(1, MAX_PAGES + 1):
+    for page in range(1, max_pages + 1):
         params = {"query": full_query, "queryType": "Latest"}
         if cursor:
             params["cursor"] = cursor
@@ -131,4 +137,4 @@ def fetch(api_key, query, since_ts, until_ts, session=None, diag=None):
             return tweets, calls
         time.sleep(0.5)
 
-    raise CollectError(f"{MAX_PAGES}ページを超えました。時間枠を短くして再実行してください")
+    raise CollectError(f"{max_pages}ページを超えました。時間枠を短くして再実行してください")
