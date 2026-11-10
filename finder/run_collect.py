@@ -98,7 +98,8 @@ def main():
 
     diag = []
     try:
-        tweets, calls = collect.fetch(os.environ.get("TWITTERAPI_KEY"), query, since_ts, until_ts, diag=diag)
+        tweets, calls = collect.fetch(os.environ.get("TWITTERAPI_KEY"), query, since_ts, until_ts, diag=diag,
+                                     max_pages=collect.BACKFILL_MAX_PAGES if backfill else collect.MAX_PAGES)
     except collect.CollectError as e:
         if production:
             d1.query("UPDATE runs SET finished_at = ?, status = 'failed', note = ? WHERE id = ?", [store.now_iso(), str(e), run_id])

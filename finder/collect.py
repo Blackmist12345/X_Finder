@@ -13,6 +13,7 @@ MAX_QUERY_LENGTH = 440
 # 何語までなら返るか分かるまで 0 にして、除外語はすべて収集後に取り除く。
 MAX_QUERY_EXCLUDES = 0
 MAX_PAGES = 50
+BACKFILL_MAX_PAGES = 150  # 取り直しは時間枠が長いので多めに(最大3,000件、約69円)
 CREDITS_PER_TWEET = 15
 CREDITS_PER_USD = 100_000
 
@@ -80,7 +81,7 @@ def response_error(data):
     return None
 
 
-def fetch(api_key, query, since_ts, until_ts, session=None, diag=None):
+def fetch(api_key, query, since_ts, until_ts, session=None, diag=None, max_pages=MAX_PAGES):
     """時間枠 [since_ts, until_ts) のポストをすべて取る。返り値は (tweets, calls)。
 
     diag にリストを渡すと、各ページの返事の中身(HTTP 状態・件数・エラーの文)を 1 行ずつ足す。
@@ -93,7 +94,7 @@ def fetch(api_key, query, since_ts, until_ts, session=None, diag=None):
     full_query = f"{query} since_time:{int(since_ts)} until_time:{int(until_ts)}"
     tweets, seen, cursor, calls = [], set(), None, 0
 
-    for page in range(1, MAX_PAGES + 1):
+    for page in range(1, max_pages + 1):
         params = {"query": full_query, "queryType": "Latest"}
         if cursor:
             params["cursor"] = cursor
@@ -136,4 +137,4 @@ def fetch(api_key, query, since_ts, until_ts, session=None, diag=None):
             return tweets, calls
         time.sleep(0.5)
 
-    raise CollectError(f"{MAX_PAGES}ページを超えました。時間枠を短くして再実行してください")
+    raise CollectError(f"{max_pages}ページを超えました。時間枠を短くして再実行してください")
