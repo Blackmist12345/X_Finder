@@ -8,13 +8,15 @@
 - 返信の先頭に X が自動で付ける @(返信相手)は、ツリーの投稿者そのものなので拾わない。
 - 投稿者本人は外す。フォロワー数・アイコンは account_step が取る。
 - 遡りがあとから済んだポストは、もう一度拾い直す(post_trees.updated_at が新しければ)。
+- 対象は、この仕組みを入れたあとに集めたポストだけ(最初の実行の時刻を meta の text_mentions_since に残す。Latte 2026-11-11)。
 """
 import json
 import re
 
 from finder import store
 
-MAX_POSTS_PER_RUN = 2000  # 1 回で拾い直すポストの上限(D1 への問い合わせ回数を抑える)。残りは次の収集で
+MAX_POSTS_PER_RUN = 500  # 1 回で拾うポストの上限。残りは次の収集で
+SINCE_KEY = "text_mentions_since"
 # 前が英数字・_・.・@ のときはメールアドレスなどの一部なので拾わない。後ろに ID の文字が続くときは 16 文字以上で ID ではない
 MENTION = re.compile(r"(?<![A-Za-z0-9_.@＠])[@＠]([A-Za-z0-9_]{1,15})(?![A-Za-z0-9_@＠])")
 # 「ミジ(@mari_2646)」「ミジ（＠mari_2646 ）」の名前の部分
@@ -63,14 +65,15 @@ def collect_accounts(post, tree_posts, author_username=None):
     return out
 
 
-def candidates(d1, limit=MAX_POSTS_PER_RUN):
-    """判定が済み、まだ拾っていない(または拾ったあとに遡りが済んだ)ポスト。"""
+def candidates(d1, since, limit=MAX_POSTS_PER_RUN):
+    """since 以降に集めて判定が済み、まだ拾っていない(または拾ったあとに遡りが済んだ)ポスト。"""
     return d1.query(
         "SELECT p.id, p.text, p.reply_to_id, t.ids_json AS tree_ids, u.username AS author_username FROM posts p "
         "LEFT JOIN users u ON u.id = p.author_id LEFT JOIN post_trees t ON t.post_id = p.id "
         "LEFT JOIN text_mentions m ON m.post_id = p.id "
-        "WHERE p.status = 'judged' AND (m.post_id IS NULL OR (t.updated_at IS NOT NULL AND t.updated_at > m.scanned_at)) "
-        "ORDER BY p.collected_at DESC, p.id DESC LIMIT ?", [limit])
+        "WHERE p.status = 'judged' AND p.collected_at >= ? "
+        "AND (m.post_id IS NULL OR (t.updated_at IS NOT NULL AND t.updated_at > m.scanned_at)) "
+        "ORDER BY p.collected_at DESC, p.id DESC LIMIT ?", [since, limit])
 
 
 def _ids(tree_ids):
@@ -97,12 +100,16 @@ def run(d1, production, now=None):
     if not production:
         return []
     lines = ["", "## 本文から X の ID を拾う", ""]
-    posts = candidates(d1)
+    now = now or store.now_iso()
+    since = d1.get_meta(SINCE_KEY)
+    if not since:  # 最初の実行: 今までのポストは拾わず、これから集めるポストだけにする
+        d1.set_meta(SINCE_KEY, now)
+        return lines + ["- 今回から、新しく集めたポストの本文の ID を拾います(今までのポストは対象外)"]
+    posts = candidates(d1, since)
     if not posts:
         return lines + ["- 新しく拾うポストはありませんでした"]
     trees = {p["id"]: _ids(p.get("tree_ids")) for p in posts}
     texts = load_posts(d1, [i for ids in trees.values() for i in ids])
-    now = now or store.now_iso()
     rows, found, with_any = [], 0, 0
     for p in posts:
         tree_posts = [texts[i] for i in trees[p["id"]] if i in texts]  # 古い順(root が先頭)

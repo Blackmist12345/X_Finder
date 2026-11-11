@@ -34,12 +34,18 @@ def add(d1, pid, text, source="search", status="judged", reply_to=None, author="
              [pid, author, source, text, status, f"2026-11-10T00:00:0{pid[-1]}+00:00", reply_to])
 
 
+def start(d1, at="2026-11-01T00:00:00+00:00"):
+    """最初の実行(この時刻より前に集めたポストは対象外になる)。"""
+    assert any("今までのポストは対象外" in l for l in mention_step.run(d1, True, now=at))
+
+
 def accounts(d1, pid):
     rows = d1.query("SELECT accounts_json FROM text_mentions WHERE post_id = ?", [pid])
     return json.loads(rows[0]["accounts_json"]) if rows else None
 
 
 def test_run_collects_from_post_and_whole_tree(d1):
+    start(d1)
     add(d1, "11", MEMBERS, source="tree", status="context")
     add(d1, "12", "@client 追記です @byocos も一緒です", source="tree", status="context", reply_to="11")
     add(d1, "1", "@client こちら相互優先です @new_one", reply_to="12")
@@ -60,6 +66,7 @@ def test_run_collects_from_post_and_whole_tree(d1):
 
 
 def test_run_rescans_after_tree_is_updated(d1):
+    start(d1)
     add(d1, "1", "募集します")
     mention_step.run(d1, True, now="2026-11-10T01:00:00+00:00")
     assert accounts(d1, "1") == []
@@ -67,6 +74,16 @@ def test_run_rescans_after_tree_is_updated(d1):
     d1.query("INSERT INTO post_trees (post_id, ids_json, updated_at) VALUES ('1', '[\"11\"]', '2026-11-10T02:00:00+00:00')")
     mention_step.run(d1, True, now="2026-11-10T03:00:00+00:00")
     assert accounts(d1, "1") == [{"handle": "late_one", "name": "", "from": "tree"}]
+
+
+def test_first_run_skips_posts_collected_before(d1):
+    add(d1, "1", "@old_one")  # 2026-11-10 に集めたポスト
+    start(d1, at="2026-11-10T12:00:00+00:00")
+    add(d1, "22", "@new_one")
+    d1.query("UPDATE posts SET collected_at = '2026-11-10T13:00:00+00:00' WHERE id = '22'")
+    mention_step.run(d1, True, now="2026-11-10T13:10:00+00:00")
+    assert accounts(d1, "1") is None
+    assert accounts(d1, "22") == [{"handle": "new_one", "name": ""}]
 
 
 def test_does_nothing_in_trial(d1):
