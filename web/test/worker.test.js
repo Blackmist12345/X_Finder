@@ -367,6 +367,27 @@ test("画像から読んだ人は、調べたフォロワー数・アイコン�
   }
 });
 
+test("本文・ツリーの本文に書かれた ID も関係するアカウントに並べ、画像からの人とまとめる", async () => {
+  const sql = (q, ...a) => db.raw.prepare(q).run(...a);
+  sql(`INSERT OR REPLACE INTO image_reads (post_id, read_at, images, accounts_json) VALUES ('1', 'x', 1, ?)`,
+    JSON.stringify([{ handle: "both_cos", name: "" }]));
+  sql(`INSERT OR REPLACE INTO text_mentions (post_id, scanned_at, accounts_json) VALUES ('1', 'x', ?)`,
+    JSON.stringify([{ handle: "friend", name: "" }, { handle: "body_cos", name: "" }, { handle: "Both_Cos", name: "ミジ", from: "tree" },
+      { handle: "mari_2646", name: "ミジ", from: "tree" }, { handle: "client", name: "" }]));
+  try {
+    const c = await getCase(db, "1");
+    assert.deepEqual(c.people.map((p) => [p.username, p.name, p.roles]), [
+      ["friend", "友達", ["mention"]], // 本文の @ は X のメンションとしても入っているので「本文から」は重ねない
+      ["both_cos", "ミジ", ["text_tree", "image"]], // 画像で名前が読めなかった人は本文の名前を出す
+      ["body_cos", null, ["text"]],
+      ["mari_2646", "ミジ", ["text_tree"]],
+    ]);
+  } finally {
+    sql(`DELETE FROM image_reads WHERE post_id = '1'`);
+    sql(`DELETE FROM text_mentions WHERE post_id = '1'`);
+  }
+});
+
 test("関係するアカウントは同じ人を 1 回だけ出し、投稿者本人は出さない", async () => {
   const sql = (q) => db.raw.prepare(q).run();
   sql(`INSERT INTO post_users (post_id, user_id, role) VALUES ('1', '300', 'reply_to'), ('1', '100', 'reply_to'), ('1', '100', 'mention')`);
