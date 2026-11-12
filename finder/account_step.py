@@ -21,6 +21,7 @@ URL = "https://api.twitterapi.io/twitter/user/info"
 CREDITS_PER_USER = 18
 CREDITS_PER_USD = 100_000
 RECHECK_DAYS = 7
+SCAN_DAYS = 2  # 画像・本文を読んだ記録のうち、候補探しで見る日数
 MAX_LOOKUPS = 100  # 1 回の実行で調べる人数の上限(約 0.27 円 × 10)。超えた分は次の収集に回す
 MAX_FAILS = 5  # 続けてこれだけ失敗したら、向こうの不調とみなして今回はやめる
 HANDLE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
@@ -46,9 +47,9 @@ def candidates(d1, now=None, limit=MAX_LOOKUPS):
     """調べる ID(小文字)を、新しく読んだ画像・本文に出てきた順に返す。"""
     now = now or datetime.now(timezone.utc)
     recent = now - timedelta(days=RECHECK_DAYS)
+    since = (now - timedelta(days=SCAN_DAYS)).replace(microsecond=0).isoformat()
     seen = {}  # handle -> いちばん新しく画像・本文から読んだ時刻
-    # 読んだ記録は直近 RECHECK_DAYS 日ぶんだけ見る(それより前に読んだ ID は、そのときに調べ終わっている。D1 の読み取り行数を増やさないため)
-    since = recent.replace(microsecond=0).isoformat()
+    # 読んだ記録は直近 SCAN_DAYS 日ぶんだけ見る(それより前に読んだ ID は、そのときに調べ終わっている。D1 の読み取り行数を増やさないため)
     for r in d1.query("SELECT read_at, accounts_json FROM image_reads WHERE read_at >= ? "
                       "AND accounts_json IS NOT NULL AND accounts_json NOT IN ('', '[]') "
                       "UNION ALL SELECT scanned_at, accounts_json FROM text_mentions WHERE scanned_at >= ? "

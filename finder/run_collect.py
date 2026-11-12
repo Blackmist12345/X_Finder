@@ -19,6 +19,7 @@ OVERLAP_SECONDS = 180       # 前回の終わりから 3 分重ねて取る(取�
 MAX_WINDOW_HOURS = 48       # 長く止まっていた場合の上限
 WINDOW_KEY = "last_window_end"
 PURGE_DAY_KEY = "purge_day"          # 掃除(削除予定・遡りの片付け)を最後にした日(UTC)。1 日 1 回だけにする
+MONTH_COST_KEY = "month_cost_sum"    # 今月の費用の、前回までの合計(サービスごと)と、そこまでに読んだ costs の id
 ROWS_READ_KEY = "d1_rows_read"       # 今日(UTC)の収集で D1 が読んだ行数の合計
 ZERO_SINCE_KEY = "zero_fetch_since"   # 0件が続き始めた時刻(取れたら消す)
 ZERO_ALERTED_KEY = "zero_fetch_alerted"  # 0件が続いていることを知らせたか(1回だけ失敗にしてメールを出す)
@@ -61,9 +62,21 @@ def rows_read_lines(d1, production, now=None):
     return lines
 
 
-def month_cost_lines(d1, basic):
+def month_cost_lines(d1, basic, production=True):
     start = datetime.now(JST).replace(day=1, hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).isoformat()
-    rows = d1.query("SELECT service, SUM(usd) AS usd FROM costs WHERE at >= ? GROUP BY service ORDER BY service", [start])
+    # 今月の費用の行を毎回全部は読まない。前回までの合計を meta に置き、そのあとに足された行だけ読む(D1 の読み取り行数を増やさないため)
+    saved = d1.get_meta(MONTH_COST_KEY) or {}
+    if saved.get("month") != start:
+        saved = {"month": start, "last_id": 0, "usd": {}}
+    # NOT INDEXED: 日時の索引ではなく id の順に、前回の続きからだけ読ませる
+    rows = d1.query("SELECT service, SUM(usd) AS usd, MAX(id) AS last_id FROM costs NOT INDEXED "
+                    "WHERE id > ? AND at >= ? GROUP BY service", [saved.get("last_id") or 0, start])
+    sums = dict(saved.get("usd") or {})
+    for r in rows:
+        sums[r["service"]] = sums.get(r["service"], 0) + (r["usd"] or 0)
+    if rows and production:
+        d1.set_meta(MONTH_COST_KEY, {"month": start, "last_id": max(r["last_id"] for r in rows), "usd": sums})
+    rows = [{"service": k, "usd": sums[k]} for k in sorted(sums)]
     rate, goal = basic["為替レート(円/ドル)"], basic["月の費用の目標(円)"]
     total = sum(r["usd"] or 0 for r in rows) * rate
     parts = "、".join(f"{r['service']} 約{(r['usd'] or 0) * rate:.0f}円" for r in rows)
@@ -209,7 +222,7 @@ def main():
         lines += deleted_step.run(d1, config, production, os.environ.get("TWITTERAPI_KEY"))
     except Exception as e:  # 確かめられなくても収集・判定の結果は残す(次の収集でもう一度試す)
         lines += ["", f"- ⚠️ 削除ポスト確認ができませんでした: {e}"]
-    lines += month_cost_lines(d1, basic)
+    lines += month_cost_lines(d1, basic, production)
     try:
         lines += rows_read_lines(d1, production)
     except Exception as e:  # 数えられなくても収集の結果は残す
