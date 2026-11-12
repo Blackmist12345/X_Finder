@@ -12,11 +12,13 @@
 """
 import json
 import re
+from datetime import datetime
 
 from finder import store
 
 MAX_POSTS_PER_RUN = 500  # 1 回で拾うポストの上限。残りは次の収集で
 SINCE_KEY = "text_mentions_since"
+LIST_DAYS = 14  # X Finderの一覧に出る日数
 # 前が英数字・_・.・@ のときはメールアドレスなどの一部なので拾わない。後ろに ID の文字が続くときは 16 文字以上で ID ではない
 MENTION = re.compile(r"(?<![A-Za-z0-9_.@＠])[@＠]([A-Za-z0-9_]{1,15})(?![A-Za-z0-9_@＠])")
 # 「ミジ(@mari_2646)」「ミジ（＠mari_2646 ）」の名前の部分
@@ -105,6 +107,8 @@ def run(d1, production, now=None):
     if not since:  # 最初の実行: 今までのポストは拾わず、これから集めるポストだけにする
         d1.set_meta(SINCE_KEY, now)
         return lines + ["- 今回から、新しく集めたポストの本文の ID を拾います(今までのポストは対象外)"]
+    # 一覧に出る 14 日より前のポストは探さない(D1 の読み取り行数を増やさないため)
+    since = max(since, store.days_ago_iso(LIST_DAYS, datetime.fromisoformat(now)))
     posts = candidates(d1, since)
     if not posts:
         return lines + ["- 新しく拾うポストはありませんでした"]

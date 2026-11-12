@@ -1,6 +1,6 @@
 import json
 
-from finder import image_step
+from finder import image_step, store
 
 
 class FakeResp:
@@ -35,10 +35,19 @@ class FakeSession:
 CONFIG = {"basic": {"判定に使うAI": "claude-haiku-5-5", "為替レート(円/ドル)": 150}}
 
 
-def add_post(d1, pid, status="judged", media=("https://pbs.twimg.com/media/a.jpg",)):
+RECENT_DAY = store.days_ago_iso(1)[:10]  # 候補は集めてから 14 日以内だけなので、きのう集めたことにする
+
+
+def add_post(d1, pid, status="judged", media=("https://pbs.twimg.com/media/a.jpg",), day=RECENT_DAY):
     d1.query("INSERT OR IGNORE INTO users (id, username, first_seen_at, last_seen_at) VALUES ('100', 'client', 'x', 'x')")
     d1.query("INSERT INTO posts (id, author_id, source, text, created_at, status, collected_at, media_json) VALUES (?, '100', 'search', 't', 'x', ?, ?, ?)",
-             [pid, status, f"2026-10-12T00:00:0{pid}+00:00", json.dumps(list(media))])
+             [pid, status, f"{day}T00:00:0{pid}+00:00", json.dumps(list(media))])
+
+
+def test_old_posts_are_not_candidates(d1):
+    add_post(d1, "1")
+    add_post(d1, "2", day=store.days_ago_iso(image_step.LIST_DAYS + 2)[:10])  # 一覧から消えた古いポストは探さない
+    assert [r["id"] for r in image_step.candidates(d1)] == ["1"]
 
 
 def test_reads_accounts_from_images_once(d1):

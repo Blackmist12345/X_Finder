@@ -1,7 +1,9 @@
 """Cloudflare D1 (N12 データ保存) の HTTP API クライアント。"""
 import json
 import os
+import sys
 import time
+from collections import Counter
 
 import requests
 
@@ -31,12 +33,27 @@ class D1:
             raise D1Error(f"環境変数が不足しています: {', '.join(missing)}")
         self.url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/d1/database/{database_id}/query"
         self.headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        self.rows_read = Counter()  # 呼び出した場所ごとの、D1 が読んだ行数(無料枠は 1 日 500 万行)
+
+    def _count_reads(self, results, label):
+        """D1 の返事の meta.rows_read(探すために目を通した行数)を、呼び出した場所ごとに足す。"""
+        n = 0
+        for r in results:
+            try:
+                n += int((r.get("meta") or {}).get("rows_read") or 0)
+            except (AttributeError, TypeError, ValueError):
+                pass
+        self.rows_read[label] += n
 
     @classmethod
     def from_env(cls):
         return cls(os.environ.get("CLOUDFLARE_ACCOUNT_ID"), os.environ.get("D1_DATABASE_ID"), os.environ.get("CLOUDFLARE_API_TOKEN"))
 
     def query(self, sql, params=None):
+        f = sys._getframe(1)
+        if f.f_code.co_filename == __file__:  # get_meta / insert_many などからは、その呼び出し元の名前で数える
+            f = f.f_back or f
+        label = f"{os.path.splitext(os.path.basename(f.f_code.co_filename))[0]}.{f.f_code.co_name}"
         payload = {"sql": sql}
         if params:
             payload["params"] = list(params)
@@ -55,6 +72,7 @@ class D1:
             if res.status_code != 200 or not data.get("success"):
                 raise D1Error(f"D1 のクエリが失敗しました ({res.status_code}): {json.dumps(data.get('errors', data), ensure_ascii=False)[:300]}")
             results = data.get("result") or [{}]
+            self._count_reads(results, label)
             return results[-1].get("results", [])
         raise D1Error("D1 のクエリが再試行後も失敗しました")
 

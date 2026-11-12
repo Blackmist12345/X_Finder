@@ -615,7 +615,9 @@ function reviewPill(c){
 }
 // 削除ポスト確認で、元のポストが見られなくなっていたカード
 const gonePill=c=>c.gone_at?'<span class="pill gone">元のポストが見られません</span>':"";
+let lastLoadAt=0;const RELOAD_AFTER_MS=120000; // アプリに戻ったときの読み直しは、前回から 2 分以上あいたときだけ(D1 の読み取りを減らす)
 async function load(){
+  lastLoadAt=Date.now();
   const view=state.rejected?"rejected":"judged";
   detailCache.clear();
   $("count").textContent="読み込み中…";
@@ -1641,7 +1643,7 @@ $("openSort").addEventListener("click",openSort);
 $("openView").addEventListener("click",openView);
 $("openCal").addEventListener("click",openCalendar);
 $("cost").addEventListener("click",openStats);
-document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&$("sheetRoot").hidden)load()});
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&$("sheetRoot").hidden&&Date.now()-lastLoadAt>=RELOAD_AFTER_MS)load()});
 renderControls();load();
 </script>
 </body>

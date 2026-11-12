@@ -58,15 +58,18 @@ TOOL = {
 HAS_MEDIA = "{0}.media_json IS NOT NULL AND {0}.media_json NOT IN ('', '[]')"
 
 
-def candidates(d1, limit=MAX_POSTS_PER_RUN):
-    """判定で対象になり、本文かツリーに画像があり、まだ読んでいないポスト(新しい順)。"""
+LIST_DAYS = 14  # X Finderの一覧に出る日数。これより古いポストは探さない(D1 の読み取り行数を増やさないため)
+
+
+def candidates(d1, limit=MAX_POSTS_PER_RUN, now=None):
+    """判定で対象になり、本文かツリーに画像があり、まだ読んでいないポスト(新しい順)。集めてから 14 日以内のものだけ。"""
     return d1.query(
         "SELECT p.id, p.media_json, t.ids_json AS tree_ids, u.username AS author_username FROM posts p "
         "LEFT JOIN users u ON u.id = p.author_id LEFT JOIN post_trees t ON t.post_id = p.id "
-        f"WHERE p.status = 'judged' AND ({HAS_MEDIA.format('p')} OR EXISTS (SELECT 1 FROM json_each(t.ids_json) j "
+        f"WHERE p.status = 'judged' AND p.collected_at >= ? AND ({HAS_MEDIA.format('p')} OR EXISTS (SELECT 1 FROM json_each(t.ids_json) j "
         f"JOIN posts tp ON tp.id = j.value WHERE {HAS_MEDIA.format('tp')})) "
         "AND NOT EXISTS (SELECT 1 FROM image_reads i WHERE i.post_id = p.id) "
-        "ORDER BY p.collected_at DESC, p.id DESC LIMIT ?", [limit])
+        "ORDER BY p.collected_at DESC, p.id DESC LIMIT ?", [store.days_ago_iso(LIST_DAYS, now), limit])
 
 
 def _urls(media_json):

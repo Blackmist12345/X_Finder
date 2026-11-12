@@ -17,6 +17,7 @@ from finder import store
 
 MAX_USERS = 20           # 1 回の実行で読む人数
 REFRESH_DAYS = 30        # これより古くなったら読み直す
+LIST_DAYS = 14           # X Finderの一覧に出る日数。この間に案件になったポストの依頼主だけ読む
 MAX_BYTES = 2_000_000    # これより大きいページは途中まで
 MAX_TEXT = 20000         # 読み取りに使う文字数(保存はしない)
 TIMEOUT = 10
@@ -148,12 +149,13 @@ def candidates(d1, now=None):
     """案件になったポストの依頼主のうち、リンク先をまだ読んでいない(古くなった)人。"""
     now = now or datetime.now(timezone.utc)
     stale = (now - timedelta(days=REFRESH_DAYS)).replace(microsecond=0).isoformat()
+    # リンクの表を全部読まず、直近に案件になったポストの依頼主から辿る(D1 の読み取り行数を増やさないため)
     return d1.query(
         "SELECT l.user_id, l.urls_json FROM user_links l "
-        "WHERE (l.fetched_at IS NULL OR l.fetched_at < ?) "
-        "AND EXISTS (SELECT 1 FROM posts p WHERE p.author_id = l.user_id AND p.status = 'judged') "
+        "WHERE l.user_id IN (SELECT p.author_id FROM posts p WHERE p.status = 'judged' AND p.collected_at >= ?) "
+        "AND (l.fetched_at IS NULL OR l.fetched_at < ?) "
         "ORDER BY l.updated_at DESC LIMIT ?",
-        [stale, MAX_USERS],
+        [store.days_ago_iso(LIST_DAYS, now), stale, MAX_USERS],
     )
 
 

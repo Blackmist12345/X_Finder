@@ -19,7 +19,11 @@ CREATE TABLE IF NOT EXISTS posts (
   skip_reason TEXT,
   collected_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS posts_status ON posts (status);
+-- 状態と集めた日時で探す(「対象になった直近 14 日のポスト」だけを読むため。状態だけの索引 posts_status はこれで足りるので消す)
+CREATE INDEX IF NOT EXISTS posts_status_collected ON posts (status, collected_at);
+DROP INDEX IF EXISTS posts_status;
+-- 遡りで取ったポストの掃除(source = 'tree' の古いものだけを読むため)
+CREATE INDEX IF NOT EXISTS posts_source_collected ON posts (source, collected_at);
 CREATE INDEX IF NOT EXISTS posts_author ON posts (author_id);
 CREATE INDEX IF NOT EXISTS posts_collected ON posts (collected_at);
 
@@ -124,6 +128,7 @@ CREATE TABLE IF NOT EXISTS image_reads (
   accounts_json TEXT,
   error TEXT
 );
+CREATE INDEX IF NOT EXISTS image_reads_read_at ON image_reads (read_at);
 
 -- N7 本文に書かれた X の ID(@abc / ＠abc)。収集したポストと、遡ったツリーの本文から拾う(finder/mention_step.py、AI なし)。1 ポスト = 1 行。
 -- accounts_json は image_reads と同じ形 [{"handle": "abc", "name": "ミジ"}]。ツリーの本文だけにあった人は "from": "tree"。
@@ -133,6 +138,7 @@ CREATE TABLE IF NOT EXISTS text_mentions (
   scanned_at TEXT NOT NULL,
   accounts_json TEXT
 );
+CREATE INDEX IF NOT EXISTS text_mentions_scanned_at ON text_mentions (scanned_at);
 
 -- 画像・本文から読んだ ID(handle)を TwitterAPI.io の Get User Info で調べた記録(finder/account_step.py)。1 ID = 1 行(小文字)。
 -- result = ok(台帳 users に保存した)/ not_found(その ID の人がいない。画像の読み違いのことが多い)/ unavailable(凍結など)。

@@ -124,3 +124,27 @@ def test_backfill_refetches_from_hours_ago_and_saves(wired, monkeypatch, make_tw
     assert d1.query("SELECT COUNT(*) AS n FROM posts")[0]["n"] == 1
     assert d1.get_meta(run_collect.WINDOW_KEY) == seen["until"]
     assert "取り直し: backfill" in summary.read_text()
+
+
+def test_rows_read_is_counted_per_caller_and_summed_for_the_day(d1):
+    from collections import Counter
+    from datetime import datetime, timezone
+
+    from finder.d1 import D1
+
+    real = D1("a", "b", "c")
+    real._count_reads([{"meta": {"rows_read": 120}}, {"meta": {}}, {}], "image_step.candidates")
+    real._count_reads([{"meta": {"rows_read": 30}}], "store.purge_deleted")
+    assert real.rows_read == Counter({"image_step.candidates": 120, "store.purge_deleted": 30})
+
+    now = datetime(2026, 11, 12, 3, tzinfo=timezone.utc)
+    d1.rows_read = Counter({"image_step.candidates": 120, "store.purge_deleted": 30})
+    lines = run_collect.rows_read_lines(d1, True, now)
+    assert "今回 150行" in lines[1] and "image_step.candidates 120" in lines[1]
+    lines = run_collect.rows_read_lines(d1, True, now)
+    assert "合計: 300行" in lines[2] and "2回" in lines[2]
+    # 日付(UTC)が変わったら数え直す
+    lines = run_collect.rows_read_lines(d1, True, datetime(2026, 11, 13, 0, 5, tzinfo=timezone.utc))
+    assert "合計: 150行" in lines[2]
+    # 試し実行では保存しない
+    assert len(run_collect.rows_read_lines(d1, False, now)) == 2

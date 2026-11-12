@@ -18,6 +18,8 @@ from finder.notion import Notion
 OVERLAP_SECONDS = 180       # 前回の終わりから 3 分重ねて取る(取りこぼし防止。重なった分も課金されるので短めに)
 MAX_WINDOW_HOURS = 48       # 長く止まっていた場合の上限
 WINDOW_KEY = "last_window_end"
+PURGE_DAY_KEY = "purge_day"          # 掃除(削除予定・遡りの片付け)を最後にした日(UTC)。1 日 1 回だけにする
+ROWS_READ_KEY = "d1_rows_read"       # 今日(UTC)の収集で D1 が読んだ行数の合計
 ZERO_SINCE_KEY = "zero_fetch_since"   # 0件が続き始めた時刻(取れたら消す)
 ZERO_ALERTED_KEY = "zero_fetch_alerted"  # 0件が続いていることを知らせたか(1回だけ失敗にしてメールを出す)
 ZERO_ALERT_HOURS = 6        # 夜でもふつうはこの時間までに1件は取れる
@@ -35,6 +37,28 @@ def write_summary(lines):
     if path:
         with open(path, "a", encoding="utf-8") as f:
             f.write(text)
+
+
+D1_FREE_ROWS_PER_DAY = 5_000_000  # D1 の無料枠(1 日に読める行数。00:00 UTC = 日本時間 9:00 に戻る)
+
+
+def rows_read_lines(d1, production, now=None):
+    """今回の実行で D1 が読んだ行数(多い順)と、今日(UTC)の収集での合計。画面を開いて読んだ分は入らない。"""
+    reads = getattr(d1, "rows_read", None)
+    if not reads:
+        return []
+    total = sum(reads.values())
+    top = "、".join(f"{k} {v:,}" for k, v in reads.most_common(6) if v)
+    lines = ["", f"D1 の読み取り: 今回 {total:,}行" + (f"(多い順: {top})" if top else "")]
+    if production:
+        today = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+        saved = d1.get_meta(ROWS_READ_KEY) or {}
+        day_total = (saved.get("rows", 0) if saved.get("day") == today else 0) + total
+        runs = (saved.get("runs", 0) if saved.get("day") == today else 0) + 1
+        d1.set_meta(ROWS_READ_KEY, {"day": today, "rows": day_total, "runs": runs})
+        lines.append(f"- 今日(日本時間 9:00 から)の収集での合計: {day_total:,}行 / 無料枠 {D1_FREE_ROWS_PER_DAY:,}行"
+                     f"({day_total / D1_FREE_ROWS_PER_DAY:.1%}、{runs}回。画面を開いて読んだ分は別)")
+    return lines
 
 
 def month_cost_lines(d1, basic):
@@ -82,9 +106,13 @@ def main():
         except Exception as e:  # 表がそろっていれば収集は続けられる
             warnings.append(f"D1 の表の確認に失敗しました: {e}")
         try:
-            purged = store.purge_deleted(d1)
-            if purged:
-                warnings.append(f"「削除予定」の案件のうち投稿から{store.DELETE_AFTER_DAYS}日たった {purged}件を消しました")
+            # 掃除は古いポストをたくさん読むので 1 日 1 回だけ(D1 の無料枠は 1 日 500 万行)
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if d1.get_meta(PURGE_DAY_KEY) != today:
+                purged = store.purge_deleted(d1)
+                d1.set_meta(PURGE_DAY_KEY, today)
+                if purged:
+                    warnings.append(f"「削除予定」の案件のうち投稿から{store.DELETE_AFTER_DAYS}日たった {purged}件を消しました")
         except Exception as e:  # 消せなくても収集は続ける(次の実行でもう一度試す)
             warnings.append(f"「削除予定」の案件を消せませんでした: {e}")
         run_id = d1.query(
@@ -182,6 +210,10 @@ def main():
     except Exception as e:  # 確かめられなくても収集・判定の結果は残す(次の収集でもう一度試す)
         lines += ["", f"- ⚠️ 削除ポスト確認ができませんでした: {e}"]
     lines += month_cost_lines(d1, basic)
+    try:
+        lines += rows_read_lines(d1, production)
+    except Exception as e:  # 数えられなくても収集の結果は残す
+        lines += ["", f"- ⚠️ D1 の読み取り行数を記録できませんでした: {e}"]
     write_summary(lines)
     if alert_zero:
         # 1回だけ失敗にして GitHub からメールを出す(次の回からは成功に戻る)

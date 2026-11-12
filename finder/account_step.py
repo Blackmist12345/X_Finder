@@ -47,9 +47,12 @@ def candidates(d1, now=None, limit=MAX_LOOKUPS):
     now = now or datetime.now(timezone.utc)
     recent = now - timedelta(days=RECHECK_DAYS)
     seen = {}  # handle -> いちばん新しく画像・本文から読んだ時刻
-    for r in d1.query("SELECT read_at, accounts_json FROM image_reads WHERE accounts_json IS NOT NULL AND accounts_json NOT IN ('', '[]') "
-                      "UNION ALL SELECT scanned_at, accounts_json FROM text_mentions "
-                      "WHERE accounts_json IS NOT NULL AND accounts_json NOT IN ('', '[]')"):
+    # 読んだ記録は直近 RECHECK_DAYS 日ぶんだけ見る(それより前に読んだ ID は、そのときに調べ終わっている。D1 の読み取り行数を増やさないため)
+    since = recent.replace(microsecond=0).isoformat()
+    for r in d1.query("SELECT read_at, accounts_json FROM image_reads WHERE read_at >= ? "
+                      "AND accounts_json IS NOT NULL AND accounts_json NOT IN ('', '[]') "
+                      "UNION ALL SELECT scanned_at, accounts_json FROM text_mentions WHERE scanned_at >= ? "
+                      "AND accounts_json IS NOT NULL AND accounts_json NOT IN ('', '[]')", [since, since]):
         try:
             accounts = json.loads(r["accounts_json"])
         except ValueError:
