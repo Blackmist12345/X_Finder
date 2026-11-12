@@ -33,7 +33,7 @@ const swipeFor = (tab, v) => (v === tab ? (tab === "new" ? "none" : "new") : v);
 const DEFAULT_SETTINGS = { swipe_right: "hold", swipe_left: "delete" };
 
 // ブラックリストの理由。spam=スパム / false=虚偽の申告 / photographer=被写体ではなくカメラマンだった / other=その他
-const ROLE_ORDER = ["reply_to", "quoted", "mention", "image", "image_tree"];
+const ROLE_ORDER = ["reply_to", "quoted", "mention", "text", "text_tree", "image", "image_tree"];
 const BLACKLIST_REASONS = ["spam", "false", "photographer", "other"];
 const BLACKLIST_SKIP = "ブラックリスト"; // 判定前のポストに付ける除外理由(finder/store.py と同じ)
 const NOT_BLACKLISTED = "NOT EXISTS (SELECT 1 FROM blacklist b WHERE b.user_id = p.author_id)";
@@ -56,6 +56,8 @@ const TABLES_DDL = [
   `CREATE TABLE IF NOT EXISTS post_checks (post_id TEXT PRIMARY KEY, checked_at TEXT NOT NULL, gone_at TEXT)`,
   // 画像から読んだ ID を調べた記録(書くのは収集の方。いない ID・凍結などを詳細に出す)
   `CREATE TABLE IF NOT EXISTS handle_lookups (handle TEXT PRIMARY KEY, looked_at TEXT NOT NULL, result TEXT NOT NULL, user_id TEXT, note TEXT)`,
+  // 本文(ツリー含む)に書かれた X の ID(書くのは収集の方)
+  `CREATE TABLE IF NOT EXISTS text_mentions (post_id TEXT PRIMARY KEY, scanned_at TEXT NOT NULL, accounts_json TEXT)`,
 ];
 let tablesReady = false;
 async function ensureTables(db) {
@@ -188,12 +190,18 @@ export async function getCase(db, id) {
     if (m) m.roles.push(p.role);
     else merged.set(p.id, { ...p, roles: [p.role] });
   }
-  // 添付画像(メンバー表など)から AI が読んだアカウント。台帳に同じ ID(username)の人がいればその人として出す
-  // ツリー(引用元・返信元)の画像から読んだ人は from: "tree" が付いていて、役割を image_tree にする
+  // 添付画像(メンバー表など)から AI が読んだアカウントと、本文(ツリー含む)に書かれた @ID。台帳に同じ ID(username)の人がいればその人として出す
+  // ツリー(引用元・返信元)の画像・本文から読んだ人は from: "tree" が付いていて、役割を image_tree / text_tree にする
   const read = await db.prepare("SELECT accounts_json FROM image_reads WHERE post_id = ?").bind(id).first();
-  const fromImage = parseJson(read && read.accounts_json, []).filter((a) => a && /^[A-Za-z0-9_]{1,15}$/.test(a.handle || ""));
+  // 本文の ID の表は収集が作る(finder/mention_step.py)。まだなければ本文からの人なしで出す
+  const written = await db.prepare("SELECT accounts_json FROM text_mentions WHERE post_id = ?").bind(id).first().catch(() => null);
+  const validHandle = (a) => a && /^[A-Za-z0-9_]{1,15}$/.test(a.handle || "");
+  const fromImage = [
+    ...parseJson(read && read.accounts_json, []).filter(validHandle).map((a) => ({ ...a, role: a.from === "tree" ? "image_tree" : "image" })),
+    ...parseJson(written && written.accounts_json, []).filter(validHandle).map((a) => ({ ...a, role: a.from === "tree" ? "text_tree" : "text" })),
+  ];
   if (fromImage.length) {
-    const handles = fromImage.map((a) => a.handle.toLowerCase());
+    const handles = [...new Set(fromImage.map((a) => a.handle.toLowerCase()))];
     const { results: known } = await db
       .prepare(
         `SELECT id, username, name, followers, following, profile_image FROM users
@@ -213,20 +221,28 @@ export async function getCase(db, id) {
       .catch(() => ({ results: [] }));
     const lookup = new Map(looked.map((l) => [l.handle, l.result]));
     const author = (row.username || "").toLowerCase();
+    const unnamed = new Set(); // ここで足した人のうち、書かれた名前がまだない人
     for (const a of fromImage) {
       const key = a.handle.toLowerCase();
-      const role = a.from === "tree" ? "image_tree" : "image";
+      const role = a.role;
       if (key === author) continue;
       const u = byName.get(key);
       const same = u ? merged.get(u.id) : [...merged.values()].find((m) => (m.username || "").toLowerCase() === key);
       if (same) {
-        if (!same.roles.includes(role)) same.roles.push(role);
+        // 本文の @ は X のメンションとしても入っているので、「メンション」の人に「本文から」は重ねない
+        if (!same.roles.includes(role) && !(role === "text" && same.roles.includes("mention"))) same.roles.push(role);
+        // 画像で名前が読めなかった人に、本文に書かれた名前(キャラ名など)があればそちらを出す
+        if (a.name && unnamed.has(same)) {
+          same.name = a.name;
+          unnamed.delete(same);
+        }
         continue;
       }
       if (u && u.id === row.author_id) continue;
       const entry = u
         ? { ...u, name: a.name || u.name, roles: [role] } // 画像に書かれた名前(キャラ名など)があればそちらを出す
         : { id: null, username: a.handle, name: a.name || null, roles: [role], lookup: lookup.get(key) || null };
+      if (!a.name) unnamed.add(entry);
       merged.set(u ? u.id : `image:${key}`, entry);
     }
   }
@@ -279,7 +295,7 @@ async function getTree(db, id, authorId) {
 }
 
 // データベースの中身を見る画面(読むだけ)。見せる表はここに並べたものだけ
-const DB_TABLES = ["posts", "judgments", "reviews", "blacklist", "users", "user_links", "user_aliases", "post_users", "image_reads", "post_trees", "missing_posts", "runs", "costs", "meta"];
+const DB_TABLES = ["posts", "judgments", "reviews", "blacklist", "users", "user_links", "user_aliases", "post_users", "image_reads", "text_mentions", "post_trees", "missing_posts", "runs", "costs", "meta"];
 const DB_PAGE = 30;
 const DB_CELL_MAX = 400; // 長い値(AI の返事の JSON など)は先頭だけ返す
 

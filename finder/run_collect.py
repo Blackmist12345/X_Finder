@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from finder import account_step, collect, deleted_step, filters, image_step, judge, judge_step, link_step, search_diag, store, tree_step
+from finder import account_step, collect, deleted_step, filters, image_step, judge, judge_step, link_step, mention_step, search_diag, store, tree_step
 from finder.config import load_config
 from finder.d1 import D1
 from finder.notion import Notion
@@ -166,9 +166,13 @@ def main():
     except Exception as e:  # 画像が読めなくても収集・判定の結果は残す
         lines += ["", f"- ⚠️ 画像からアカウントを読めませんでした: {e}"]
     try:
+        lines += mention_step.run(d1, production)
+    except Exception as e:  # 拾えなくても収集・判定の結果は残す(次の収集でもう一度)
+        lines += ["", f"- ⚠️ 本文から X の ID を拾えませんでした: {e}"]
+    try:
         lines += account_step.run(d1, config, production, os.environ.get("TWITTERAPI_KEY"))
     except Exception as e:  # 調べられなくても収集・判定の結果は残す(次の収集でもう一度)
-        lines += ["", f"- ⚠️ 画像から読んだアカウントのフォロワー数を取れませんでした: {e}"]
+        lines += ["", f"- ⚠️ 画像・本文から読んだアカウントのフォロワー数を取れませんでした: {e}"]
     try:
         lines += link_step.run(d1, production)
     except Exception as e:  # リンク先が読めなくても収集・判定の結果は残す

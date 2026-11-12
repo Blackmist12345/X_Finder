@@ -1,9 +1,9 @@
-"""N7 参加者情報(の続き): 画像から読んだ X のアカウント(image_step)のフォロワー数・フォロー数・アイコンを取る。
+"""N7 参加者情報(の続き): 画像から読んだ X のアカウント(image_step)と、本文に書かれた ID(mention_step)のフォロワー数・フォロー数・アイコンを取る。
 
 TwitterAPI.io の Get User Info(GET /twitter/user/info?userName=ID)で 1 人ずつ調べ、結果をユーザー台帳(users)に保存する。
 画面の「関係するアカウント」は台帳から数字とアイコンを出す。
 - 台帳にフォロワー数が入っている人や、調べてから 7 日以内の人は調べない。
-- 7 日より前に調べた人は、そのあと新しく読んだ画像にまた出てきたときだけ調べ直す(同じ人を何度も取らない)。
+- 7 日より前に調べた人は、そのあと新しく読んだ画像・本文にまた出てきたときだけ調べ直す(同じ人を何度も取らない)。
 - いない ID(画像の読み違いなど)・凍結などの人も handle_lookups に記録し、画面に出す。
 - 失敗しても収集・判定は止めない(調べられなかった人は次の収集でもう一度)。
 料金(docs.twitterapi.io/pricing): 1 人 18 クレジット($0.00018)。
@@ -43,11 +43,13 @@ def _ts(iso):
 
 
 def candidates(d1, now=None, limit=MAX_LOOKUPS):
-    """調べる ID(小文字)を、新しく読んだ画像に出てきた順に返す。"""
+    """調べる ID(小文字)を、新しく読んだ画像・本文に出てきた順に返す。"""
     now = now or datetime.now(timezone.utc)
     recent = now - timedelta(days=RECHECK_DAYS)
-    seen = {}  # handle -> いちばん新しく画像から読んだ時刻
-    for r in d1.query("SELECT read_at, accounts_json FROM image_reads WHERE accounts_json IS NOT NULL AND accounts_json NOT IN ('', '[]')"):
+    seen = {}  # handle -> いちばん新しく画像・本文から読んだ時刻
+    for r in d1.query("SELECT read_at, accounts_json FROM image_reads WHERE accounts_json IS NOT NULL AND accounts_json NOT IN ('', '[]') "
+                      "UNION ALL SELECT scanned_at, accounts_json FROM text_mentions "
+                      "WHERE accounts_json IS NOT NULL AND accounts_json NOT IN ('', '[]')"):
         try:
             accounts = json.loads(r["accounts_json"])
         except ValueError:
@@ -117,7 +119,7 @@ def run(d1, config, production, api_key, session=None, now=None):
     """調べて保存し、要約の行を返す。試し実行では何もしない。"""
     if not production:
         return []
-    lines = ["", "## 画像から読んだアカウントのフォロワー数", ""]
+    lines = ["", "## 画像・本文から読んだアカウントのフォロワー数", ""]
     if not api_key:
         return lines + ["- ⚠️ TWITTERAPI_KEY が登録されていないので、調べませんでした"]
     handles = candidates(d1, now=now)
@@ -146,7 +148,7 @@ def run(d1, config, production, api_key, session=None, now=None):
         counts[result] += 1
         time.sleep(0.2)
     usd = cost_usd(calls)
-    store.record_cost(d1, "twitterapi.io", calls, usd, "画像から読んだアカウントのフォロワー数")
+    store.record_cost(d1, "twitterapi.io", calls, usd, "画像・本文から読んだアカウントのフォロワー数")
     rate = config["basic"]["為替レート(円/ドル)"]
     left = len(handles) - sum(counts.values())
     lines.append(f"- 調べた {sum(counts.values())}人(取れた {counts['ok']}人"
