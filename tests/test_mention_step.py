@@ -95,4 +95,7 @@ def test_does_nothing_in_trial(d1):
 def test_account_step_also_looks_up_ids_from_text(d1):
     d1.query("INSERT INTO text_mentions (post_id, scanned_at, accounts_json) VALUES ('1', '2026-11-02T00:00:00+00:00', ?)",
              [json.dumps([{"handle": "From_Text", "name": "ミジ", "from": "tree"}])])
-    assert account_step.candidates(d1) == ["from_text"]
+    from datetime import datetime, timezone
+    assert account_step.candidates(d1, now=datetime(2026, 11, 3, tzinfo=timezone.utc)) == ["from_text"]
+    # 読んだ記録は直近 7 日ぶんだけ見る
+    assert account_step.candidates(d1, now=datetime(2026, 11, 20, tzinfo=timezone.utc)) == []

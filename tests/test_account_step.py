@@ -64,8 +64,9 @@ def test_skips_known_users_and_rechecks_only_when_seen_again_after_7_days(d1):
              "('2', 'old', 10, 5, 'x', 'x', '2026-10-01T00:00:00+00:00'), "
              "('3', 'old_again', 10, 5, 'x', 'x', '2026-10-01T00:00:00+00:00')")
     read(d1, "1", ["known", "old", "new_one"], at="2026-09-30T00:00:00+00:00")
-    read(d1, "2", ["old_again"], at="2026-11-02T00:00:00+00:00")
-    assert sorted(account_step.candidates(d1, now=NOW)) == ["new_one", "old_again"]
+    read(d1, "2", ["old_again", "new_two"], at="2026-11-02T00:00:00+00:00")
+    # 画像を読んだ記録は直近 7 日ぶんだけ見る(new_one は 9/30 に読んだきりなので、もう探さない)
+    assert sorted(account_step.candidates(d1, now=NOW)) == ["new_two", "old_again"]
 
 
 def test_stops_after_repeated_failures_and_retries_next_time(d1, monkeypatch):

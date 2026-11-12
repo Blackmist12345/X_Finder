@@ -135,18 +135,42 @@ function workPoints(detail) {
 export async function listCases(db, params) {
   const view = params.get("view") === "rejected" ? "rejected" : "judged";
   const days = Math.min(Math.max(Number(params.get("days")) || 14, 1), 60);
-  const group = view === "rejected" ? "" : params.get("group") === "deleted" ? "AND r.state = 'delete'" : "AND (r.state IS NULL OR r.state != 'delete')";
-  const { results } = await db
-    .prepare(
-      `SELECT ${CASE_COLUMNS}, p.media_json, j.score_json,
-        (SELECT COUNT(*) FROM post_users pu WHERE pu.post_id = p.id AND pu.role IN ('mention', 'quoted')) AS others
-       FROM posts p JOIN judgments j ON j.post_id = p.id LEFT JOIN users u ON u.id = p.author_id
-       LEFT JOIN reviews r ON r.post_id = p.id
-       WHERE p.status = ? AND (p.collected_at >= ? OR r.state IN ${KEEP_STATES}) AND ${NOT_BLACKLISTED} ${group}
-       ORDER BY (r.state IN ${KEEP_STATES}) DESC, p.collected_at DESC, p.created_at DESC, p.id DESC LIMIT ?`,
-    )
-    .bind(view, daysAgoIso(days), MAX_LIST)
-    .all();
+  const deleted = view === "judged" && params.get("group") === "deleted";
+  const group = view === "rejected" ? "" : deleted ? "AND r.state = 'delete'" : "AND (r.state IS NULL OR r.state != 'delete')";
+  const select = `SELECT ${CASE_COLUMNS}, p.media_json, j.score_json,
+        (SELECT COUNT(*) FROM post_users pu WHERE pu.post_id = p.id AND pu.role IN ('mention', 'quoted')) AS others`;
+  const order = "ORDER BY p.collected_at DESC, p.created_at DESC, p.id DESC LIMIT ?";
+  // D1 の読み取り行数(無料枠は 1 日 500 万行)を増やさないよう、2 回に分けて取る。
+  // 1) 連絡中・受注中: 状態の表(reviews)から辿る(CROSS JOIN は「左の表から先に読む」指定)
+  // 2) それ以外: 状態+集めた日時の索引で、直近の分だけ読む
+  const kept = deleted
+    ? []
+    : (
+        await db
+          .prepare(
+            `${select}
+             FROM reviews r CROSS JOIN posts p ON p.id = r.post_id JOIN judgments j ON j.post_id = p.id
+             LEFT JOIN users u ON u.id = p.author_id
+             WHERE r.state IN ${KEEP_STATES} AND p.status = ? AND ${NOT_BLACKLISTED} ${order}`,
+          )
+          .bind(view, MAX_LIST)
+          .all()
+      ).results;
+  const recent = kept.length >= MAX_LIST
+    ? []
+    : (
+        await db
+          .prepare(
+            `${select}
+             FROM posts p JOIN judgments j ON j.post_id = p.id LEFT JOIN users u ON u.id = p.author_id
+             LEFT JOIN reviews r ON r.post_id = p.id
+             WHERE p.status = ? AND p.collected_at >= ? AND (r.state IS NULL OR r.state NOT IN ${KEEP_STATES})
+               AND ${NOT_BLACKLISTED} ${group} ${order}`,
+          )
+          .bind(view, daysAgoIso(days), MAX_LIST - kept.length)
+          .all()
+      ).results;
+  const results = [...kept, ...recent];
   // 添付画像の URL も返す(詳細を開いた瞬間から画像の場所を取っておき、あとから表示がずれないように)
   // 自己紹介は一覧では使わないので返さない(年齢と活動地域だけ読み取って付ける)
   return results.map(({ media_json, score_json, description, location, link_found, ...r }) => ({
