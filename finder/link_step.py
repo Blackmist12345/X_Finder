@@ -17,7 +17,7 @@ from finder import store
 
 MAX_USERS = 20           # 1 回の実行で読む人数
 REFRESH_DAYS = 30        # これより古くなったら読み直す
-LIST_DAYS = 14           # X Finderの一覧に出る日数。この間に案件になったポストの依頼主だけ読む
+LIST_DAYS = 3            # 集めてからこの日数の間に案件になったポストの依頼主だけ読む(D1 の読み取り行数を増やさないため)
 MAX_BYTES = 2_000_000    # これより大きいページは途中まで
 MAX_TEXT = 20000         # 読み取りに使う文字数(保存はしない)
 TIMEOUT = 10

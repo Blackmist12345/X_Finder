@@ -148,3 +148,23 @@ def test_rows_read_is_counted_per_caller_and_summed_for_the_day(d1):
     assert "合計: 150行" in lines[2]
     # 試し実行では保存しない
     assert len(run_collect.rows_read_lines(d1, False, now)) == 2
+
+
+def test_month_cost_reads_only_new_rows_and_keeps_the_sum(d1):
+    from finder import store
+    basic = {"為替レート(円/ドル)": 100, "月の費用の目標(円)": 1000}
+    plan = " ".join(r["detail"] for r in d1.query(
+        "EXPLAIN QUERY PLAN SELECT service, SUM(usd), MAX(id) FROM costs NOT INDEXED WHERE id > ? AND at >= ? GROUP BY service", [0, "x"]))
+    assert "rowid>" in plan  # 前回の続きからだけ読む
+    store.record_cost(d1, "claude", 1, 1.0, "a")
+    store.record_cost(d1, "twitterapi.io", 1, 0.5, "b")
+    assert "約150円" in run_collect.month_cost_lines(d1, basic)[1]
+    assert d1.get_meta(run_collect.MONTH_COST_KEY)["last_id"] == 2
+    d1.query("DELETE FROM costs")  # 読み終えた行は、もう読まなくても合計に入っている
+    d1.query("INSERT INTO costs (id, at, service, units, usd, note) VALUES (3, ?, 'claude', 1, 0.25, 'c')", [store.now_iso()])
+    line = run_collect.month_cost_lines(d1, basic)[1]
+    assert "約175円" in line and "claude 約125円" in line
+    # 試し実行では合計を保存しない
+    d1.query("INSERT INTO costs (id, at, service, units, usd, note) VALUES (4, ?, 'claude', 1, 1.0, 'd')", [store.now_iso()])
+    assert "約275円" in run_collect.month_cost_lines(d1, basic, production=False)[1]
+    assert d1.get_meta(run_collect.MONTH_COST_KEY)["last_id"] == 3

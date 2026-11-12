@@ -58,11 +58,11 @@ TOOL = {
 HAS_MEDIA = "{0}.media_json IS NOT NULL AND {0}.media_json NOT IN ('', '[]')"
 
 
-LIST_DAYS = 14  # X Finderの一覧に出る日数。これより古いポストは探さない(D1 の読み取り行数を増やさないため)
+LIST_DAYS = 3  # 集めてからこの日数のポストだけ探す(画像は判定の直後に読むので足りる。D1 の読み取り行数を増やさないため)
 
 
 def candidates(d1, limit=MAX_POSTS_PER_RUN, now=None):
-    """判定で対象になり、本文かツリーに画像があり、まだ読んでいないポスト(新しい順)。集めてから 14 日以内のものだけ。"""
+    """判定で対象になり、本文かツリーに画像があり、まだ読んでいないポスト(新しい順)。集めてから LIST_DAYS 日以内のものだけ。"""
     return d1.query(
         "SELECT p.id, p.media_json, t.ids_json AS tree_ids, u.username AS author_username FROM posts p "
         "LEFT JOIN users u ON u.id = p.author_id LEFT JOIN post_trees t ON t.post_id = p.id "
