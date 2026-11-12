@@ -14,9 +14,13 @@ def test_build_query_caps_number_of_excludes():
     excludes = [{"word": "時給", "score": 1}, {"word": "VRChat", "score": 9}, {"word": "有償", "score": 5}]
     query, used, overflow = collect.build_query(["カメラマン"], ["募集"], excludes, max_excludes=1)
     assert used == ["VRChat"] and overflow == ["有償", "時給"]
-    # 既定(今は0語): 除外語はすべて収集後に取り除く
-    query, used, overflow = collect.build_query(["カメラマン"], ["募集"], excludes)
+    # 0語: 除外語はすべて収集後に取り除く
+    query, used, overflow = collect.build_query(["カメラマン"], ["募集"], excludes, max_excludes=0)
     assert query == '(("カメラマン") ("募集"))' and used == [] and len(overflow) == 3
+    # 既定は MAX_QUERY_EXCLUDES 語まで(点数の高い順)
+    many = [{"word": f"語{i}", "score": 100 - i} for i in range(collect.MAX_QUERY_EXCLUDES + 5)]
+    query, used, overflow = collect.build_query(["カメラマン"], ["募集"], many)
+    assert used == [f"語{i}" for i in range(collect.MAX_QUERY_EXCLUDES)] and len(overflow) == 5
 
 
 def test_cost_uses_per_tweet_price_with_per_call_minimum():

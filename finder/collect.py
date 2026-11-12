@@ -10,8 +10,9 @@ URL = "https://api.twitterapi.io/twitter/tweet/advanced_search"
 MAX_QUERY_LENGTH = 440
 # 検索式に入れる除外語の数の上限。2026-11-10 ごろから、除外語(-"語")を37語入れた式だと
 # TwitterAPI.io が時間の指定なしでも0件を返すようになった(診断モードで確認)。
-# 何語までなら返るか分かるまで 0 にして、除外語はすべて収集後に取り除く。
-MAX_QUERY_EXCLUDES = 0
+# 2026-11-11 の診断では 0・5・10語は返り、20・30語は0件だったので、確かめてある 10語までにする。
+# 入りきらない除外語は収集後に取り除く。
+MAX_QUERY_EXCLUDES = 10
 MAX_PAGES = 50
 BACKFILL_MAX_PAGES = 150  # 取り直しは時間枠が長いので多めに(最大3,000件、約69円)
 CREDITS_PER_TWEET = 15
