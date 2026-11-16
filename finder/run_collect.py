@@ -1,4 +1,4 @@
-"""収集の 1 回分: N1 設定読込 → N2 収集 → N3 一次フィルタ → N12/N15 保存 → 遡り・2 回目の N3 → N4 AI 判定 → N10 採点。
+"""収集の 1 回分: N1 設定読込 → N2 収集 → N3 一次フィルタ → N12/N15 保存 → 手動追加の取り込み → 遡り・2 回目の N3 → N4 AI 判定 → N10 採点。
 
 環境変数:
   MODE   production(保存して検索時間枠を進める)/ backfill(HOURS 時間前から取り直して保存する)/ dry_run(何も保存しない試し)/ diagnose(検索の条件を変えて件数を比べる。何も保存しない)
@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from finder import account_step, collect, deleted_step, filters, image_step, judge, judge_step, link_step, mention_step, search_diag, store, tree_step
+from finder import account_step, collect, deleted_step, filters, image_step, judge, judge_step, link_step, manual_step, mention_step, search_diag, store, tree_step
 from finder.config import load_config
 from finder.d1 import D1
 from finder.notion import Notion
@@ -196,6 +196,10 @@ def main():
         lines.append("- 減点語に当たった数: " + "、".join(f"{k} {v}件" for k, v in penalty_count.most_common(10)))
     for w in warnings:
         lines.append(f"- ⚠️ {w}")
+    try:
+        lines += manual_step.run(d1, config, production, os.environ.get("TWITTERAPI_KEY"))
+    except Exception as e:  # 取り込めなくても収集の結果は残す(受付は残るので次の収集でもう一度)
+        lines += ["", f"- ⚠️ 手動追加のポストを取り込めませんでした: {e}"]
     try:
         lines += tree_step.run(d1, config, production, os.environ.get("TWITTERAPI_KEY"))
     except Exception as e:  # 遡れなくても収集の結果は残す(次の収集でもう一度遡る)

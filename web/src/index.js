@@ -58,6 +58,10 @@ const TABLES_DDL = [
   `CREATE TABLE IF NOT EXISTS handle_lookups (handle TEXT PRIMARY KEY, looked_at TEXT NOT NULL, result TEXT NOT NULL, user_id TEXT, note TEXT)`,
   // 本文(ツリー含む)に書かれた X の ID(書くのは収集の方)
   `CREATE TABLE IF NOT EXISTS text_mentions (post_id TEXT PRIMARY KEY, scanned_at TEXT NOT NULL, accounts_json TEXT)`,
+  // 手動追加の受付(画面が書き、次の収集が取り込んで結果を書き戻す。schema.sql と同じ)
+  `CREATE TABLE IF NOT EXISTS manual_adds (
+    post_id TEXT PRIMARY KEY, url TEXT NOT NULL, requested_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+    note TEXT, tries INTEGER NOT NULL DEFAULT 0, done_at TEXT)`,
 ];
 let tablesReady = false;
 async function ensureTables(db) {
@@ -115,7 +119,7 @@ function daysAgoIso(days) {
 }
 
 const CASE_COLUMNS = `
-  p.id, p.text, p.url, p.created_at, p.collected_at, p.status, p.skip_reason, p.quoted_id, p.reply_to_id,
+  p.id, p.source, p.text, p.url, p.created_at, p.collected_at, p.status, p.skip_reason, p.quoted_id, p.reply_to_id,
   j.case_type, j.works, j.prefecture, j.prefecture_source, j.place, j.dates, j.summary, j.score, j.reject_reason,
   p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, CASE WHEN r.state IN ('checking', 'accepted', 'hold', 'delete') THEN r.state ELSE 'new' END AS review, (r.opened_at IS NOT NULL) AS opened,
   (r.post_id IS NOT NULL AND NOT (r.state = 'new' AND r.opened_at IS r.updated_at)) AS touched,
@@ -319,7 +323,7 @@ async function getTree(db, id, authorId) {
 }
 
 // データベースの中身を見る画面(読むだけ)。見せる表はここに並べたものだけ
-const DB_TABLES = ["posts", "judgments", "reviews", "blacklist", "users", "user_links", "user_aliases", "post_users", "image_reads", "text_mentions", "post_trees", "missing_posts", "runs", "costs", "meta"];
+const DB_TABLES = ["posts", "judgments", "reviews", "blacklist", "users", "user_links", "user_aliases", "post_users", "image_reads", "text_mentions", "post_trees", "missing_posts", "manual_adds", "runs", "costs", "meta"];
 const DB_PAGE = 30;
 const DB_CELL_MAX = 400; // 長い値(AI の返事の JSON など)は先頭だけ返す
 
@@ -458,7 +462,8 @@ export async function setReviews(db, body) {
 const SORT_FACETS = ["gender", "age", "area", "shoot", "plan", "score", "type"];
 // 「絞り込み」: チェックした値に当てはまるカードだけを一覧に出す(状態は変えない)。仕分けと同じ項目に、収集日を足す
 // score は「この点数以上」、within は「収集から◯日以内」、before は「収集から◯日以上前」の数字を1つだけ入れる
-const VIEW_FACETS = [...SORT_FACETS, "within", "before"];
+// added は「追加のしかた」(手動追加 / 収集)。絞り込みだけで使う
+const VIEW_FACETS = [...SORT_FACETS, "added", "within", "before"];
 const SORT_VALUES_MAX = 60;
 const PRESET_MAX = 20;
 function cleanRule(rule, keys = SORT_FACETS) {
@@ -557,6 +562,49 @@ export async function saveSettings(db, body) {
     .bind(SETTINGS_KEY, JSON.stringify(next), nowIso())
     .run();
   return next;
+}
+
+// ---- 手動追加 ----
+// ポストの URL を受け付けて manual_adds に書くだけ(画面の Worker には X の鍵を置かないので、取りに行くのは次の収集)。
+// すでに一覧に出ているポスト・ブラックリストの人のポスト(D1 にあって分かるもの)は、ここで断る。
+const MANUAL_URL = /^(?:https?:\/\/)?(?:(?:www|mobile|m)\.)?(?:x|twitter)\.com\/(?:[A-Za-z0-9_]{1,15}|i\/web|i)\/status(?:es)?\/(\d{1,25})(?:[/?#].*)?$/i;
+const MANUAL_LIST_DAYS = 14; // 一覧に出るのは集めてから 14 日(連絡中・受注中は残る)
+const STATE_NAMES = { new: "新着", checking: "確認中", accepted: "連絡中", hold: "受注中", delete: "削除予定" };
+export function parsePostUrl(raw) {
+  const m = String(raw || "").trim().match(MANUAL_URL);
+  return m ? m[1] : null;
+}
+
+export async function addManual(db, body) {
+  const id = parsePostUrl(body?.url);
+  if (!id) throw new RangeError("url");
+  const post = await db
+    .prepare(`SELECT p.status, p.collected_at, r.state, ${NOT_BLACKLISTED} AS allowed
+              FROM posts p LEFT JOIN reviews r ON r.post_id = p.id WHERE p.id = ?`)
+    .bind(id)
+    .first();
+  if (post && !post.allowed) return { result: "blacklisted", message: "ブラックリストの人のポストなので追加しません" };
+  if (post?.status === "judged" && (post.collected_at >= daysAgoIso(MANUAL_LIST_DAYS) || ["accepted", "hold"].includes(post.state))) {
+    const state = REVIEW_STATES.includes(post.state) ? post.state : "new";
+    return { result: "exists", state, message: `すでに一覧にあります(${STATE_NAMES[state]})` };
+  }
+  const wait = await db.prepare("SELECT 1 AS ok FROM manual_adds WHERE post_id = ? AND status = 'pending'").bind(id).first();
+  if (wait) return { result: "pending", message: "受付済みです。次の収集(10分ごと)で取り込みます" };
+  await db
+    .prepare(`INSERT INTO manual_adds (post_id, url, requested_at, status) VALUES (?, ?, ?, 'pending')
+              ON CONFLICT(post_id) DO UPDATE SET url = excluded.url, requested_at = excluded.requested_at,
+                status = 'pending', note = NULL, tries = 0, done_at = NULL`)
+    .bind(id, `https://x.com/i/web/status/${id}`, nowIso())
+    .run();
+  return { result: "queued", message: "受け付けました。次の収集(10分ごと)で取り込み、新着のいちばん上に出します" };
+}
+
+// 最近の受付(設定の「ポストを追加」に出す)
+export async function listManual(db) {
+  const { results } = await db
+    .prepare("SELECT post_id, url, requested_at, status, note, done_at FROM manual_adds ORDER BY requested_at DESC LIMIT 10")
+    .all();
+  return results;
 }
 
 // 画面の fetch からだけ書けるようにする(よそのサイトからのフォーム送信を受け付けない)
@@ -703,6 +751,17 @@ export default {
         return json({ error: "保存できませんでした" }, 500);
       }
     }
+    if (url.pathname === "/api/manual" && request.method === "POST") {
+      if (!sameOriginWrite(request, url)) return text("このページからだけ変更できます。", 403);
+      try {
+        await ensureTables(env.DB);
+        return json(await addManual(env.DB, await request.json().catch(() => ({}))));
+      } catch (e) {
+        if (e instanceof RangeError) return json({ error: "X のポストの URL(x.com/…/status/数字)を貼ってください" }, 400);
+        console.error(e);
+        return json({ error: "受け付けられませんでした" }, 500);
+      }
+    }
     if (url.pathname === "/api/reviews" && request.method === "POST") {
       if (!sameOriginWrite(request, url)) return text("このページからだけ変更できます。", 403);
       try {
@@ -751,6 +810,7 @@ export default {
         return t ? json(t) : json({ error: "見つかりません" }, 404);
       }
       if (url.pathname === "/api/blacklist") return json({ blacklist: await listBlacklist(env.DB) });
+      if (url.pathname === "/api/manual") return json({ items: await listManual(env.DB) });
       if (url.pathname === "/api/stats") return json(await getStats(env.DB, url.searchParams));
       if (url.pathname === "/api/calendar") {
         try {

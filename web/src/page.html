@@ -134,6 +134,17 @@ select{font:inherit;font-size:16px;border:1px solid var(--line);background:var(-
 .pill{font-size:11.5px;border-radius:6px;padding:2px 7px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
 .pill.type{background:var(--accent-soft);color:var(--accent);font-weight:500}
 .pill.warn{background:var(--warn-soft);color:var(--warn)}
+/* 手動追加したカードのタグ */
+.pill.manual{background:var(--accent);color:var(--surface);font-weight:600}
+/* 設定の「ポストを追加」 */
+.madd{display:flex;gap:8px}
+.madd .btn{flex:none;padding:8px 18px}
+.madd input{flex:1;min-width:0;font:inherit;font-size:16px;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:10px;padding:8px 10px}
+.mlist{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:4px;font-size:12px;color:var(--muted)}
+.mlist li{display:flex;gap:6px;align-items:baseline;min-width:0}
+.mlist .mid{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.mlist .mst{flex:none;font-weight:600}
+.mlist .mst.ok{color:var(--ok)}.mlist .mst.ng{color:var(--warn)}
 .warn-text{color:var(--warn)}
 .pill.gone{background:var(--surface-2);color:var(--muted);border:1px dashed var(--muted)}
 .ctag{display:inline-block;font-size:11px;line-height:1.5;border-radius:5px;padding:0 5px;margin-left:4px;background:var(--surface-2);color:var(--muted);vertical-align:1px;white-space:nowrap}
@@ -486,6 +497,8 @@ const SORT_FACETS=[
   // 点数は「この点数以下」の数字を1つだけ入れる(rule.score は ["-50"] の形)。値のチェックではなく数字の欄で選ぶ
   {k:"score",g:"案件",t:"点数",num:true,v:()=>[]},
   {k:"type",g:"案件",t:"種類",v:c=>c.case_type||"その他"},
+  // 設定の「ポストを追加」で手動追加したカードか。絞り込みだけで使う(手動追加のカードは自動仕分けの対象外)
+  {k:"added",g:"案件",t:"追加のしかた",v:c=>c.source==="manual"?"手動追加":"収集",viewOnly:true},
 ];
 const NA_VALUES=["記載なし","不明","日付不明"];
 // 点数表の作品に当たったときの点(カードの「作品」の行の後ろに小さく出す。マイナスは赤、プラスは緑)
@@ -606,6 +619,7 @@ async function postReview(id,body){
   if(!r.ok)throw new Error(`${r.status}`);return (await r.json()).review}
 function setLocalReview(id,review){const c=cases.find(x=>x.id===id);if(c)c.review=review}
 function daysLeft(c){if(!c.created_at)return null;return Math.max(0,Math.ceil((new Date(c.created_at).getTime()+DELETE_DAYS*864e5-Date.now())/864e5))}
+const manualPill=c=>isManual(c)?'<span class="pill manual">手動</span>':"";
 function reviewPill(c){
   if(c.review==="accepted")return '<span class="pill acc">連絡中</span>';
   if(c.review==="checking")return '<span class="pill chk">確認中</span>';
@@ -657,7 +671,9 @@ function filtered(){
   const a=matching().filter(c=>c.review===state.tab);
   const by={score:(x,y)=>(y.score??-1e9)-(x.score??-1e9),new:(x,y)=>(y.created_at||"").localeCompare(x.created_at||""),
     ff:(x,y)=>ffVal(y)-ffVal(x),followers:(x,y)=>(y.followers||0)-(x.followers||0)}[state.sort];
-  return a.sort(by);
+  // 新着のタブでは、手動追加したカードを並び順に関係なくいちばん上に出す
+  const top=state.tab==="new"?(x,y)=>isManual(y)-isManual(x):()=>0;
+  return a.sort((x,y)=>top(x,y)||by(x,y));
 }
 function render(){
   renderControls();
@@ -703,7 +719,7 @@ function card(c){
   const rejected=state.rejected;
   const pk=state.picking,on=pk&&state.picked.has(c.id);
   return `<div class="swipe" data-sid="${esc(c.id)}"><div class="swipe-bg"><span class="l"></span><span class="r"></span></div><button class="card${pk?" pickable":""}${on?" picked":""}" data-id="${esc(c.id)}"${pk?` aria-pressed="${on}"`:""}>
-   <div class="meta">${pk?'<span class="pickmark" aria-hidden="true"></span>':""}${reviewPill(c)}${gonePill(c)}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(placeShort(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
+   <div class="meta">${pk?'<span class="pickmark" aria-hidden="true"></span>':""}${manualPill(c)}${reviewPill(c)}${gonePill(c)}<span class="pill type">${esc(c.case_type||"その他")}</span><span class="pill">${esc(placeShort(c))}</span>${rejected?`<span class="pill warn">${esc(c.reject_reason||c.skip_reason||"")}</span>`:""}<span class="pill">${ago(c.created_at)}</span></div>
    <div class="score">${rejected?"":`<span class="n">${c.score==null?"—":Math.round(c.score)}</span><span class="l">点</span>`}</div>
    <div class="title">${esc(c.summary||"(要約なし)")}</div>
    <p class="excerpt">${esc((c.text||"").replace(/\s+/g," "))}</p>
@@ -823,7 +839,7 @@ function sheetHtml(c,full){
   const cu=safeUser(c.username);
   const detail=c.score_detail||[];
   return `<div class="grab"></div>
-   <div class="meta" id="sheetMeta">${reviewPill(c)}${gonePill(c)}<span class="pill type">${esc(c.case_type||"その他")}</span>${c.score!=null?`<span class="pill">${Math.round(c.score)}点</span>`:""}<span class="pill">${ago(c.created_at)}に投稿</span>${c.reject_reason?`<span class="pill warn">${esc(c.reject_reason)}</span>`:""}</div>
+   <div class="meta" id="sheetMeta">${manualPill(c)}${reviewPill(c)}${gonePill(c)}<span class="pill type">${esc(c.case_type||"その他")}</span>${c.score!=null?`<span class="pill">${Math.round(c.score)}点</span>`:""}<span class="pill">${ago(c.created_at)}に投稿</span>${c.reject_reason?`<span class="pill warn">${esc(c.reject_reason)}</span>`:""}</div>
    <h2>${esc(c.summary||"(要約なし)")}</h2>
    <dl class="facts"><dt>日程</dt><dd>${esc(c.dates||"不明")}</dd>${calDetail(c)}<dt>場所</dt><dd>${esc(c.place||"")}${c.place?" ・ ":""}${esc(place(c))}${esc(placeFrom(c))}</dd>
     ${c.works?`<dt>作品</dt><dd>${esc(c.works)}</dd>`:""}</dl>
@@ -1006,6 +1022,10 @@ function openSettings(){
   presentSheet(`<div class="grab"></div>
    <h2>設定</h2>
    <button type="button" class="btn help-btn" data-help="1">つかいかた ›</button>
+   <div class="sec" style="margin-top:8px"><h3>ポストを追加</h3>
+    <form class="madd" id="maddForm"><input type="url" id="maddUrl" inputmode="url" autocomplete="off" placeholder="https://x.com/…/status/…" aria-label="追加するポストの URL"><button type="submit" class="btn">追加</button></form>
+    <p class="sub" id="maddMsg" aria-live="polite" style="margin:6px 0 0">X のポストの URL を1件ずつ貼ります。次の収集(10分ごと)で取り込み、新着のいちばん上に「手動」のタグ付きで出します。</p>
+    <ul class="mlist" id="maddList"></ul></div>
    <div class="sec" style="margin-top:8px"><h3>画面の色</h3><div class="theme-seg" id="themeSeg" role="group" aria-label="画面の色">${THEMES.map(([k,l])=>`<button type="button" data-theme-pick="${k}" class="${curTheme()===k?"on":""}" aria-pressed="${curTheme()===k}">${l}</button>`).join("")}</div></div>
    <div class="sec"><h3>文字のフォント</h3><label class="setting" style="border:0;padding-top:0"><span>フォント</span><select id="fontSel" aria-label="文字のフォント">${FONTS.map(([k,l])=>`<option value="${k}" ${curFont()===k?"selected":""}>${l}</option>`).join("")}</select></label>
     <p class="font-sample">カメラマン募集 10/25(土) 渋谷スタジオ</p></div>
@@ -1029,6 +1049,37 @@ function openSettings(){
   };
   document.querySelectorAll("[data-sw-tab]").forEach(e=>e.onchange=onChange);
   $("fontSel").onchange=e=>pickFont(e.target.value);
+  $("maddForm").onsubmit=e=>{e.preventDefault();addManual()};
+  loadManual();
+}
+// ---- 手動追加(設定の「ポストを追加」) ----
+// 受け付けるだけで、取り込むのは次の収集。最近の受付と結果を下に出す
+const MANUAL_STATUS={pending:["取り込み待ち",""],added:["追加済み","ok"],exists:["一覧にあり",""],blacklisted:["ブラックリスト","ng"],not_found:["見つからない","ng"],failed:["失敗","ng"]};
+async function loadManual(){
+  const el=$("maddList");if(!el)return;
+  try{
+    const r=await fetch("/api/manual",{credentials:"same-origin"});if(!r.ok)throw new Error(r.status);
+    const {items}=await r.json();if(!$("maddList"))return;
+    el.innerHTML=items.map(it=>{const [l,k]=MANUAL_STATUS[it.status]||[it.status,""];
+      return `<li><span class="mst ${k}">${esc(l)}</span><span class="mid" title="${esc(it.note||"")}">${esc(it.note&&it.status!=="added"&&it.status!=="pending"?it.note:fmtDate(it.requested_at))} ・ ${esc(it.post_id)}</span></li>`}).join("");
+  }catch(e){el.innerHTML=""}
+}
+const fmtDate=iso=>{const t=Date.parse(iso||"");if(!Number.isFinite(t))return "";const d=new Date(t+9*3600e3);return `${d.getUTCMonth()+1}/${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2,"0")}:${String(d.getUTCMinutes()).padStart(2,"0")}`};
+let maddBusy=false;
+async function addManual(){
+  const input=$("maddUrl"),msg=$("maddMsg"),url=input.value.trim();
+  if(!url||maddBusy)return;
+  maddBusy=true;msg.textContent="送っています…";msg.classList.remove("warn-text");
+  try{
+    const r=await fetch("/api/manual",{method:"POST",credentials:"same-origin",headers:{"content-type":"application/json","x-finder":"1"},body:JSON.stringify({url})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.error||`${r.status}`);
+    msg.textContent=d.message||"受け付けました";
+    msg.classList.toggle("warn-text",d.result==="blacklisted");
+    if(d.result==="queued")input.value="";
+    loadManual();
+  }catch(e){msg.textContent=`受け付けられませんでした(${e.message})`;msg.classList.add("warn-text")}
+  finally{maddBusy=false}
 }
 // ブラックリストは設定から 1 段入ったページで見る(「‹ 設定」で戻る)
 function openBlacklist(){
@@ -1049,6 +1100,12 @@ const HELP=[
   <p>点数は Notion の【3】点数表だけで決まります。区分ごとに、種類・撮影場所の都道府県(読めなければ本文の地名)・本文に出てくる語・作品・イベントに当たった行の点を足し、プラスの点のときは依頼主の FF率(フォロワー数÷フォロー数)を倍率として掛けます(0.5〜1.5倍。幅は【4】基本設定で変えられる)。点数は −100〜+100 で、内訳は詳細で見られます。点数表に当たった作品は、カードの「作品」の行に点が出ます(マイナスは赤)。点数表を変えると、そのあとに取得したポストから新しい点数になります。</p>
   <p>日程の横の「予定あり / 空き / 休み」は Google カレンダーとの照合です。依頼主の名前の横には、プロフィールから読んだ性別・年齢が出ます(未成年は赤)。活動地域はカードの「活動地域」の行に出ます(書いていない人は「記載なし」)。</p>
   <p>一番上で下に引っぱると再読み込みします。下へスクロールすると上部がたたまれます。</p>`],
+ ["ポストを追加(手動追加)",`<p>設定の「ポストを追加」に X のポストの URL を1件ずつ貼ると、次の収集(10分ごと)で取り込みます。</p>
+  <ul><li><b>出かた</b>: 「新着」に、並び順に関係なくいちばん上に出ます。カードと詳細に「手動」のタグが付きます。絞り込みの「追加のしかた」で手動追加のカードだけを出せます。</li>
+  <li><b>かけないもの</b>: 検索除外語と、収集のときのフォロワー数などの足切りはかけません。自動仕分けでも動かしません。</li>
+  <li><b>AI</b>: 引用元・返信元の遡り、AI 判定と点数、画像・アカウントの読み取りは、ふつうのカードと同じに行います(20件たまるのを待たずに判定します)。AI が対象外と判定しても一覧に出し、詳細にその理由が出ます。</li>
+  <li><b>出ないとき</b>: すでに一覧にあるポストは何も変えずに「すでにあります」と出ます。ブラックリストの人のポスト、削除・非公開のポストは追加しません。結果は「ポストを追加」の下に出ます。</li>
+  <li><b>費用</b>: X からポストを取るのに1件約0.02円、AI 判定などはふつうのカードと同じだけかかります。</li></ul>`],
  ["自動仕分け",`<p>ホームの「自動仕分け」で、要らない案件を決めておけます。アプリを開くたび(引っぱって再読み込みしたときも)、チェックした値に1つでも当てはまる新着を削除予定に移し、件数を下に出します(確認中・連絡中・受注中は動かしません)。「元に戻す」で戻した案件や、一度でも状態を変えた案件は、次からは自動では移しません。</p>
   <ul><li><b>項目と値</b>: 依頼主(性別・年齢・活動地域)と案件(撮影場所・撮影日の予定・種類)ごとに、今の案件にある値を件数つきで並べます。件数は新着で数えます。書いていない・分からない案件は「記載なし」「不明」「日付不明」という1つの値になっていて、これもチェックできます。</li>
   <li><b>活動地域</b>: 読み取れる地域を最初から全部並べています。地方(関西・東海など)、都道府県(地方ごとの行)、都市(名古屋・神戸・仙台など)の3つで、市の名前で書いている人はその市の値になります(名古屋の人は「愛知」ではなく「名古屋」)。今の新着にいない地域は薄い字です。「たたむ」で今の新着にある値とチェックした値だけになり、「すべて出す」で戻ります。いくつも書いてある人は、その全部にチェックが付いたときだけ当てはまります(東京と大阪の人は、大阪だけのチェックでは移りません)。</li>
@@ -1059,7 +1116,7 @@ const HELP=[
   <li><b>今すぐ削除予定にする</b>: 今の新着で当てはまるものを全部移します。あとから「元に戻す」で戻せます。</li>
   <li><b>プリセット</b>: 選べるのは1つだけで、タップするとそのチェックに切り替わります。選んだあとにチェックを変えると「プリセットなし」になり、「＋ 新しいプリセットとして保存」で名前を付けて保存できます(同じ名前は上書き)。× で消せます。チェックとプリセットはどの端末でも同じです。</li></ul>`],
  ["絞り込み",`<p>ホームの「絞り込み」(自動仕分けの隣)から、今開いているタブのカードを条件で絞って表示できます。自動仕分けと違い、カードの状態は変わりません。条件はすぐ保存され、開き直しても、どの端末でも同じです。</p>
-  <ul><li><b>項目</b>: 自動仕分けと同じ(性別・年齢・活動地域・撮影場所・撮影日の予定・点数・種類)に「収集日」を足しています。件数は今のタブのカードで数えます。各項目の下の「すべてチェック」で、その項目に出ている値を全部チェックでき、全部チェックしてあるときは「すべてチェックを外す」になります。</li>
+  <ul><li><b>項目</b>: 自動仕分けと同じ(性別・年齢・活動地域・撮影場所・撮影日の予定・点数・種類)に「追加のしかた」(手動追加 / 収集)と「収集日」を足しています。件数は今のタブのカードで数えます。各項目の下の「すべてチェック」で、その項目に出ている値を全部チェックでき、全部チェックしてあるときは「すべてチェックを外す」になります。</li>
   <li><b>当てはまり方</b>: チェックした値のカードだけが出ます。同じ項目の中はどれか1つ(東京か神奈川)、項目同士は全部(撮影場所が東京か神奈川で、かつ女性)です。活動地域や年齢の幅のように値をいくつも持つカードは、どれか1つにチェックがあれば出ます。</li>
   <li><b>点数</b>: 数字を入れると、その点数以上のカードだけが出ます。</li>
   <li><b>収集日</b>: 集めてからの日数で絞ります。「3日以内」で最近3日に集めたもの、「7日以上前」で1週間以上たったものが出ます。両方入れるとその間です。</li>
@@ -1132,13 +1189,17 @@ function renderCalendar(){
 // 項目ごとに、今の案件にある値を件数つきで並べる(件数は新着で数える)。チェックはすぐ保存する(どの端末でも同じ)
 const facetVals=(f,c)=>{const v=f.v(c);return Array.isArray(v)?v:[v]};
 const usedFacets=()=>SORT_FACETS.filter(f=>!f.show||f.show());
+const sortFacets=()=>usedFacets().filter(f=>!f.viewOnly); // 自動仕分けで使う項目
+const isManual=c=>c.source==="manual";
 // 仕分けに当てはまるか(チェックした値のどれか1つ。活動地域だけは全部にチェックがあるとき)
+// 手動追加したカードは当てはまらない(自動仕分けの対象外。Latte 決定)
 function sortHit(c,rule=settings.sort_rule){
-  return usedFacets().some(f=>{const on=rule[f.k];if(!on||!on.length)return false;
+  if(isManual(c))return false;
+  return sortFacets().some(f=>{const on=rule[f.k];if(!on||!on.length)return false;
     if(f.num){const max=parseFloat(on[0]);return Number.isFinite(max)&&c.score!=null&&c.score<=max}
     const vals=facetVals(f,c);return f.all?vals.every(v=>on.includes(v)):vals.some(v=>on.includes(v))});
 }
-const checkedCount=()=>usedFacets().reduce((n,f)=>n+(settings.sort_rule[f.k]||[]).length,0);
+const checkedCount=()=>sortFacets().reduce((n,f)=>n+(settings.sort_rule[f.k]||[]).length,0);
 const ruleKey=r=>JSON.stringify(SORT_FACETS.map(f=>[...(r[f.k]||[])].sort()));
 // 仕分けと絞り込みは同じ項目と値の並べ方を使う。違うのは、チェックの保存先・件数を数えるカード・押したときの印(data-sv / data-vv)
 const SORT_CTX={get rule(){return settings.sort_rule},pool:()=>cases.filter(c=>c.review==="new"),attr:"sv",none:"新着がありません"};
@@ -1220,7 +1281,7 @@ function renderSort(){
   const act=activePreset();
   body.innerHTML=`<div class="sort-presets">${settings.sort_presets.map((p,i)=>`<span class="preset${p===act?" on":""}"><button type="button" class="chip" data-preset="${i}" aria-pressed="${p===act}">${esc(p.name)}</button><button type="button" class="pdel" data-preset-del="${i}" aria-label="${esc(p.name)}を消す">×</button></span>`).join("")}
      ${act?"":`<button type="button" class="chip add" data-preset-save="1">＋ ${settings.sort_presets.length?"新しいプリセットとして保存":"今のチェックを保存"}</button>`}</div>
-   ${["依頼主","案件"].map(g=>`<div class="sort-grp">${g}</div>${usedFacets().filter(f=>f.g===g).map(f=>{if(f.num)return scoreItem(f,news);const fs=fullSections(f.k);return fs?fullItem(f,fs):valueItem(f)}).join("")}`).join("")}
+   ${["依頼主","案件"].map(g=>`<div class="sort-grp">${g}</div>${sortFacets().filter(f=>f.g===g).map(f=>{if(f.num)return scoreItem(f,news);const fs=fullSections(f.k);return fs?fullItem(f,fs):valueItem(f)}).join("")}`).join("")}
    <div class="sort-foot"><p class="sum">今の新着 ${news.length}件のうち <b>${hits}件</b> が当てはまります</p>
     <div class="actions"><button class="btn" data-close="1">閉じる</button><button type="button" class="btn del fill" data-sort-run="1" ${hits?"":"disabled"}>今すぐ削除予定にする(${hits}件)</button></div></div>`;
 }
@@ -1364,7 +1425,7 @@ function renderPickBar(){
 }
 // ---- データベースの中身(見るだけ) ----
 const DB_LABEL={posts:"ポスト",judgments:"AI の判定と点数",reviews:"確認の状態",blacklist:"ブラックリスト",users:"ユーザー台帳",user_aliases:"読み間違いの別名",
-  user_links:"プロフィールのリンク先",post_users:"ポストと人のつながり",image_reads:"画像から読んだアカウント",runs:"収集の実行",costs:"費用",meta:"内部の記録"};
+  user_links:"プロフィールのリンク先",post_users:"ポストと人のつながり",image_reads:"画像から読んだアカウント",manual_adds:"手動追加の受付",runs:"収集の実行",costs:"費用",meta:"内部の記録"};
 function dbSheet(inner){presentSheet(`<div class="grab"></div>${inner}`,"データベース")}
 async function openDb(){
   dbSheet('<h2>データベース</h2><p class="sub">読み込み中…</p>');
