@@ -8,6 +8,7 @@ D1 にもうあるポストと、前に見られなかったポスト(missing_po
   - 除外語(検索に入れた語も、入りきらなかった語も全部)をツリーの文章にかけ、当たれば対象外にする
   - 点数表の区分「語」はツリー全体で数え、同じ語は何度出てきても 1 回
   - フォロワー数とブラックリストは、最初に収集したポストだけで判定済みなので、ここでは見ない
+  - 手動追加のポスト(source=manual)には除外語をかけない
 
 遡りが済んだポストには post_trees の行を作る。判定(judge_step)はこの行があるポストから判定する。
 取りに行くのに失敗したら行を作らず、次の収集でもう一度遡る。
@@ -186,7 +187,7 @@ def recheck(row, tree_text, exclude_words, words):
 def pending(d1):
     """N3 を通って判定を待っている、まだ遡っていないポスト。"""
     return d1.query(
-        "SELECT p.id, p.text, p.reply_to_id, p.quoted_id, p.created_at, p.penalty_json FROM posts p "
+        "SELECT p.id, p.source, p.text, p.reply_to_id, p.quoted_id, p.created_at, p.penalty_json FROM posts p "
         "WHERE p.status = 'new' AND NOT EXISTS (SELECT 1 FROM post_trees t WHERE t.post_id = p.id) "
         "ORDER BY p.collected_at, p.id LIMIT ?", [MAX_POSTS])
 
@@ -219,7 +220,8 @@ def run(d1, config, production, api_key, session=None):
         if not ids:
             continue
         tree_text = "\n".join(nodes[i]["text"] for i in ids)
-        reason, hits = recheck(row, tree_text, exclude_words, words)
+        # 手動追加のポストには除外語をかけない(点数表の語は数える)
+        reason, hits = recheck(row, tree_text, [] if row.get("source") == "manual" else exclude_words, words)
         if reason:
             skipped.append(reason)
             d1.query("UPDATE posts SET status = 'skipped', skip_reason = ? WHERE id = ?", [reason, row["id"]])

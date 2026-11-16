@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 
 import { resetCertsCache, verifyAccess } from "../src/auth.js";
-import worker, { changeBlacklist, listTables, readTable, getCase, getSettings, getStats, getSummary, listBlacklist, listCases, saveSettings, setReview, setReviews } from "../src/index.js";
+import worker, { changeBlacklist, listTables, readTable, getCase, getSettings, getStats, getSummary, listBlacklist, listCases, saveSettings, setReview, setReviews, addManual, listManual, parsePostUrl } from "../src/index.js";
 import { fakeD1 } from "./fake-d1.js";
 
 const TEAM = "example.cloudflareaccess.com";
@@ -482,6 +482,58 @@ test("Access を通れば画面と API が返る", async () => {
     assert.equal((await worker.fetch(req("/api/db/runs", token), env)).status, 200);
     assert.equal((await worker.fetch(req("/api/db/nope", token), env)).status, 404);
     assert.equal((await worker.fetch(req("/api/db/posts"), env)).status, 403); // Access を通っていなければ見られない
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("手動追加: URL から ID を読む(x.com / twitter.com / mobile、クエリ付きも)", () => {
+  assert.equal(parsePostUrl("https://x.com/client/status/123?s=20"), "123");
+  assert.equal(parsePostUrl("https://twitter.com/a_b/status/456/photo/1"), "456");
+  assert.equal(parsePostUrl("mobile.x.com/i/web/status/789"), "789");
+  assert.equal(parsePostUrl("https://example.com/a/status/1"), null);
+  assert.equal(parsePostUrl("https://x.com/client"), null);
+});
+
+test("手動追加: 受け付けて、一覧にあるもの・ブラックリストの人は断る", async () => {
+  await assert.rejects(addManual(db, { url: "あいうえお" }), RangeError);
+  assert.equal((await addManual(db, { url: "https://x.com/client/status/1" })).result, "exists");
+  // 古くて一覧から外れた判定済み・対象外・判定待ちは受け付ける
+  assert.equal((await addManual(db, { url: "https://x.com/client/status/4" })).result, "queued");
+  assert.equal((await addManual(db, { url: "https://x.com/client/status/3" })).result, "queued");
+  assert.equal((await addManual(db, { url: "https://x.com/someone/status/999" })).result, "queued");
+  assert.equal((await addManual(db, { url: "https://x.com/someone/status/999" })).result, "pending");
+  db.raw.prepare("INSERT INTO blacklist (user_id, reason, added_at) VALUES ('100', 'spam', 'x')").run();
+  assert.equal((await addManual(db, { url: "https://x.com/client/status/2" })).result, "blacklisted");
+  const items = await listManual(db);
+  assert.deepEqual(items.map((i) => i.post_id).sort(), ["3", "4", "999"]);
+  assert.ok(items.every((i) => i.status === "pending"));
+});
+
+test("手動追加: 一覧に source を返し、絞り込みの「追加のしかた」を保存できる", async () => {
+  db.raw.prepare("UPDATE posts SET source = 'manual' WHERE id = '1'").run();
+  const cases = await listCases(db, new URLSearchParams());
+  assert.equal(cases.find((c) => c.id === "1").source, "manual");
+  const saved = await saveSettings(db, { view_rule: { added: ["手動追加"] } });
+  assert.deepEqual(saved.view_rule.added, ["手動追加"]);
+});
+
+test("手動追加: POST /api/manual は同じページからだけ受け付ける", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = certsFetch;
+  try {
+    const token = await makeToken();
+    const env = { DB: db, ACCESS_TEAM_DOMAIN: TEAM, ACCESS_AUD: AUD };
+    const post = (headers) => worker.fetch(new Request("https://x-finder.example.workers.dev/api/manual", {
+      method: "POST", body: JSON.stringify({ url: "https://x.com/a/status/55" }),
+      headers: { "cf-access-jwt-assertion": token, "content-type": "application/json", ...headers },
+    }), env);
+    assert.equal((await post({})).status, 403);
+    const ok = await post({ "x-finder": "1" });
+    assert.equal(ok.status, 200);
+    assert.equal((await ok.json()).result, "queued");
+    const list = await (await worker.fetch(req("/api/manual", token), env)).json();
+    assert.equal(list.items[0].post_id, "55");
   } finally {
     globalThis.fetch = realFetch;
   }

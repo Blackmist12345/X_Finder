@@ -69,13 +69,13 @@ def _media(media_json):
 def items_from_db(d1, now=None):
     """判定待ちのポスト。遡りが済んだもの(と、待ちすぎたもの)だけ。"""
     rows = d1.query(
-        "SELECT p.id, p.text, p.url, p.penalty_json, p.collected_at, p.created_at, p.author_id, p.media_json, q.text AS quoted_text, "
+        "SELECT p.id, p.source, p.text, p.url, p.penalty_json, p.collected_at, p.created_at, p.author_id, p.media_json, q.text AS quoted_text, "
         "u.location AS author_location, u.description AS author_description, "
         "u.followers AS author_followers, u.following AS author_following, t.ids_json AS tree_ids "
         "FROM posts p LEFT JOIN posts q ON q.id = p.quoted_id LEFT JOIN users u ON u.id = p.author_id "
         "LEFT JOIN post_trees t ON t.post_id = p.id "
         "WHERE p.status = 'new' AND (t.post_id IS NOT NULL OR p.collected_at < ?) "
-        "ORDER BY p.collected_at, p.id LIMIT ?",
+        "ORDER BY (p.source = 'manual') DESC, p.collected_at, p.id LIMIT ?",
         [((now or datetime.now(timezone.utc)) - timedelta(hours=TREE_WAIT_HOURS)).replace(microsecond=0).isoformat(), MAX_PER_RUN])
     ids_by_post = {r["id"]: json.loads(r["tree_ids"]) for r in rows if r.get("tree_ids")}
     trees = tree_items(d1, ids_by_post, {r["id"]: r["author_id"] for r in rows}) if ids_by_post else {}
@@ -106,7 +106,8 @@ def evaluate(items, results, config):
         if r is None:
             continue
         reject = judge.reject_reason(r, cosplay_only)
-        total, detail = (None, []) if reject else score(
+        # 手動追加のポストは対象外でも一覧に出すので、点数も付ける
+        total, detail = (None, []) if reject and not manual(it) else score(
             r, it["penalties"], it.get("text"), config,
             {"followers": it.get("author_followers"), "following": it.get("author_following")})
         out.append((it, r, reject, total, detail))
@@ -132,7 +133,8 @@ def save(d1, evaluated, missing_ids, model):
 
     groups = {}
     for it, _, reject, *_ in evaluated:
-        groups.setdefault(("rejected", reject) if reject else ("judged", None), []).append(it["id"])
+        # 手動追加のポストは AI の判定に関わらず一覧に出す(対象外の理由は judgments に残り、詳細に出る)
+        groups.setdefault(("rejected", reject) if reject and not manual(it) else ("judged", None), []).append(it["id"])
     if missing_ids:
         groups[("judge_error", "AI が判定を返さなかった")] = list(missing_ids)
     for (status, reason), ids in groups.items():
@@ -190,9 +192,15 @@ def add_events(notion, d1, evaluated, config):
     return [f"- イベントの一覧に足した: {'、'.join(done)}"]
 
 
+def manual(item):
+    """手動追加のポストか。"""
+    return item.get("source") == "manual"
+
+
 def should_wait(items, batch_size, max_wait_minutes, now=None):
-    """判定を次回に回すなら True。件数がそろうか、いちばん古いポストが待ちすぎたら判定する。"""
-    if len(items) >= batch_size:
+    """判定を次回に回すなら True。件数がそろうか、いちばん古いポストが待ちすぎたら判定する。
+    手動追加のポストがあれば待たない(貼ってすぐ一覧に出したいので)。"""
+    if len(items) >= batch_size or any(manual(it) for it in items):
         return False
     oldest = min((it.get("collected_at") or "") for it in items)
     now = now or datetime.now(timezone.utc)

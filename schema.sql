@@ -2,7 +2,7 @@
 -- 何度実行しても壊れないように IF NOT EXISTS で作る。
 
 -- 収集したポスト。検索で見つけたもの(source=search)と、引用元として一緒に届いたもの(source=quoted)、
--- 返信元・引用元を root まで遡って取ったもの(source=tree)。
+-- 返信元・引用元を root まで遡って取ったもの(source=tree)、X Finder の設定から URL で手動追加したもの(source=manual)。
 CREATE TABLE IF NOT EXISTS posts (
   id TEXT PRIMARY KEY,
   author_id TEXT NOT NULL,
@@ -207,3 +207,17 @@ CREATE TABLE IF NOT EXISTS missing_posts (
   id TEXT PRIMARY KEY,
   checked_at TEXT NOT NULL
 );
+
+-- 手動追加の受付: X Finder の設定で貼ったポストの URL。次の収集(finder/manual_step.py)が取り込み、結果を書き戻す。
+-- status: pending(取り込み待ち) / added(追加した) / exists(すでに一覧にあった) / blacklisted(ブラックリストの人) /
+--         not_found(見つからない・削除・非公開) / failed(取りに行けなかった)
+CREATE TABLE IF NOT EXISTS manual_adds (
+  post_id TEXT PRIMARY KEY,
+  url TEXT NOT NULL,
+  requested_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  note TEXT,
+  tries INTEGER NOT NULL DEFAULT 0,
+  done_at TEXT
+);
+CREATE INDEX IF NOT EXISTS manual_adds_status ON manual_adds (status, requested_at);
