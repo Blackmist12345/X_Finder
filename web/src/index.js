@@ -58,6 +58,10 @@ const TABLES_DDL = [
   `CREATE TABLE IF NOT EXISTS handle_lookups (handle TEXT PRIMARY KEY, looked_at TEXT NOT NULL, result TEXT NOT NULL, user_id TEXT, note TEXT)`,
   // 本文(ツリー含む)に書かれた X の ID(書くのは収集の方)
   `CREATE TABLE IF NOT EXISTS text_mentions (post_id TEXT PRIMARY KEY, scanned_at TEXT NOT NULL, accounts_json TEXT)`,
+  // 画像から読んだ ID を手で直したもの(画面が書き、次の収集が直した ID のフォロワー数を調べる。schema.sql と同じ)
+  `CREATE TABLE IF NOT EXISTS account_fixes (
+    post_id TEXT NOT NULL, original TEXT NOT NULL, handle TEXT NOT NULL, fixed_at TEXT NOT NULL, PRIMARY KEY (post_id, original))`,
+  `CREATE INDEX IF NOT EXISTS account_fixes_fixed_at ON account_fixes (fixed_at)`,
   // 手動追加の受付(画面が書き、次の収集が取り込んで結果を書き戻す。schema.sql と同じ)
   `CREATE TABLE IF NOT EXISTS manual_adds (
     post_id TEXT PRIMARY KEY, url TEXT NOT NULL, requested_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
@@ -223,9 +227,20 @@ export async function getCase(db, id) {
   const read = await db.prepare("SELECT accounts_json FROM image_reads WHERE post_id = ?").bind(id).first();
   // 本文の ID の表は収集が作る(finder/mention_step.py)。まだなければ本文からの人なしで出す
   const written = await db.prepare("SELECT accounts_json FROM text_mentions WHERE post_id = ?").bind(id).first().catch(() => null);
-  const validHandle = (a) => a && /^[A-Za-z0-9_]{1,15}$/.test(a.handle || "");
+  const validHandle = (a) => a && HANDLE_RE.test(a.handle || "");
+  // 画像から読んだ ID を手で直したもの(account_fixes)。AI が読んだ ID を直した ID に置き換え、元の ID を fixed_from に残す(「元に戻す」に使う)
+  const { results: fixRows } = await db
+    .prepare("SELECT original, handle FROM account_fixes WHERE post_id = ?")
+    .bind(id)
+    .all()
+    .catch(() => ({ results: [] }));
+  const fixes = new Map(fixRows.map((f) => [f.original, f.handle]));
+  const applyFix = (a) => {
+    const fixed = fixes.get(a.handle.toLowerCase());
+    return fixed ? { ...a, handle: fixed, fixed_from: a.handle, read_as: a.handle } : { ...a, read_as: a.handle };
+  };
   const fromImage = [
-    ...parseJson(read && read.accounts_json, []).filter(validHandle).map((a) => ({ ...a, role: a.from === "tree" ? "image_tree" : "image" })),
+    ...parseJson(read && read.accounts_json, []).filter(validHandle).map(applyFix).map((a) => ({ ...a, role: a.from === "tree" ? "image_tree" : "image" })),
     ...parseJson(written && written.accounts_json, []).filter(validHandle).map((a) => ({ ...a, role: a.from === "tree" ? "text_tree" : "text" })),
   ];
   if (fromImage.length) {
@@ -248,6 +263,17 @@ export async function getCase(db, id) {
       .all()
       .catch(() => ({ results: [] }));
     const lookup = new Map(looked.map((l) => [l.handle, l.result]));
+    // 手で直した ID のうち、まだ調べていない人は「取得待ち」(次の収集で調べる)
+    const fixedHandles = [...fixes.values()].map((h) => h.toLowerCase()).filter((h) => !byName.has(h) && !lookup.has(h));
+    if (fixedHandles.length) {
+      const { results: done } = await db
+        .prepare(`SELECT handle FROM handle_lookups WHERE handle IN (${fixedHandles.map(() => "?").join(", ")})`)
+        .bind(...fixedHandles)
+        .all()
+        .catch(() => ({ results: [] }));
+      const doneSet = new Set(done.map((d) => d.handle));
+      for (const h of fixedHandles) if (!doneSet.has(h)) lookup.set(h, "pending");
+    }
     const author = (row.username || "").toLowerCase();
     const unnamed = new Set(); // ここで足した人のうち、書かれた名前がまだない人
     for (const a of fromImage) {
@@ -256,7 +282,14 @@ export async function getCase(db, id) {
       if (key === author) continue;
       const u = byName.get(key);
       const same = u ? merged.get(u.id) : [...merged.values()].find((m) => (m.username || "").toLowerCase() === key);
+      // 画像から読んだ人は、手で直せるように AI が読んだ ID(read_as)と直したかどうか(fixed_from)を付ける
+      const editInfo = (e) => {
+        if (!role.startsWith("image")) return;
+        if (!e.read_as) e.read_as = a.read_as;
+        if (a.fixed_from) e.fixed_from = a.fixed_from;
+      };
       if (same) {
+        editInfo(same);
         // 本文の @ は X のメンションとしても入っているので、「メンション」の人に「本文から」は重ねない
         if (!same.roles.includes(role) && !(role === "text" && same.roles.includes("mention"))) same.roles.push(role);
         // 画像で名前が読めなかった人に、本文に書かれた名前(キャラ名など)があればそちらを出す
@@ -270,6 +303,7 @@ export async function getCase(db, id) {
       const entry = u
         ? { ...u, name: a.name || u.name, roles: [role] } // 画像に書かれた名前(キャラ名など)があればそちらを出す
         : { id: null, username: a.handle, name: a.name || null, roles: [role], lookup: lookup.get(key) || null };
+      editInfo(entry);
       if (!a.name) unnamed.add(entry);
       merged.set(u ? u.id : `image:${key}`, entry);
     }
@@ -323,7 +357,7 @@ async function getTree(db, id, authorId) {
 }
 
 // データベースの中身を見る画面(読むだけ)。見せる表はここに並べたものだけ
-const DB_TABLES = ["posts", "judgments", "reviews", "blacklist", "users", "user_links", "user_aliases", "post_users", "image_reads", "text_mentions", "post_trees", "missing_posts", "manual_adds", "runs", "costs", "meta"];
+const DB_TABLES = ["posts", "judgments", "reviews", "blacklist", "users", "user_links", "user_aliases", "post_users", "image_reads", "text_mentions", "account_fixes", "post_trees", "missing_posts", "manual_adds", "runs", "costs", "meta"];
 const DB_PAGE = 30;
 const DB_CELL_MAX = 400; // 長い値(AI の返事の JSON など)は先頭だけ返す
 
@@ -564,6 +598,34 @@ export async function saveSettings(db, body) {
   return next;
 }
 
+// ---- 関係するアカウントの ID を手で直す ----
+// 画像から AI が読んだ ID(original)を、そのポストだけ直した ID(handle)に置き換える。画面の「ID を直す」で、変えた人の分だけまとめて届く。
+// body = { fixes: [{ original, handle }, ...] }。handle が空か original と同じなら「元に戻す」(行を消す)。
+// フォロワー数などは画面では取らない(画面の Worker には X の鍵を置かない)。次の収集で finder/account_step.py が調べる。
+const HANDLE_RE = /^[A-Za-z0-9_]{1,15}$/;
+const MAX_FIXES = 50;
+const cleanHandle = (v) => String(v ?? "").trim().replace(/^[@＠]/, "");
+export async function fixAccounts(db, postId, body) {
+  const list = Array.isArray(body?.fixes) ? body.fixes : [];
+  if (!list.length || list.length > MAX_FIXES) throw new RangeError("fixes");
+  const fixes = list.map((f) => ({ original: cleanHandle(f?.original), handle: cleanHandle(f?.handle) }));
+  if (fixes.some((f) => !HANDLE_RE.test(f.original) || (f.handle && !HANDLE_RE.test(f.handle)))) throw new RangeError("handle");
+  // 直せるのは、そのポストの画像から AI が読んだ ID だけ(1 人でも違えば何も書かない)
+  const read = await db.prepare("SELECT accounts_json FROM image_reads WHERE post_id = ?").bind(postId).first();
+  const known = new Set(parseJson(read && read.accounts_json, []).map((a) => String((a && a.handle) || "").toLowerCase()));
+  if (!fixes.every((f) => known.has(f.original.toLowerCase()))) return null;
+  const at = nowIso();
+  await db.batch(fixes.map((f) => {
+    const key = f.original.toLowerCase();
+    return !f.handle || f.handle.toLowerCase() === key
+      ? db.prepare("DELETE FROM account_fixes WHERE post_id = ? AND original = ?").bind(postId, key)
+      : db.prepare(`INSERT INTO account_fixes (post_id, original, handle, fixed_at) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(post_id, original) DO UPDATE SET handle = excluded.handle, fixed_at = excluded.fixed_at`)
+          .bind(postId, key, f.handle, at);
+  }));
+  return getCase(db, postId);
+}
+
 // ---- 手動追加 ----
 // ポストの URL を受け付けて manual_adds に書くだけ(画面の Worker には X の鍵を置かないので、取りに行くのは次の収集)。
 // すでに一覧に出ているポスト・ブラックリストの人のポスト(D1 にあって分かるもの)は、ここで断る。
@@ -769,6 +831,20 @@ export default {
         return json(await setReviews(env.DB, await request.json().catch(() => ({}))));
       } catch (e) {
         if (e instanceof RangeError) return json({ error: "指定が正しくありません" }, 400);
+        console.error(e);
+        return json({ error: "保存できませんでした" }, 500);
+      }
+    }
+    const fix = url.pathname.match(/^\/api\/cases\/(\d{1,25})\/accounts$/);
+    if (fix) {
+      if (request.method !== "POST") return text("POST だけ使えます。", 405);
+      if (!sameOriginWrite(request, url)) return text("このページからだけ変更できます。", 403);
+      try {
+        await ensureTables(env.DB);
+        const c = await fixAccounts(env.DB, fix[1], await request.json().catch(() => ({})));
+        return c ? json(c) : json({ error: "見つかりません" }, 404);
+      } catch (e) {
+        if (e instanceof RangeError) return json({ error: "X の ID は英数字と _ だけ、15文字までです" }, 400);
         console.error(e);
         return json({ error: "保存できませんでした" }, 500);
       }

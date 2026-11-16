@@ -1,10 +1,11 @@
-"""N7 参加者情報(の続き): 画像から読んだ X のアカウント(image_step)と、本文に書かれた ID(mention_step)のフォロワー数・フォロー数・アイコンを取る。
+"""N7 参加者情報(の続き): 画像から読んだ X のアカウント(image_step)と、本文に書かれた ID(mention_step)、画面で手で直した ID のフォロワー数・フォロー数・アイコンを取る。
 
 TwitterAPI.io の Get User Info(GET /twitter/user/info?userName=ID)で 1 人ずつ調べ、結果をユーザー台帳(users)に保存する。
 画面の「関係するアカウント」は台帳から数字とアイコンを出す。
 - 台帳にフォロワー数が入っている人や、調べてから 7 日以内の人は調べない。
 - 7 日より前に調べた人は、そのあと新しく読んだ画像・本文にまた出てきたときだけ調べ直す(同じ人を何度も取らない)。
 - いない ID(画像の読み違いなど)・凍結などの人も handle_lookups に記録し、画面に出す。
+- 画面で手で直した ID(account_fixes)も、直してから最初の収集で調べる(同じ 7 日のきまりで、最近調べた人は調べない)。
 - 失敗しても収集・判定は止めない(調べられなかった人は次の収集でもう一度)。
 料金(docs.twitterapi.io/pricing): 1 人 18 クレジット($0.00018)。
 """
@@ -63,6 +64,12 @@ def candidates(d1, now=None, limit=MAX_LOOKUPS):
             h = str((a or {}).get("handle") or "").lower() if isinstance(a, dict) else ""
             if HANDLE.match(h) and read_at and (h not in seen or seen[h] < read_at):
                 seen[h] = read_at
+    # 画面で手で直した ID(account_fixes)。直した時刻を「読んだ時刻」とみなす。直近 SCAN_DAYS 日ぶんだけ見る
+    for r in d1.query("SELECT handle, fixed_at FROM account_fixes WHERE fixed_at >= ?", [since]):
+        h = str(r["handle"] or "").lower()
+        at = _ts(r["fixed_at"])
+        if HANDLE.match(h) and at and (h not in seen or seen[h] < at):
+            seen[h] = at
     if not seen:
         return []
     last = {}  # handle -> 最後にフォロワー数を取った時刻(台帳か、調べた記録)

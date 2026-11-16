@@ -438,6 +438,20 @@ header.top.slim .tab .c{font-size:17px}
 .person .id.stats>span:first-child{text-align:left;overflow:hidden;text-overflow:ellipsis}
 .person .id.stats>.warn-text{grid-column:2 / -1}
 .person .id.stats small{display:block;font-size:10px;line-height:1.2;opacity:.8}
+/* 画像から読んだ ID を手で直す(一番下のボタン 1 つで、全員の入力欄を出す) */
+.pfix{display:grid;grid-template-columns:auto 1fr;gap:4px 6px;align-items:center;margin:-6px 0 0;padding:8px 10px;border:1px dashed var(--line);border-radius:12px}
+.pfix .at{color:var(--muted);font-size:15px}
+.pfix input{font:inherit;font-size:16px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);min-width:0}
+.pfix input.changed{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.pfix input.bad{border-color:var(--rec);box-shadow:0 0 0 1px var(--rec)}
+.pfix .from{grid-column:1 / -1;display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px;color:var(--muted);font-size:12px}
+.pfix button.lnk,.fixbar button.lnk{font:inherit;font-weight:700;color:var(--accent);background:none;border:0;padding:4px 2px;cursor:pointer}
+.fixbar{display:flex;justify-content:flex-end;font-size:13px}
+.fixfoot{display:grid;gap:8px;margin-top:2px}
+.fixfoot .row{display:flex;gap:8px}
+.fixfoot .row .btn{padding:10px}
+.fixfoot .btn.fill{background:var(--accent);border-color:var(--accent);color:#fff}
+.person .sub.fixed{color:var(--accent);white-space:nowrap}
 .breakdown{display:grid;grid-template-columns:1fr auto;gap:4px 10px;font-size:13px;margin:0}
 .breakdown dd{margin:0;text-align:right;font-family:var(--font-num);font-size:15px;font-variant-numeric:tabular-nums}
 .breakdown .total{border-top:1px solid var(--line);padding-top:4px;font-weight:700}
@@ -730,16 +744,56 @@ function card(c){
   </button></div>`;
 }
 // 画像から読んだ ID を調べた結果(finder/account_step.py)。いない ID は画像の読み違いのことが多い
-const PERSON_LOOKUP={not_found:"見つかりません",unavailable:"凍結など"};
+const PERSON_LOOKUP={not_found:"見つかりません",unavailable:"凍結など",pending:"取得待ち(次の収集で)"};
 // @ID と、フォロワー・フォロー・FF率の列(どの行でも同じ位置。数字の上に小さく見出し)。数字がない人は理由(見つかりません など)を列の場所に出す
 function statsLine(username,u,lookup){
   const cols=u?`<span><small>フォロワー</small><span class="num">${fmt(u.followers)}</span></span><span><small>フォロー</small><span class="num">${fmt(u.following)}</span></span><span><small>FF率</small><span class="num">${ffText(u)}</span></span>`
     :`<span class="${lookup?"warn-text":""}">${lookup?PERSON_LOOKUP[lookup]||"":""}</span>`;
   return `<div class="id stats"><span>@${esc(username||"")}</span>${cols}</div>`}
+// 画像から読んだ人は ID を手で直せる(本文・メンションからの人は X の ID そのものなので直さない)。手で直した人は直したあとも直せる
+const canFix=p=>!!p.read_as&&(!!p.fixed_from||(p.roles||[p.role]).every(r=>String(r).startsWith("image")));
+let fixing=false; // 「ID を直す」を押して、全員の入力欄が出ている間
+function fixInput(p){
+  const orig=p.fixed_from||p.read_as;
+  return `<div class="pfix" data-fix-row="${esc(p.read_as)}"><span class="at">@</span><input data-fix-orig="${esc(p.read_as)}" data-fix-now="${esc(p.username||"")}" value="${esc(p.username||"")}" maxlength="15" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="email" aria-label="${esc(p.name||p.username||"")}の X の ID">
+   ${p.fixed_from?`<span class="from">AI の読み取り: @${esc(orig)}<button type="button" class="lnk" data-fix-undo="${esc(orig)}">元に戻す</button></span>`:""}</div>`;
+}
 function person(p){
   const u=safeUser(p.username);
-  return `<${u?`a class="person link" href="https://x.com/${u}" data-xuser="${u}"`:'div class="person"'}>${ava(p)}<div class="who"><div>${esc(p.name||p.username||"")} <span class="sub">${(p.roles||[p.role]).map(r=>ROLE[r]||"").filter(Boolean).join("・")}</span></div>
-    ${statsLine(p.username,p.followers!=null?p:null,p.lookup)}</div>${u?'<span class="go">X で開く ›</span>':""}</${u?"a":"div"}>`;
+  return `<${u?`a class="person link" href="https://x.com/${u}" data-xuser="${u}"`:'div class="person"'}>${ava(p)}<div class="who"><div>${esc(p.name||p.username||"")} <span class="sub">${(p.roles||[p.role]).map(r=>ROLE[r]||"").filter(Boolean).join("・")}</span>${p.fixed_from?' <span class="sub fixed">手で修正</span>':""}</div>
+    ${statsLine(p.username,p.followers!=null?p:null,p.lookup)}</div>${u?'<span class="go">X で開く ›</span>':""}</${u?"a":"div"}>${fixing&&canFix(p)?fixInput(p):""}`;
+}
+// 「関係するアカウント」の中身。直せる人がいれば一番下に「ID を直す」を 1 つだけ出す
+function peopleHtml(people){
+  const list=(people||[]).map(person).join("");
+  if(!(people||[]).some(canFix))return list;
+  if(!fixing)return list+'<div class="fixbar"><button type="button" class="lnk" data-fix-edit="1">✎ ID を直す</button></div>';
+  return list+`<div class="fixfoot"><p class="sub" data-fix-msg>変えたところだけ保存します。英数字と _ だけ、15文字まで。このポストだけに効き、フォロワー数は次の収集(10分ごと)で取り直します。</p>
+   <div class="row"><button type="button" class="btn" data-fix-cancel="1">やめる</button><button type="button" class="btn fill" data-fix-save="1">保存する</button></div></div>`;
+}
+function renderPeople(){const sec=$("peopleSec");if(sec&&currentCase)sec.innerHTML=peopleHtml(currentCase.people)}
+function startFix(){fixing=true;renderPeople();const first=$("peopleSec")?.querySelector("[data-fix-orig]");if(first)first.focus({preventScroll:true})}
+function markFix(inp){const v=inp.value.trim().replace(/^[@＠]/,"");inp.classList.toggle("changed",v!==inp.dataset.fixNow);inp.classList.toggle("bad",!/^[A-Za-z0-9_]{1,15}$/.test(v))}
+// 変えた人の分だけまとめて送る(空にした・AI の読み取りと同じにした人は元に戻す)。返ってきた詳細で描き直す
+async function saveFixes(){
+  const sec=$("peopleSec");const id=$("reviewActions")?.dataset.id;if(!sec||!id)return;
+  const msg=sec.querySelector("[data-fix-msg]");
+  const inputs=[...sec.querySelectorAll("[data-fix-orig]")];
+  const changed=inputs.map(i=>({i,v:i.value.trim().replace(/^[@＠]/,"")})).filter(x=>x.v!==x.i.dataset.fixNow);
+  if(!changed.length){fixing=false;renderPeople();return}
+  const bad=changed.filter(x=>!/^[A-Za-z0-9_]{1,15}$/.test(x.v));
+  if(bad.length){bad.forEach(x=>x.i.classList.add("bad"));bad[0].i.focus();
+    msg.textContent="使えない文字があります。X の ID は英数字と _ だけ、15文字までです(- は使えません)";msg.classList.add("warn-text");return}
+  sec.querySelectorAll("button,input").forEach(b=>b.disabled=true);
+  try{
+    const c=await postJson(`/api/cases/${encodeURIComponent(id)}/accounts`,{fixes:changed.map(x=>({original:x.i.dataset.fixOrig,handle:x.v}))});
+    if(currentCase&&currentCase.id===id)currentCase.people=c.people;
+    fixing=false;renderPeople();
+    showToast(`${changed.length}人の ID を保存しました`);
+  }catch(e){
+    sec.querySelectorAll("button,input").forEach(b=>b.disabled=false);
+    msg.textContent=`保存できませんでした(${e.message})`;msg.classList.add("warn-text");
+  }
 }
 // ---- ブラックリスト ----
 const BLACK_REASON={spam:"スパム",false:"虚偽の申告",photographer:"カメラマンだった",other:"その他"};
@@ -852,7 +906,7 @@ function sheetHtml(c,full){
     ${c.age||c.gender||(c.areas||[]).length?`<div class="id">${c.gender?`性別: ${esc(c.gender)} ・ `:""}${c.age?`年齢: ${esc(c.age.label)}${c.age.minor===true?"(未成年)":c.age.minor===false?"(成人)":""}`:"年齢: 不明"} ・ 活動地域: ${(c.areas||[]).length?esc(c.areas.join("・")):"不明"}<span class="sub">(${profileFrom(c)})</span></div>`:""}
     ${c.location?`<div class="id">地域: ${esc(c.location)}</div>`:""}${c.description?`<div class="id">${esc(c.description)}</div>`:""}</div>${cu?'<span class="go">X で開く ›</span>':""}</${cu?"a":"div"}></div>
     ${c.blacklist?`<p class="sub" style="color:var(--rec)">🚫 ブラックリストに登録済み(${esc(BLACK_REASON[c.blacklist.reason]||"")})</p>`:""}</div>
-   ${c.people&&c.people.length?`<div class="sec"><h3>関係するアカウント</h3><div class="people">${c.people.map(person).join("")}</div></div>`:""}
+   ${c.people&&c.people.length?`<div class="sec"><h3>関係するアカウント</h3><div class="people" id="peopleSec">${peopleHtml(c.people)}</div></div>`:""}
    <div class="black" id="blackBox" data-uid="${esc(c.author_id||"")}" data-name="${esc(c.username?"@"+c.username:(c.name||"この人"))}"></div>
    ${full?"":'<p class="sub" id="sheetLoading" style="text-align:center">くわしい情報を読み込み中…</p>'}
    <div class="detail-actions" id="reviewActions" data-id="${esc(c.id)}">${reviewButtons(c.review,full?c:{...c,blacklist:null})}</div>`;
@@ -863,6 +917,7 @@ async function openSheet(id,cardEl){
   opening=true;try{await openSheetNow(id,cardEl)}catch(e){opening=false;throw e}
 }
 async function openSheetNow(id,cardEl){
+  fixing=false; // 別の詳細を開いたら「ID を直す」はたたむ
   const base=cases.find(x=>x.id===id);
   const p=fetchDetail(id);p.catch(()=>{});
   // 開いても状態は変えない
@@ -1544,6 +1599,10 @@ document.addEventListener("click",ev=>{
     $("blackBox").scrollIntoView({behavior:"smooth",block:"nearest"});return}
   if(ev.target.closest("[data-black-cancel]")){$("blackBox").innerHTML="";return}
   const ub=ev.target.closest("[data-unblack]");if(ub){unblack(ub);return}
+  if(ev.target.closest("[data-fix-edit]")){startFix();return}
+  if(ev.target.closest("[data-fix-cancel]")){fixing=false;renderPeople();return}
+  if(ev.target.closest("[data-fix-save]")){saveFixes();return}
+  const fu=ev.target.closest("[data-fix-undo]");if(fu){const inp=fu.closest("[data-fix-row]").querySelector("input");inp.value=fu.dataset.fixUndo;markFix(inp);return}
   const pr=ev.target.closest("[data-preset]");if(pr){presetPick(Number(pr.dataset.preset));return}
   const pd=ev.target.closest("[data-preset-del]");if(pd){presetDelete(Number(pd.dataset.presetDel));return}
   if(ev.target.closest("[data-preset-save]")){presetSave();return}
@@ -1557,6 +1616,7 @@ document.addEventListener("click",ev=>{
   if(ev.target.closest("[data-close]")){closeSheet();return}
   const c=ev.target.closest(".card");if(c&&!suppressClick){if(state.picking)togglePick(c.dataset.id);else openSheet(c.dataset.id,c)}
 });
+document.addEventListener("input",e=>{if(e.target.matches&&e.target.matches("[data-fix-orig]"))markFix(e.target)});
 document.addEventListener("keydown",e=>{
   if(!$("viewer").hidden){const s=$("strip");
     if(e.key==="Escape")closeViewer();
