@@ -599,27 +599,30 @@ export async function saveSettings(db, body) {
 }
 
 // ---- 関係するアカウントの ID を手で直す ----
-// 画像から AI が読んだ ID(original)を、そのポストだけ直した ID(handle)に置き換える。handle が空か original と同じなら「元に戻す」(行を消す)。
+// 画像から AI が読んだ ID(original)を、そのポストだけ直した ID(handle)に置き換える。画面の「ID を直す」で、変えた人の分だけまとめて届く。
+// body = { fixes: [{ original, handle }, ...] }。handle が空か original と同じなら「元に戻す」(行を消す)。
 // フォロワー数などは画面では取らない(画面の Worker には X の鍵を置かない)。次の収集で finder/account_step.py が調べる。
 const HANDLE_RE = /^[A-Za-z0-9_]{1,15}$/;
-export async function fixAccount(db, postId, body) {
-  const original = String(body?.original || "").trim().replace(/^[@＠]/, "");
-  const handle = String(body?.handle ?? "").trim().replace(/^[@＠]/, "");
-  if (!HANDLE_RE.test(original) || (handle && !HANDLE_RE.test(handle))) throw new RangeError("handle");
-  // 直せるのは、そのポストの画像から AI が読んだ ID だけ
+const MAX_FIXES = 50;
+const cleanHandle = (v) => String(v ?? "").trim().replace(/^[@＠]/, "");
+export async function fixAccounts(db, postId, body) {
+  const list = Array.isArray(body?.fixes) ? body.fixes : [];
+  if (!list.length || list.length > MAX_FIXES) throw new RangeError("fixes");
+  const fixes = list.map((f) => ({ original: cleanHandle(f?.original), handle: cleanHandle(f?.handle) }));
+  if (fixes.some((f) => !HANDLE_RE.test(f.original) || (f.handle && !HANDLE_RE.test(f.handle)))) throw new RangeError("handle");
+  // 直せるのは、そのポストの画像から AI が読んだ ID だけ(1 人でも違えば何も書かない)
   const read = await db.prepare("SELECT accounts_json FROM image_reads WHERE post_id = ?").bind(postId).first();
-  const known = parseJson(read && read.accounts_json, []).some((a) => a && String(a.handle || "").toLowerCase() === original.toLowerCase());
-  if (!known) return null;
-  const key = original.toLowerCase();
-  if (!handle || handle.toLowerCase() === key) {
-    await db.prepare("DELETE FROM account_fixes WHERE post_id = ? AND original = ?").bind(postId, key).run();
-  } else {
-    await db
-      .prepare(`INSERT INTO account_fixes (post_id, original, handle, fixed_at) VALUES (?, ?, ?, ?)
-                ON CONFLICT(post_id, original) DO UPDATE SET handle = excluded.handle, fixed_at = excluded.fixed_at`)
-      .bind(postId, key, handle, nowIso())
-      .run();
-  }
+  const known = new Set(parseJson(read && read.accounts_json, []).map((a) => String((a && a.handle) || "").toLowerCase()));
+  if (!fixes.every((f) => known.has(f.original.toLowerCase()))) return null;
+  const at = nowIso();
+  await db.batch(fixes.map((f) => {
+    const key = f.original.toLowerCase();
+    return !f.handle || f.handle.toLowerCase() === key
+      ? db.prepare("DELETE FROM account_fixes WHERE post_id = ? AND original = ?").bind(postId, key)
+      : db.prepare(`INSERT INTO account_fixes (post_id, original, handle, fixed_at) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(post_id, original) DO UPDATE SET handle = excluded.handle, fixed_at = excluded.fixed_at`)
+          .bind(postId, key, f.handle, at);
+  }));
   return getCase(db, postId);
 }
 
@@ -838,7 +841,7 @@ export default {
       if (!sameOriginWrite(request, url)) return text("このページからだけ変更できます。", 403);
       try {
         await ensureTables(env.DB);
-        const c = await fixAccount(env.DB, fix[1], await request.json().catch(() => ({})));
+        const c = await fixAccounts(env.DB, fix[1], await request.json().catch(() => ({})));
         return c ? json(c) : json({ error: "見つかりません" }, 404);
       } catch (e) {
         if (e instanceof RangeError) return json({ error: "X の ID は英数字と _ だけ、15文字までです" }, 400);
