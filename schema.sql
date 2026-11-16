@@ -151,6 +151,18 @@ CREATE TABLE IF NOT EXISTS handle_lookups (
   note TEXT
 );
 
+-- 画像から AI が読んだ ID を、画面で手で直したもの(画面の Worker が書く)。修正はそのポストだけに効く。1 ポスト × AI が読んだ ID = 1 行。
+-- original = AI が読んだ ID(小文字)、handle = 直した ID(入力どおり)。AI の読み取り(image_reads)とは別の表なので、読み直しても上書きされない。
+-- 「元に戻す」は行を消す。直した ID のフォロワー数などは、次の収集で account_step が fixed_at の新しい行から調べる。
+CREATE TABLE IF NOT EXISTS account_fixes (
+  post_id TEXT NOT NULL,
+  original TEXT NOT NULL,
+  handle TEXT NOT NULL,
+  fixed_at TEXT NOT NULL,
+  PRIMARY KEY (post_id, original)
+);
+CREATE INDEX IF NOT EXISTS account_fixes_fixed_at ON account_fixes (fixed_at);
+
 -- どのポストに、誰が、どの立場で出てきたか(client / quoted / reply_to / mention)。
 CREATE TABLE IF NOT EXISTS post_users (
   post_id TEXT NOT NULL,

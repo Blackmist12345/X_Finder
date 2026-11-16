@@ -89,3 +89,14 @@ def test_does_nothing_without_key_or_in_trial(d1):
     read(d1, "1", ["cos_a"])
     assert account_step.run(d1, CONFIG, False, "k") == []
     assert "TWITTERAPI_KEY" in account_step.run(d1, CONFIG, True, None)[-1]
+
+
+def test_looks_up_handles_fixed_by_hand(d1):
+    """画面で手で直した ID は、直してから最初の収集で調べる。最近調べた人・古い修正は調べない。"""
+    read(d1, "1", ["mikurucos"], at="2026-10-01T00:00:00+00:00")
+    d1.query("INSERT INTO account_fixes (post_id, original, handle, fixed_at) VALUES "
+             "('1', 'mikurucos', '_Mikurucos_', '2026-11-02T12:00:00+00:00'), "
+             "('2', 'typo', 'fixed_known', '2026-11-02T12:00:00+00:00'), "
+             "('3', 'typo2', 'fixed_long_ago', '2026-10-01T00:00:00+00:00')")
+    d1.query("INSERT INTO handle_lookups (handle, looked_at, result) VALUES ('fixed_known', '2026-11-01T00:00:00+00:00', 'ok')")
+    assert account_step.candidates(d1, now=NOW) == ["_mikurucos_"]

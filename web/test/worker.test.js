@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 
 import { resetCertsCache, verifyAccess } from "../src/auth.js";
-import worker, { changeBlacklist, listTables, readTable, getCase, getSettings, getStats, getSummary, listBlacklist, listCases, saveSettings, setReview, setReviews, addManual, listManual, parsePostUrl } from "../src/index.js";
+import worker, { changeBlacklist, listTables, readTable, getCase, getSettings, getStats, getSummary, listBlacklist, listCases, saveSettings, setReview, setReviews, addManual, listManual, parsePostUrl, fixAccount } from "../src/index.js";
 import { fakeD1 } from "./fake-d1.js";
 
 const TEAM = "example.cloudflareaccess.com";
@@ -363,6 +363,43 @@ test("画像から読んだ人は、調べたフォロワー数・アイコン�
   } finally {
     sql(`DELETE FROM image_reads WHERE post_id = '1'`);
     sql(`DELETE FROM users WHERE id = '900'`);
+    sql(`DELETE FROM handle_lookups`);
+  }
+});
+
+test("画像から読んだ ID を手で直すと、そのポストだけ直した ID で出し、元に戻せる", async () => {
+  const sql = (q, ...a) => db.raw.prepare(q).run(...a);
+  sql(`INSERT OR REPLACE INTO image_reads (post_id, read_at, images, accounts_json) VALUES ('1', 'x', 1, ?), ('2', 'x', 1, ?)`,
+    JSON.stringify([{ handle: "Mikurucos", name: "しもつきみくる" }, { handle: "typo_y", name: "" }]), JSON.stringify([{ handle: "Mikurucos", name: "" }]));
+  sql(`INSERT INTO users (id, username, name, followers, following, status, first_seen_at, last_seen_at)
+       VALUES ('901', '_Mikurucos_', 'みくる', 350, 191, 'confirmed', 'x', 'x')`);
+  try {
+    // 直す前は編集できる印(read_as)だけ付く。メンションの人には付かない
+    let c = await getCase(db, "1");
+    assert.deepEqual(c.people.map((p) => [p.username, p.read_as ?? null, p.fixed_from ?? null]),
+      [["friend", null, null], ["Mikurucos", "Mikurucos", null], ["typo_y", "typo_y", null]]);
+    // 直すと、台帳の人として数字付きで出る。名前は画像に書かれた名前のまま
+    c = await fixAccount(db, "1", { original: "Mikurucos", handle: "@_Mikurucos_" });
+    const fixed = c.people.find((p) => p.read_as === "Mikurucos");
+    assert.deepEqual([fixed.username, fixed.name, fixed.followers, fixed.fixed_from], ["_Mikurucos_", "しもつきみくる", 350, "Mikurucos"]);
+    // 台帳にいない ID に直したら「取得待ち」
+    c = await fixAccount(db, "1", { original: "typo_y", handle: "typo__y" });
+    assert.equal(c.people.find((p) => p.read_as === "typo_y").lookup, "pending");
+    sql(`INSERT INTO handle_lookups (handle, looked_at, result) VALUES ('typo__y', 'x', 'not_found')`);
+    assert.equal((await getCase(db, "1")).people.find((p) => p.read_as === "typo_y").lookup, "not_found");
+    // 別のポストには効かない
+    assert.equal((await getCase(db, "2")).people[0].username, "Mikurucos");
+    // 元に戻す(空)と、AI が読んだ ID に戻る
+    c = await fixAccount(db, "1", { original: "mikurucos", handle: "" });
+    assert.deepEqual(c.people.find((p) => p.read_as === "Mikurucos").username, "Mikurucos");
+    assert.equal(db.raw.prepare("SELECT COUNT(*) AS n FROM account_fixes WHERE post_id = '1'").get().n, 1);
+    // 使えない文字・画像にない ID は断る
+    await assert.rejects(fixAccount(db, "1", { original: "typo_y", handle: "typo-y" }), RangeError);
+    assert.equal(await fixAccount(db, "1", { original: "nobody", handle: "abc" }), null);
+  } finally {
+    sql(`DELETE FROM image_reads WHERE post_id IN ('1', '2')`);
+    sql(`DELETE FROM users WHERE id = '901'`);
+    sql(`DELETE FROM account_fixes`);
     sql(`DELETE FROM handle_lookups`);
   }
 });
