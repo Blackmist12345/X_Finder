@@ -512,7 +512,7 @@ const SORT_FACETS=[
   {k:"score",g:"案件",t:"点数",num:true,v:()=>[]},
   {k:"type",g:"案件",t:"種類",v:c=>c.case_type||"その他"},
   // 設定の「ポストを追加」で手動追加したカードか。絞り込みだけで使う(手動追加のカードは自動仕分けの対象外)
-  {k:"added",g:"案件",t:"追加のしかた",v:c=>c.source==="manual"?"手動追加":"収集",viewOnly:true},
+  {k:"added",g:"案件",t:"追加のしかた",v:c=>c.via_chat?"チャット":c.source==="manual"?"手動追加":"収集",viewOnly:true},
 ];
 const NA_VALUES=["記載なし","不明","日付不明"];
 // 点数表の作品に当たったときの点(カードの「作品」の行の後ろに小さく出す。マイナスは赤、プラスは緑)
@@ -633,7 +633,8 @@ async function postReview(id,body){
   if(!r.ok)throw new Error(`${r.status}`);return (await r.json()).review}
 function setLocalReview(id,review){const c=cases.find(x=>x.id===id);if(c)c.review=review}
 function daysLeft(c){if(!c.created_at)return null;return Math.max(0,Math.ceil((new Date(c.created_at).getTime()+DELETE_DAYS*864e5-Date.now())/864e5))}
-const manualPill=c=>isManual(c)?'<span class="pill manual">手動</span>':"";
+// 案件管理のチャットから取り込んだカードは「チャット」、設定の「ポストを追加」なら「手動」
+const manualPill=c=>c.via_chat?'<span class="pill manual">チャット</span>':isManual(c)?'<span class="pill manual">手動</span>':"";
 function reviewPill(c){
   if(c.review==="accepted")return '<span class="pill acc">連絡中</span>';
   if(c.review==="checking")return '<span class="pill chk">確認中</span>';
@@ -1160,6 +1161,7 @@ const HELP=[
   <li><b>かけないもの</b>: 検索除外語と、収集のときのフォロワー数などの足切りはかけません。自動仕分けでも動かしません。</li>
   <li><b>AI</b>: 引用元・返信元の遡り、AI 判定と点数、画像・アカウントの読み取りは、ふつうのカードと同じに行います(20件たまるのを待たずに判定します)。AI が対象外と判定しても一覧に出し、詳細にその理由が出ます。</li>
   <li><b>出ないとき</b>: すでに一覧にあるポストは何も変えずに「すでにあります」と出ます。ブラックリストの人のポスト、削除・非公開のポストは追加しません。結果は「ポストを追加」の下に出ます。</li>
+  <li><b>チャットから</b>: 案件管理のチャットでメッセージを長押しして「ポストから取り込む」を選ぶと、そのポストも同じように取り込みます。タグは「手動」ではなく「チャット」で、絞り込みの「追加のしかた」でも「チャット」と分かれます。画像のキャスト表からキャラ名・役割・撮影名も読み、案件管理の案件に候補として出します。</li>
   <li><b>費用</b>: X からポストを取るのに1件約0.02円、AI 判定などはふつうのカードと同じだけかかります。</li></ul>`],
  ["自動仕分け",`<p>ホームの「自動仕分け」で、要らない案件を決めておけます。アプリを開くたび(引っぱって再読み込みしたときも)、チェックした値に1つでも当てはまる新着を削除予定に移し、件数を下に出します(確認中・連絡中・受注中は動かしません)。「元に戻す」で戻した案件や、一度でも状態を変えた案件は、次からは自動では移しません。</p>
   <ul><li><b>項目と値</b>: 依頼主(性別・年齢・活動地域)と案件(撮影場所・撮影日の予定・種類)ごとに、今の案件にある値を件数つきで並べます。件数は新着で数えます。書いていない・分からない案件は「記載なし」「不明」「日付不明」という1つの値になっていて、これもチェックできます。</li>

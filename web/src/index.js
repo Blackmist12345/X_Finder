@@ -66,6 +66,9 @@ const TABLES_DDL = [
   `CREATE TABLE IF NOT EXISTS manual_adds (
     post_id TEXT PRIMARY KEY, url TEXT NOT NULL, requested_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
     note TEXT, tries INTEGER NOT NULL DEFAULT 0, done_at TEXT)`,
+  // 案件管理のチャットから取り込んだポスト(書くのは案件管理。カードに「チャット」のタグを付ける。schema.sql と同じ)
+  `CREATE TABLE IF NOT EXISTS chat_adds (post_id TEXT PRIMARY KEY, requested_at TEXT NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS chat_adds_requested_at ON chat_adds (requested_at)`,
 ];
 let tablesReady = false;
 async function ensureTables(db) {
@@ -128,7 +131,8 @@ const CASE_COLUMNS = `
   p.author_id, u.username, u.name, u.followers, u.following, u.profile_image, CASE WHEN r.state IN ('checking', 'accepted', 'hold', 'delete') THEN r.state ELSE 'new' END AS review, (r.opened_at IS NOT NULL) AS opened,
   (r.post_id IS NOT NULL AND NOT (r.state = 'new' AND r.opened_at IS r.updated_at)) AS touched,
   u.description, u.location, (SELECT ul.found_json FROM user_links ul WHERE ul.user_id = p.author_id) AS link_found,
-  (SELECT pc.gone_at FROM post_checks pc WHERE pc.post_id = p.id) AS gone_at`;
+  (SELECT pc.gone_at FROM post_checks pc WHERE pc.post_id = p.id) AS gone_at,
+  EXISTS (SELECT 1 FROM chat_adds ca WHERE ca.post_id = p.id) AS via_chat`;
 
 // 点数の内訳から、カードに出す作品の点(「作品: 〇〇」の行)だけを取り出す
 function workPoints(detail) {
@@ -357,7 +361,7 @@ async function getTree(db, id, authorId) {
 }
 
 // データベースの中身を見る画面(読むだけ)。見せる表はここに並べたものだけ
-const DB_TABLES = ["posts", "judgments", "reviews", "blacklist", "users", "user_links", "user_aliases", "post_users", "image_reads", "text_mentions", "account_fixes", "post_trees", "missing_posts", "manual_adds", "runs", "costs", "meta"];
+const DB_TABLES = ["posts", "judgments", "reviews", "blacklist", "users", "user_links", "user_aliases", "post_users", "image_reads", "image_details", "text_mentions", "account_fixes", "post_trees", "missing_posts", "manual_adds", "chat_adds", "runs", "costs", "meta"];
 const DB_PAGE = 30;
 const DB_CELL_MAX = 400; // 長い値(AI の返事の JSON など)は先頭だけ返す
 

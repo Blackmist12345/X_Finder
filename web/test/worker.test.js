@@ -153,6 +153,14 @@ test("削除ポスト確認で見られなくなったカードには印(gone_at
   assert.equal((await getCase(db, "1")).gone_at, "t");
 });
 
+test("案件管理のチャットから取り込んだカードには印(via_chat)が付く", async () => {
+  db.raw.prepare("INSERT INTO chat_adds (post_id, requested_at) VALUES ('1', 't')").run();
+  const cases = await listCases(db, new URLSearchParams());
+  assert.ok(cases.find((c) => c.id === "1").via_chat);
+  assert.ok(cases.filter((c) => c.id !== "1").every((c) => !c.via_chat));
+  assert.ok((await getCase(db, "1")).via_chat);
+});
+
 test("スワイプは状態タブごと: 前からの設定はどのタブも同じ、そのタブの状態は新着に戻すになる", async () => {
   const first = await getSettings(db);
   assert.deepEqual(first.swipe_tabs.new, { right: "hold", left: "delete" });

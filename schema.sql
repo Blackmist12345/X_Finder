@@ -129,6 +129,26 @@ CREATE TABLE IF NOT EXISTS image_reads (
   error TEXT
 );
 CREATE INDEX IF NOT EXISTS image_reads_read_at ON image_reads (read_at);
+-- accounts_json の各人には、画像に書かれていれば chara(キャラ名)・work(作品名)・part(役割: subject=被写体 / photographer=カメラマン /
+-- assistant=アシスタント / organizer=主催)も付く(2026-11-17 から。書かれていなければ付けない)。
+
+-- 画像から読んだ撮影名(併せ名・撮影会名)と、予算・大事な注意事項の短いまとめ(memo)。1 ポスト = 1 行。image_reads と同じときに書く。
+-- 行があれば「キャラ・役割まで読んだ新しい読み取り」。案件管理(x-photo-scheduler の tasks/)が案件の候補に使う。
+CREATE TABLE IF NOT EXISTS image_details (
+  post_id TEXT PRIMARY KEY,
+  read_at TEXT NOT NULL,
+  shoot_name TEXT,
+  memo TEXT
+);
+
+-- 案件管理(x-photo-scheduler の tasks/)のチャットで「ポストから取り込む」を押したポスト。1 ポスト = 1 行(書くのは案件管理)。
+-- 取り込み自体は手動追加(manual_adds)と同じ。画面ではこのポストに「手動」ではなく「チャット」のタグを付ける。
+-- 古い読み取り(image_details がない)のポストも、受け付けてから CHAT_DAYS 日のうちは image_step がもう一度画像を読む。
+CREATE TABLE IF NOT EXISTS chat_adds (
+  post_id TEXT PRIMARY KEY,
+  requested_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS chat_adds_requested_at ON chat_adds (requested_at);
 
 -- N7 本文に書かれた X の ID(@abc / ＠abc)。収集したポストと、遡ったツリーの本文から拾う(finder/mention_step.py、AI なし)。1 ポスト = 1 行。
 -- accounts_json は image_reads と同じ形 [{"handle": "abc", "name": "ミジ"}]。ツリーの本文だけにあった人は "from": "tree"。
