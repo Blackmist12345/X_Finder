@@ -16,8 +16,9 @@ class FakeResp:
 class FakeSession:
     """画像の取得(GET)と Claude(POST)の代わり。answers[ポストの画像URL] = AI が返すアカウント。"""
 
-    def __init__(self, accounts, broken=(), place=None):
+    def __init__(self, accounts, broken=(), place=None, extra=None):
         self.accounts, self.broken, self.gets, self.posts = accounts, set(broken), [], []
+        self.extra = extra or {}
         self.place = place or {"prefecture": "不明", "venue": "", "event": ""}
 
     def get(self, url, timeout=None):
@@ -28,7 +29,7 @@ class FakeSession:
 
     def post(self, url, headers=None, json=None, timeout=None):
         self.posts.append(json)
-        return FakeResp(data={"content": [{"type": "tool_use", "input": {"accounts": self.accounts, "place": self.place}}],
+        return FakeResp(data={"content": [{"type": "tool_use", "input": {"accounts": self.accounts, "place": self.place, **self.extra}}],
                               "usage": {"input_tokens": 1500, "output_tokens": 80}})
 
 
@@ -143,3 +144,35 @@ def test_image_place_does_not_override_text(d1):
     image_step.run(d1, SCORE_CONFIG, True, {"ANTHROPIC_API_KEY": "k"}, session=s)
     assert d1.query("SELECT prefecture, prefecture_source, place FROM judgments") == [
         {"prefecture": "東京都", "prefecture_source": "本文", "place": "池袋"}]
+
+
+def test_cast_details_are_kept(d1):
+    add_post(d1, "1")
+    s = FakeSession([{"handle": "_Mikurucos_", "name": "しもつきみくる", "chara": "香菱", "work": "原神", "part": "subject"},
+                     {"handle": "cam_b", "name": "", "chara": "", "part": "?"}],
+                    extra={"shoot_name": "璃月併せ", "memo": "予算4500〜5000円"})
+    image_step.run(d1, CONFIG, True, {"ANTHROPIC_API_KEY": "k"}, session=s)
+    row = d1.query("SELECT accounts_json FROM image_reads")[0]
+    assert json.loads(row["accounts_json"]) == [
+        {"handle": "_Mikurucos_", "name": "しもつきみくる", "chara": "香菱", "work": "原神", "part": "subject"}, {"handle": "cam_b", "name": ""}]
+    assert d1.query("SELECT post_id, shoot_name, memo FROM image_details") == [{"post_id": "1", "shoot_name": "璃月併せ", "memo": "予算4500〜5000円"}]
+
+
+def test_chat_posts_are_read_again_and_first(d1):
+    old_day = store.days_ago_iso(image_step.LIST_DAYS + 5)[:10]
+    add_post(d1, "1")  # ふつうの新しいポスト
+    add_post(d1, "2", day=old_day)  # 古いが、チャットから取り込んだ(前の形の読み取りがある)
+    d1.query("INSERT INTO image_reads (post_id, read_at, images, accounts_json) VALUES ('2', 'x', 1, '[]')")
+    add_post(d1, "3", day=old_day, media=())  # チャットから取り込んだ、画像のないポスト
+    add_post(d1, "4", status="new")  # チャットから取り込んだが、まだ判定前
+    for pid in ("2", "3", "4"):
+        d1.query("INSERT INTO chat_adds (post_id, requested_at) VALUES (?, ?)", [pid, store.now_iso()])
+    assert [r["id"] for r in image_step.candidates(d1)] == ["2", "3", "1"]
+    s = FakeSession([{"handle": "cos_a", "name": "A", "chara": "胡桃", "part": "subject"}], extra={"shoot_name": "併せ", "memo": ""})
+    image_step.run(d1, CONFIG, True, {"ANTHROPIC_API_KEY": "k"}, session=s)
+    assert len(s.posts) == 2  # 画像のない 3 は AI を呼ばない
+    rows = {r["post_id"]: r for r in d1.query("SELECT post_id, images, accounts_json, error FROM image_reads")}
+    assert json.loads(rows["2"]["accounts_json"]) == [{"handle": "cos_a", "name": "A", "chara": "胡桃", "part": "subject"}]
+    assert (rows["3"]["images"], rows["3"]["accounts_json"], rows["3"]["error"]) == (0, "[]", None)
+    assert {r["post_id"] for r in d1.query("SELECT post_id FROM image_details")} == {"1", "2", "3"}
+    assert image_step.candidates(d1) == []  # 読み直しは 1 回だけ
