@@ -47,6 +47,9 @@ try{applyFont(localStorage.getItem("finder-font")||"gothic")}catch(e){}
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Barlow+Condensed:wght@500;600;700&display=swap">
 <style>
+/* スマホでダブルタップしても拡大しない（スクロールとピンチ拡大はそのまま）。個別の touch-action 指定はこれより優先される */
+html, body, *, *::before, *::after { touch-action: manipulation; }
+
 /* N13 X Finder: スマホ1列。上に絞り込みと並び順、点数つきのカード、タップで下から詳細。 */
 :root{
   --bg:#f3f5f8; --surface:#ffffff; --surface-2:#eaeef4; --line:#d9dfe8;
@@ -458,6 +461,10 @@ header.top.slim .tab .c{font-size:17px}
 .actions{display:flex;gap:8px;margin-top:20px}
 .btn{flex:1;text-align:center;font:inherit;font-weight:700;border-radius:12px;padding:12px;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer;text-decoration:none}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+/* iPhone: 16px未満の入力欄を選ぶと自動で拡大されるので、iPhoneのときだけ入力欄の文字を16pxにする（PCは変わらない） */
+@supports (-webkit-touch-callout: none) {
+  input, textarea, select { font-size: 16px !important; }
+}
 </style>
 </head>
 <body>
