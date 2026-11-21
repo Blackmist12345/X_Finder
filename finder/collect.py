@@ -23,6 +23,13 @@ class CollectError(Exception):
     pass
 
 
+class TransientCollectError(CollectError):
+    """TwitterAPI.io が遅い・混んでいる・不調(タイムアウト、429、5xx)で取れなかった。
+
+    設定やキーの誤りではなく、時間をおけば直ることが多い失敗。呼び出し側は、続いた時間を見てから知らせる。
+    """
+
+
 def base_query(group_a, group_b):
     """除外語を入れる前の (撮影者語 OR ...) (募集語 OR ...)。"""
     return "((" + " OR ".join(f'"{w}"' for w in group_a) + ") (" + " OR ".join(f'"{w}"' for w in group_b) + "))"
@@ -82,6 +89,15 @@ def response_error(data):
     return None
 
 
+def request_error_label(e):
+    """接続の失敗を短い言葉にする(ログ用)。"""
+    if isinstance(e, requests.Timeout):
+        return "タイムアウト"
+    if isinstance(e, requests.ConnectionError):
+        return "接続できず"
+    return type(e).__name__
+
+
 def fetch(api_key, query, since_ts, until_ts, session=None, diag=None, max_pages=MAX_PAGES):
     """時間枠 [since_ts, until_ts) のポストをすべて取る。返り値は (tweets, calls)。
 
@@ -100,15 +116,18 @@ def fetch(api_key, query, since_ts, until_ts, session=None, diag=None, max_pages
         if cursor:
             params["cursor"] = cursor
         data = None
+        tries = []  # 各回の結果(HTTP の番号か「タイムアウト」など)。失敗したときにログへ出す
         for attempt in range(4):
             calls += 1
             try:
                 res = http.get(URL, headers=headers, params=params, timeout=30)
             except requests.RequestException as e:
+                tries.append(request_error_label(e))
                 if attempt == 3:
-                    raise CollectError(f"{page}ページ目で接続に失敗しました: {e}") from e
+                    raise TransientCollectError(f"{page}ページ目で接続に失敗しました: {e}(各回: {'、'.join(tries)})") from e
                 time.sleep(2 ** (attempt + 1))
                 continue
+            tries.append(f"HTTP {res.status_code}")
             if res.status_code == 200:
                 try:
                     data = res.json()
@@ -120,7 +139,7 @@ def fetch(api_key, query, since_ts, until_ts, session=None, diag=None, max_pages
                 continue
             raise CollectError(f"{page}ページ目で TwitterAPI.io がエラーを返しました ({res.status_code}): {res.text[:200]}")
         if data is None:
-            raise CollectError(f"{page}ページ目が再試行後も取得できませんでした")
+            raise TransientCollectError(f"{page}ページ目が再試行後も取得できませんでした(各回: {'、'.join(tries)})")
         if diag is not None:
             diag.append(describe_response(page, 200, data))
         problem = response_error(data)

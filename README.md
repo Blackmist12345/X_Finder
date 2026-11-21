@@ -10,7 +10,7 @@
 | 番号 | 名前 | 場所 |
 | --- | --- | --- |
 | N1 | 設定読込 | `finder/config.py`(Notion の【1】〜【7】の表から読む。不正な値は前回の値を使う) |
-| N2 | 収集 | `finder/collect.py`(TwitterAPI.io。失敗したら検索時間枠を進めない) |
+| N2 | 収集 | `finder/collect.py`(TwitterAPI.io。失敗したら検索時間枠を進めない。タイムアウト・429・5xx などの一時的な失敗は、1時間続くまでメールを出さずに終え、続いたら1回だけ失敗にして知らせる) |
 | N3 | 一次フィルタ(一部) | `finder/filters.py`(リポスト・フォロワー数・入りきらなかった除外語。減点語は記録だけ) |
 | N12 | データ保存 | `finder/store.py`, `schema.sql`(Cloudflare D1) |
 | N15 | ユーザー台帳 | `finder/store.py`(投稿者・引用元・メンション先・リプライ先を登録) |

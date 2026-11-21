@@ -24,6 +24,9 @@ ROWS_READ_KEY = "d1_rows_read"       # 今日(UTC)の収集で D1 が読んだ�
 ZERO_SINCE_KEY = "zero_fetch_since"   # 0件が続き始めた時刻(取れたら消す)
 ZERO_ALERTED_KEY = "zero_fetch_alerted"  # 0件が続いていることを知らせたか(1回だけ失敗にしてメールを出す)
 ZERO_ALERT_HOURS = 6        # 夜でもふつうはこの時間までに1件は取れる
+FAIL_SINCE_KEY = "fetch_fail_since"      # TwitterAPI.io の一時的な失敗(遅い・混雑・不調)が続き始めた時刻(取れたら消す)
+FAIL_ALERTED_KEY = "fetch_fail_alerted"  # 続いていることを知らせたか(1回だけ失敗にしてメールを出す)
+FAIL_ALERT_HOURS = 1        # 一時的な失敗がこの時間続いたら知らせる。失敗した回は検索時間枠を進めないので、次に取れた回で取り戻せる
 JST = timezone(timedelta(hours=9))
 
 
@@ -144,9 +147,16 @@ def main():
     except collect.CollectError as e:
         if production:
             d1.query("UPDATE runs SET finished_at = ?, status = 'failed', note = ? WHERE id = ?", [store.now_iso(), str(e), run_id])
+        notes, alert = [], True
+        if mode == "production" and isinstance(e, collect.TransientCollectError):
+            alert = fail_streak(d1, until_ts, notes)
         write_summary(head + ["", f"**収集に失敗しました。検索時間枠は進めていません。** {e}"]
-                      + [f"- 検索の返事: {d}" for d in diag] + [f"- ⚠️ {w}" for w in warnings])
-        sys.exit(1)
+                      + [f"- 検索の返事: {d}" for d in diag] + [f"- {n}" for n in notes] + [f"- ⚠️ {w}" for w in warnings])
+        if alert:
+            sys.exit(1)
+        return
+    if mode == "production":
+        clear_fail_streak(d1)
     head += [f"- 検索の返事: {d}" for d in diag[:3]]
     alert_zero = production and zero_streak(d1, len(tweets), since_ts, until_ts, warnings)
 
@@ -235,6 +245,36 @@ def main():
     if alert_zero:
         # 1回だけ失敗にして GitHub からメールを出す(次の回からは成功に戻る)
         sys.exit(1)
+
+
+def fail_streak(d1, now_ts, notes):
+    """TwitterAPI.io の一時的な失敗が続いた時間を数える。メールを出すべき回だけ True を返す。
+
+    短い間の失敗はメールを出さずに終える(次に取れた回で、進めなかった検索時間枠の分を取り戻す)。
+    FAIL_ALERT_HOURS 続いたら1回だけ失敗にして GitHub からメールを出す。取れたら数え直す。
+    """
+    start = d1.get_meta(FAIL_SINCE_KEY)
+    if start is None:
+        start = now_ts
+        d1.set_meta(FAIL_SINCE_KEY, start)
+    hours = (now_ts - start) / 3600
+    if hours < FAIL_ALERT_HOURS:
+        notes.append(f"TwitterAPI.io の一時的な失敗なので、メールは出していません({jst(start)} から。"
+                     f"{FAIL_ALERT_HOURS}時間続いたら1回だけ知らせます)")
+        return False
+    if d1.get_meta(FAIL_ALERTED_KEY):
+        notes.append(f"⚠️ {jst(start)} から約{hours:.1f}時間、TwitterAPI.io から取れていません(メールは送信済み)")
+        return False
+    d1.set_meta(FAIL_ALERTED_KEY, True)
+    notes.append(f"⚠️ {jst(start)} から約{hours:.1f}時間、TwitterAPI.io から取れていません。TwitterAPI.io の状態を確かめてください")
+    return True
+
+
+def clear_fail_streak(d1):
+    """取れたら、一時的な失敗の数えを消す。"""
+    if d1.get_meta(FAIL_SINCE_KEY) is not None:
+        d1.set_meta(FAIL_SINCE_KEY, None)
+        d1.set_meta(FAIL_ALERTED_KEY, False)
 
 
 def zero_streak(d1, fetched, since_ts, until_ts, warnings):
