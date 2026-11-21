@@ -112,3 +112,49 @@ def test_fetch_missing_tweets_without_message_is_zero(monkeypatch):
     diag = []
     assert collect.fetch("key", "q", 0, 1, session=s, diag=diag) == ([], 1)
     assert "tweets なし" in diag[0] and "返事のキー: has_next_page" in diag[0]
+
+
+class TimeoutSession:
+    """毎回タイムアウトする TwitterAPI.io の代わり。"""
+
+    def __init__(self):
+        self.calls = 0
+
+    def get(self, url, headers=None, params=None, timeout=None):
+        self.calls += 1
+        raise collect.requests.ReadTimeout("Read timed out. (read timeout=30)")
+
+
+def test_fetch_timeout_is_transient_and_lists_each_try(monkeypatch):
+    monkeypatch.setattr(collect.time, "sleep", lambda s: None)
+    s = TimeoutSession()
+    try:
+        collect.fetch("key", "q", 0, 1, session=s)
+    except collect.TransientCollectError as e:
+        assert "接続に失敗しました" in str(e)
+        assert "各回: タイムアウト、タイムアウト、タイムアウト、タイムアウト" in str(e)
+    else:
+        raise AssertionError("TransientCollectError が出るはず")
+    assert s.calls == 4
+
+
+def test_fetch_busy_is_transient_and_shows_http_codes(monkeypatch):
+    monkeypatch.setattr(collect.time, "sleep", lambda s: None)
+    s = FakeSession([FakeResponse(429, {}), FakeResponse(503, {}), FakeResponse(504, {}), FakeResponse(502, {})])
+    try:
+        collect.fetch("key", "q", 0, 1, session=s)
+    except collect.TransientCollectError as e:
+        assert "再試行後も取得できませんでした(各回: HTTP 429、HTTP 503、HTTP 504、HTTP 502)" in str(e)
+    else:
+        raise AssertionError("TransientCollectError が出るはず")
+
+
+def test_fetch_bad_key_is_not_transient(monkeypatch):
+    monkeypatch.setattr(collect.time, "sleep", lambda s: None)
+    s = FakeSession([FakeResponse(401, {"error": "bad key"})])
+    try:
+        collect.fetch("key", "q", 0, 1, session=s)
+    except collect.TransientCollectError:
+        raise AssertionError("キーの誤りは一時的な失敗ではない")
+    except collect.CollectError as e:
+        assert "401" in str(e)

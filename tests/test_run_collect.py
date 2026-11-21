@@ -49,6 +49,53 @@ def test_failed_fetch_keeps_window(wired, monkeypatch):
     assert "検索時間枠は進めていません" in summary.read_text()
 
 
+def test_transient_failure_mails_only_after_an_hour(wired, monkeypatch, make_tweet):
+    d1, summary = wired
+    monkeypatch.setenv("MODE", "production")
+    clock = {"now": 1_800_000_000}
+    monkeypatch.setattr(run_collect.time, "time", lambda: clock["now"])
+
+    def slow(*a, **k):
+        raise collect.TransientCollectError("1ページ目で接続に失敗しました: Read timed out.")
+
+    monkeypatch.setattr(collect, "fetch", slow)
+    run_collect.main()  # 1回目: メールは出さない(終了コード 0)
+    assert d1.get_meta(run_collect.WINDOW_KEY) is None
+    assert d1.query("SELECT status FROM runs")[0]["status"] == "failed"
+    assert "メールは出していません" in summary.read_text()
+
+    clock["now"] += 50 * 60
+    run_collect.main()  # 1時間たっていないので、まだ出さない
+
+    clock["now"] += 10 * 60
+    with pytest.raises(SystemExit):  # 1時間続いたので1回だけ失敗にしてメールを出す
+        run_collect.main()
+    assert "TwitterAPI.io の状態を確かめてください" in summary.read_text()
+
+    clock["now"] += 10 * 60
+    run_collect.main()  # 送ったあとは、続いていても出さない
+    assert "メールは送信済み" in summary.read_text()
+
+    monkeypatch.setattr(collect, "fetch", lambda *a, **k: ([make_tweet("1", text="カメラマン募集")], 1))
+    clock["now"] += 10 * 60
+    run_collect.main()  # 取れたら数え直す
+    assert d1.get_meta(run_collect.FAIL_SINCE_KEY) is None
+    assert d1.get_meta(run_collect.FAIL_ALERTED_KEY) is False
+    assert d1.get_meta(run_collect.WINDOW_KEY) is not None
+
+
+def test_transient_failure_in_backfill_still_fails(wired, monkeypatch):
+    d1, _ = wired
+    monkeypatch.setenv("MODE", "backfill")
+
+    def slow(*a, **k):
+        raise collect.TransientCollectError("timeout")
+
+    monkeypatch.setattr(collect, "fetch", slow)
+    with pytest.raises(SystemExit):  # 手で動かす取り直しは、すぐ分かるように失敗にする
+        run_collect.main()
+
+
 def test_dry_run_writes_nothing(wired, monkeypatch, make_tweet):
     d1, _ = wired
     monkeypatch.setattr(collect, "fetch", lambda *a, **k: ([make_tweet("1")], 1))
