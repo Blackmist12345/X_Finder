@@ -132,7 +132,8 @@ const CASE_COLUMNS = `
   (r.post_id IS NOT NULL AND NOT (r.state = 'new' AND r.opened_at IS r.updated_at)) AS touched,
   u.description, u.location, (SELECT ul.found_json FROM user_links ul WHERE ul.user_id = p.author_id) AS link_found,
   (SELECT pc.gone_at FROM post_checks pc WHERE pc.post_id = p.id) AS gone_at,
-  EXISTS (SELECT 1 FROM chat_adds ca WHERE ca.post_id = p.id) AS via_chat`;
+  EXISTS (SELECT 1 FROM chat_adds ca WHERE ca.post_id = p.id) AS via_chat,
+  (SELECT ma.requested_at FROM manual_adds ma WHERE ma.post_id = p.id AND ma.status IN ('added', 'moved')) AS manual_at`;
 
 // 点数の内訳から、カードに出す作品の点(「作品: 〇〇」の行)だけを取り出す
 function workPoints(detail) {
@@ -651,8 +652,7 @@ export async function addManual(db, body) {
     .first();
   if (post && !post.allowed) return { result: "blacklisted", message: "ブラックリストの人のポストなので追加しません" };
   if (post?.status === "judged" && (post.collected_at >= daysAgoIso(MANUAL_LIST_DAYS) || ["accepted", "hold"].includes(post.state))) {
-    const state = REVIEW_STATES.includes(post.state) ? post.state : "new";
-    return { result: "exists", state, message: `すでに一覧にあります(${STATE_NAMES[state]})` };
+    return moveToTop(db, id, post);
   }
   const wait = await db.prepare("SELECT 1 AS ok FROM manual_adds WHERE post_id = ? AND status = 'pending'").bind(id).first();
   if (wait) return { result: "pending", message: "受付済みです。次の収集(10分ごと)で取り込みます" };
@@ -663,6 +663,31 @@ export async function addManual(db, body) {
     .bind(id, `https://x.com/i/web/status/${id}`, nowIso())
     .run();
   return { result: "queued", message: "受け付けました。次の収集(10分ごと)で取り込み、新着のいちばん上に出します" };
+}
+
+// すでに一覧にあるポストを URL から登録し直したら、どのタブにあっても新着のいちばん上に出す(Latte 決定 2026-11-26)。
+// X から取り直さないので、その場で動く(費用なし)。本文・判定・点数は変えない。
+// 並びは manual_adds の登録日時(status = 'moved')で決める(listCases の manual_at)。
+// 集めた日時は変えないが、2 週間を過ぎた連絡中・受注中を新着に戻すと一覧から消えてしまうので、そのときだけ今にする
+async function moveToTop(db, id, post) {
+  const from = REVIEW_STATES.includes(post.state) ? post.state : "new";
+  const now = nowIso();
+  const writes = [
+    db.prepare(`INSERT INTO manual_adds (post_id, url, requested_at, status, note, done_at) VALUES (?, ?, ?, 'moved', ?, ?)
+                ON CONFLICT(post_id) DO UPDATE SET requested_at = excluded.requested_at, status = 'moved',
+                  note = excluded.note, tries = 0, done_at = excluded.done_at`)
+      .bind(id, `https://x.com/i/web/status/${id}`, now, `新着のいちばん上に移しました(${STATE_NAMES[from]}から)`, now),
+  ];
+  if (from !== "new") writes.push(reviewWrite(db, id, "new", now));
+  if (post.collected_at < daysAgoIso(MANUAL_LIST_DAYS)) {
+    writes.push(db.prepare("UPDATE posts SET collected_at = ? WHERE id = ?").bind(now, id));
+  }
+  await db.batch(writes);
+  return {
+    result: "moved",
+    from,
+    message: from === "new" ? "すでに新着にあったので、いちばん上に移しました" : `${STATE_NAMES[from]}にあったので、新着のいちばん上に移しました`,
+  };
 }
 
 // 最近の受付(設定の「ポストを追加」に出す)

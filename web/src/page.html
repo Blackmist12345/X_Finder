@@ -693,8 +693,8 @@ function filtered(){
   const a=matching().filter(c=>c.review===state.tab);
   const by={score:(x,y)=>(y.score??-1e9)-(x.score??-1e9),new:(x,y)=>(y.created_at||"").localeCompare(x.created_at||""),
     ff:(x,y)=>ffVal(y)-ffVal(x),followers:(x,y)=>(y.followers||0)-(x.followers||0)}[state.sort];
-  // 新着のタブでは、手動追加したカードを並び順に関係なくいちばん上に出す
-  const top=state.tab==="new"?(x,y)=>isManual(y)-isManual(x):()=>0;
+  // 新着のタブでは、手動追加したカード(URL から登録し直したカードも)を並び順に関係なくいちばん上に出す。その中は登録が新しい順
+  const top=state.tab==="new"?(x,y)=>isManual(y)-isManual(x)||manualAt(y).localeCompare(manualAt(x)):()=>0;
   return a.sort((x,y)=>top(x,y)||by(x,y));
 }
 function render(){
@@ -1087,7 +1087,7 @@ function openSettings(){
    <button type="button" class="btn help-btn" data-help="1">つかいかた ›</button>
    <div class="sec" style="margin-top:8px"><h3>ポストを追加</h3>
     <form class="madd" id="maddForm"><input type="url" id="maddUrl" inputmode="url" autocomplete="off" placeholder="https://x.com/…/status/…" aria-label="追加するポストの URL"><button type="submit" class="btn">追加</button></form>
-    <p class="sub" id="maddMsg" aria-live="polite" style="margin:6px 0 0">X のポストの URL を1件ずつ貼ります。次の収集(10分ごと)で取り込み、新着のいちばん上に「手動」のタグ付きで出します。</p>
+    <p class="sub" id="maddMsg" aria-live="polite" style="margin:6px 0 0">X のポストの URL を1件ずつ貼ります。次の収集(10分ごと)で取り込み、新着のいちばん上に「手動」のタグ付きで出します。すでに一覧にあるポストは、その場で新着のいちばん上に移します。</p>
     <ul class="mlist" id="maddList"></ul></div>
    <div class="sec" style="margin-top:8px"><h3>画面の色</h3><div class="theme-seg" id="themeSeg" role="group" aria-label="画面の色">${THEMES.map(([k,l])=>`<button type="button" data-theme-pick="${k}" class="${curTheme()===k?"on":""}" aria-pressed="${curTheme()===k}">${l}</button>`).join("")}</div></div>
    <div class="sec"><h3>文字のフォント</h3><label class="setting" style="border:0;padding-top:0"><span>フォント</span><select id="fontSel" aria-label="文字のフォント">${FONTS.map(([k,l])=>`<option value="${k}" ${curFont()===k?"selected":""}>${l}</option>`).join("")}</select></label>
@@ -1117,7 +1117,7 @@ function openSettings(){
 }
 // ---- 手動追加(設定の「ポストを追加」) ----
 // 受け付けるだけで、取り込むのは次の収集。最近の受付と結果を下に出す
-const MANUAL_STATUS={pending:["取り込み待ち",""],added:["追加済み","ok"],exists:["一覧にあり",""],blacklisted:["ブラックリスト","ng"],not_found:["見つからない","ng"],failed:["失敗","ng"]};
+const MANUAL_STATUS={pending:["取り込み待ち",""],added:["追加済み","ok"],exists:["一覧にあり",""],moved:["先頭に移動","ok"],blacklisted:["ブラックリスト","ng"],not_found:["見つからない","ng"],failed:["失敗","ng"]};
 async function loadManual(){
   const el=$("maddList");if(!el)return;
   try{
@@ -1139,8 +1139,9 @@ async function addManual(){
     if(!r.ok)throw new Error(d.error||`${r.status}`);
     msg.textContent=d.message||"受け付けました";
     msg.classList.toggle("warn-text",d.result==="blacklisted");
-    if(d.result==="queued")input.value="";
+    if(d.result==="queued"||d.result==="moved")input.value="";
     loadManual();
+    if(d.result==="moved")load(); // 新着のいちばん上に出たカードを一覧に反映する
   }catch(e){msg.textContent=`受け付けられませんでした(${e.message})`;msg.classList.add("warn-text")}
   finally{maddBusy=false}
 }
@@ -1167,7 +1168,8 @@ const HELP=[
   <ul><li><b>出かた</b>: 「新着」に、並び順に関係なくいちばん上に出ます。カードと詳細に「手動」のタグが付きます。絞り込みの「追加のしかた」で手動追加のカードだけを出せます。</li>
   <li><b>かけないもの</b>: 検索除外語と、収集のときのフォロワー数などの足切りはかけません。自動仕分けでも動かしません。</li>
   <li><b>AI</b>: 引用元・返信元の遡り、AI 判定と点数、画像・アカウントの読み取りは、ふつうのカードと同じに行います(20件たまるのを待たずに判定します)。AI が対象外と判定しても一覧に出し、詳細にその理由が出ます。</li>
-  <li><b>出ないとき</b>: すでに一覧にあるポストは何も変えずに「すでにあります」と出ます。ブラックリストの人のポスト、削除・非公開のポストは追加しません。結果は「ポストを追加」の下に出ます。</li>
+  <li><b>すでに一覧にあるとき</b>: どのタブにあっても新着に戻し、その場で新着のいちばん上に出します(収集を待たず、費用もかかりません)。本文・AI 判定・点数は変えません。2週間を過ぎて残っていた連絡中・受注中のカードは、新着に戻しても消えないよう、集めた日時を今にします。新着のいちばん上にある手動のカードどうしは、登録が新しい順に並びます。</li>
+  <li><b>出ないとき</b>: ブラックリストの人のポスト、削除・非公開のポストは追加しません。結果は「ポストを追加」の下に出ます。</li>
   <li><b>チャットから</b>: 案件管理のチャットでメッセージを長押しして「ポストから取り込む」を選ぶと、そのポストも同じように取り込みます。タグは「手動」ではなく「チャット」で、絞り込みの「追加のしかた」でも「チャット」と分かれます。画像のキャスト表からキャラ名・役割・撮影名も読み、案件管理の案件に候補として出します。</li>
   <li><b>費用</b>: X からポストを取るのに1件約0.02円、AI 判定などはふつうのカードと同じだけかかります。</li></ul>`],
  ["自動仕分け",`<p>ホームの「自動仕分け」で、要らない案件を決めておけます。アプリを開くたび(引っぱって再読み込みしたときも)、チェックした値に1つでも当てはまる新着を削除予定に移し、件数を下に出します(確認中・連絡中・受注中は動かしません)。「元に戻す」で戻した案件や、一度でも状態を変えた案件は、次からは自動では移しません。</p>
@@ -1254,7 +1256,9 @@ function renderCalendar(){
 const facetVals=(f,c)=>{const v=f.v(c);return Array.isArray(v)?v:[v]};
 const usedFacets=()=>SORT_FACETS.filter(f=>!f.show||f.show());
 const sortFacets=()=>usedFacets().filter(f=>!f.viewOnly); // 自動仕分けで使う項目
-const isManual=c=>c.source==="manual";
+// 手動追加したカード: 収集で見つかったあと URL から登録し直したもの(manual_at)も含む
+const isManual=c=>c.source==="manual"||!!c.manual_at;
+const manualAt=c=>c.manual_at||(c.source==="manual"?c.collected_at||"":"");
 // 仕分けに当てはまるか(チェックした値のどれか1つ。活動地域だけは全部にチェックがあるとき)
 // 手動追加したカードは当てはまらない(自動仕分けの対象外。Latte 決定)
 function sortHit(c,rule=settings.sort_rule){
