@@ -545,7 +545,7 @@ test("手動追加: URL から ID を読む(x.com / twitter.com / mobile、ク�
 
 test("手動追加: 受け付けて、一覧にあるもの・ブラックリストの人は断る", async () => {
   await assert.rejects(addManual(db, { url: "あいうえお" }), RangeError);
-  assert.equal((await addManual(db, { url: "https://x.com/client/status/1" })).result, "exists");
+  assert.equal((await addManual(db, { url: "https://x.com/client/status/1" })).result, "moved");
   // 古くて一覧から外れた判定済み・対象外・判定待ちは受け付ける
   assert.equal((await addManual(db, { url: "https://x.com/client/status/4" })).result, "queued");
   assert.equal((await addManual(db, { url: "https://x.com/client/status/3" })).result, "queued");
@@ -554,8 +554,42 @@ test("手動追加: 受け付けて、一覧にあるもの・ブラックリス
   db.raw.prepare("INSERT INTO blacklist (user_id, reason, added_at) VALUES ('100', 'spam', 'x')").run();
   assert.equal((await addManual(db, { url: "https://x.com/client/status/2" })).result, "blacklisted");
   const items = await listManual(db);
-  assert.deepEqual(items.map((i) => i.post_id).sort(), ["3", "4", "999"]);
-  assert.ok(items.every((i) => i.status === "pending"));
+  assert.deepEqual(items.map((i) => i.post_id).sort(), ["1", "3", "4", "999"]);
+  assert.ok(items.every((i) => i.status === (i.post_id === "1" ? "moved" : "pending")));
+});
+
+test("手動追加: 一覧にあるポストを登録し直すと、どのタブからでも新着のいちばん上に移す", async () => {
+  const old = new Date(Date.now() - 30 * 864e5).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+  db.raw.prepare("INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES ('2', 'checking', NULL, ?)").run(old);
+  db.raw.prepare("INSERT INTO reviews (post_id, state, opened_at, updated_at) VALUES ('4', 'hold', NULL, ?)").run(old);
+  const before = db.raw.prepare("SELECT collected_at, text FROM posts WHERE id = '2'").get();
+  // 確認中 → 新着(集めた日時・本文は変えない)
+  const r2 = await addManual(db, { url: "https://x.com/client/status/2" });
+  assert.equal(r2.result, "moved");
+  assert.equal(r2.from, "checking");
+  assert.equal(db.raw.prepare("SELECT state FROM reviews WHERE post_id = '2'").get().state, "new");
+  assert.deepEqual(db.raw.prepare("SELECT collected_at, text FROM posts WHERE id = '2'").get(), before);
+  // 2 週間を過ぎた受注中 → 新着(消えないよう集めた日時を今に)
+  await new Promise((ok) => setTimeout(ok, 1100)); // 登録日時の秒が変わるまで待つ
+  const r4 = await addManual(db, { url: "https://x.com/client/status/4" });
+  assert.equal(r4.result, "moved");
+  assert.ok(db.raw.prepare("SELECT collected_at FROM posts WHERE id = '4'").get().collected_at > old);
+  // すでに新着にあるもの
+  assert.equal((await addManual(db, { url: "https://x.com/client/status/1" })).from, "new");
+  const cases = await listCases(db, new URLSearchParams());
+  const c2 = cases.find((c) => c.id === "2"), c4 = cases.find((c) => c.id === "4");
+  assert.equal(c2.review, "new");
+  assert.equal(c4.review, "new");
+  assert.ok(c2.manual_at && c4.manual_at > c2.manual_at); // 画面はこの日時が新しい順に先頭へ
+  assert.equal(c2.source, "search"); // 追加のしかたは変えない
+  const items = await listManual(db);
+  assert.ok(items.filter((i) => ["1", "2", "4"].includes(i.post_id)).every((i) => i.status === "moved"));
+});
+
+test("手動追加: 前に「一覧にあり」で断った受付は先頭に出さない", async () => {
+  db.raw.prepare("INSERT INTO manual_adds (post_id, url, requested_at, status) VALUES ('1', 'u', '2026-01-01T00:00:00+00:00', 'exists')").run();
+  const cases = await listCases(db, new URLSearchParams());
+  assert.equal(cases.find((c) => c.id === "1").manual_at, null);
 });
 
 test("手動追加: 一覧に source を返し、絞り込みの「追加のしかた」を保存できる", async () => {
